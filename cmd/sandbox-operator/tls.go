@@ -15,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -235,21 +236,15 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 		original := crd.DeepCopy()
 
 		webhook := crd.Spec.Conversion.Webhook
-		if webhook == nil {
-			webhook = &apiextensionsv1.WebhookConversion{}
-		}
+		webhook = cmp.Or(webhook, &apiextensionsv1.WebhookConversion{})
 
 		if len(webhook.ConversionReviewVersions) == 0 {
 			webhook.ConversionReviewVersions = []string{"v1", "v1beta1"}
 		}
 
-		if webhook.ClientConfig == nil {
-			webhook.ClientConfig = &apiextensionsv1.WebhookClientConfig{}
-		}
+		webhook.ClientConfig = cmp.Or(webhook.ClientConfig, &apiextensionsv1.WebhookClientConfig{})
 
-		if webhook.ClientConfig.Service == nil {
-			webhook.ClientConfig.Service = &apiextensionsv1.ServiceReference{}
-		}
+		webhook.ClientConfig.Service = cmp.Or(webhook.ClientConfig.Service, &apiextensionsv1.ServiceReference{})
 
 		webhook.ClientConfig.Service.Name = serviceName
 		webhook.ClientConfig.Service.Namespace = namespace

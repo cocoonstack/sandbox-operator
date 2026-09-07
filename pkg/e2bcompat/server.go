@@ -20,6 +20,7 @@
 package e2bcompat
 
 import (
+	"cmp"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -106,15 +107,9 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if !ok {
 		return nil, errors.New("e2bcompat: store does not implement scale.ClaimIDResolver")
 	}
-	if opts.Namespace == "" {
-		opts.Namespace = "default"
-	}
-	if opts.EnvdVersion == "" {
-		opts.EnvdVersion = DefaultEnvdVersion
-	}
-	if opts.SizeClass == "" {
-		opts.SizeClass = scale.SizeClassSmall
-	}
+	opts.Namespace = cmp.Or(opts.Namespace, "default")
+	opts.EnvdVersion = cmp.Or(opts.EnvdVersion, DefaultEnvdVersion)
+	opts.SizeClass = cmp.Or(opts.SizeClass, scale.SizeClassSmall)
 	keys := make(map[string]struct{}, len(opts.APIKeys))
 	for _, k := range opts.APIKeys {
 		if k = strings.TrimSpace(k); k != "" {

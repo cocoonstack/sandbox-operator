@@ -2,6 +2,7 @@
 package podruntime
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -207,9 +208,7 @@ func stableVMName(namespace, name string) string {
 		}
 	}
 	prefix := strings.Trim(normalized.String(), "-")
-	if prefix == "" {
-		prefix = "sandbox"
-	}
+	prefix = cmp.Or(prefix, "sandbox")
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(namespace+"/"+name)))[:8]
 	const maxPrefix = 63 - 1 - 8
 	if len(prefix) > maxPrefix {

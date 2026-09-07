@@ -1,6 +1,7 @@
 package apiserver
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -121,9 +122,7 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("expected SandboxForkOptions, got %T", obj))
 			}
 			count := int(opts.Count)
-			if count == 0 {
-				count = 1
-			}
+			count = cmp.Or(count, 1)
 			if count < 0 {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("count must be >= 1, got %d", count))
 			}

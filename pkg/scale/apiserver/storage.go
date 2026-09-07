@@ -1,6 +1,7 @@
 package apiserver
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
@@ -114,9 +115,7 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	// Identity: namespace from the request path, name (honoring generateName) from
 	// the submitted object.
 	namespace := genericapirequest.NamespaceValue(ctx)
-	if namespace == "" {
-		namespace = sb.Namespace
-	}
+	namespace = cmp.Or(namespace, sb.Namespace)
 	name := sb.Name
 	if name == "" && sb.GenerateName != "" {
 		name = names.SimpleNameGenerator.GenerateName(sb.GenerateName)

@@ -39,9 +39,7 @@ func PoolKeyFor(containers []corev1.Container, net string) PoolKey {
 	if len(containers) > 0 {
 		template = containers[0].Image
 	}
-	if net == "" {
-		net = NetDefault
-	}
+	net = cmp.Or(net, NetDefault)
 	return PoolKey{Template: template, Net: net, Size: SizeClassForContainers(containers)}
 }
 

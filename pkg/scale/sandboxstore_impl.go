@@ -656,9 +656,7 @@ type ssaInventoryApplier struct {
 
 // NewSSAInventoryApplier returns the default server-side-apply InventoryApplier.
 func NewSSAInventoryApplier(c client.Client, fieldOwner string) InventoryApplier {
-	if fieldOwner == "" {
-		fieldOwner = "cocoon-node-inventory-publisher"
-	}
+	fieldOwner = cmp.Or(fieldOwner, "cocoon-node-inventory-publisher")
 	return &ssaInventoryApplier{c: c, fieldOwner: fieldOwner}
 }
 
@@ -980,10 +978,7 @@ func readyStatus(phase string) metav1.ConditionStatus {
 }
 
 func readyReason(phase string) string {
-	if phase == "" {
-		return "Unknown"
-	}
-	return phase
+	return cmp.Or(phase, "Unknown")
 }
 
 // resourceVersionFor derives a deterministic, content-sensitive ResourceVersion
