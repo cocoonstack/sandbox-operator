@@ -966,9 +966,7 @@ func TestReconcile(t *testing.T) {
 			}
 
 			reconcileCount := tc.reconcileCount
-			if reconcileCount == 0 {
-				reconcileCount = 1
-			}
+			reconcileCount = cmp.Or(reconcileCount, 1)
 			var err error
 			for i := 0; i < reconcileCount; i++ {
 				_, err = r.Reconcile(t.Context(), ctrl.Request{

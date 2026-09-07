@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -82,9 +83,7 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	npNamespace := template.Namespace
 
 	management := template.Spec.NetworkPolicyManagement
-	if management == "" {
-		management = extensionsv1beta1.NetworkPolicyManagementManaged
-	}
+	management = cmp.Or(management, extensionsv1beta1.NetworkPolicyManagementManaged)
 
 	if management == extensionsv1beta1.NetworkPolicyManagementUnmanaged {
 		return ctrl.Result{}, r.dropManagedNetworkPolicy(ctx, template, npName, npNamespace)
@@ -209,9 +208,7 @@ func (r *SandboxTemplateReconciler) dropManagedNetworkPolicy(ctx context.Context
 // routerNamespace is the namespace the sandbox-router runs in (the operator
 // install namespace); ingress is admitted only from that namespace.
 func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) networkingv1.NetworkPolicySpec {
-	if routerNamespace == "" {
-		routerNamespace = defaultRouterNamespace
-	}
+	routerNamespace = cmp.Or(routerNamespace, defaultRouterNamespace)
 	peers := []networkingv1.NetworkPolicyPeer{
 		{
 			NamespaceSelector: &metav1.LabelSelector{
