@@ -992,7 +992,9 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			scheme := newScheme(t)
 
 			claimToUse := tc.claimToReconcile
-			claimToUse = cmp.Or(claimToUse, claim)
+			if claimToUse == nil {
+				claimToUse = claim
+			}
 
 			allObjects := append(slices.Clone(tc.existingObjects), claimToUse)
 			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(allObjects...).WithStatusSubresource(claimToUse).Build()
