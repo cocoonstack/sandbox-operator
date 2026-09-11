@@ -1177,7 +1177,7 @@ func (r *SandboxClaimReconciler) sandboxFromStatus(ctx context.Context, claim *e
 // still owned by the warm pool means an adoption is half-finished, which this
 // completes.
 func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
-	sbName := assignedSandboxName(claim)
+	sbName := claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]
 	if sbName == "" {
 		return nil, nil
 	}
@@ -1896,11 +1896,6 @@ func validateVolumeClaimTemplates(vcts []v1beta1.PersistentVolumeClaimTemplate) 
 		names[vct.Name] = struct{}{}
 	}
 	return nil
-}
-
-// assignedSandboxName reads the assigned-sandbox annotation.
-func assignedSandboxName(claim *extensionsv1beta1.SandboxClaim) string {
-	return claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]
 }
 
 // warmPoolRefIndexer indexes SandboxClaims by spec.warmPoolRef.name.

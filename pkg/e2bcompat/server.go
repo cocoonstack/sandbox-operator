@@ -30,6 +30,7 @@ import (
 
 	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apiserver/pkg/storage/names"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -196,7 +197,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := generateName()
+	name := names.SimpleNameGenerator.GenerateName(namePrefix)
 	pool := scale.PoolKey{
 		Template: req.TemplateID,
 		Net:      netFor(req.AllowInternetAccess),
