@@ -3,8 +3,6 @@ package e2bcompat
 import (
 	"encoding/json"
 	"net/http"
-
-	"k8s.io/apiserver/pkg/storage/names"
 )
 
 const (
@@ -16,13 +14,6 @@ const (
 	// sandboxes` and in node inventory.
 	namePrefix = "e2b-"
 )
-
-// generateName returns a fresh Kubernetes-safe name for a compat claim. e2b
-// clients do not name their sandboxes; the identity a caller sees back is the
-// node-assigned claim id, not this name.
-func generateName() string {
-	return names.SimpleNameGenerator.GenerateName(namePrefix)
-}
 
 // writeJSON writes v as the response body with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {

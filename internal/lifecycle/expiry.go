@@ -42,11 +42,6 @@ func TimeLeft(now time.Time, shutdownTime *metav1.Time, ttlSecondsAfterFinished 
 	return false, expireAt.Sub(now)
 }
 
-// needsCleanup reports whether ttl-after-finished cleanup applies.
-func needsCleanup(ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) bool {
-	return ttlSecondsAfterFinished != nil && finishedCondition != nil
-}
-
 // finishedTime returns the finish timestamp encoded in the terminal condition.
 func finishedTime(finishedCondition *metav1.Condition) *time.Time {
 	if finishedCondition == nil || finishedCondition.LastTransitionTime.IsZero() {
@@ -64,7 +59,7 @@ func expireAtFor(shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, fini
 		expireAt = &shutdownAt
 	}
 
-	if !needsCleanup(ttlSecondsAfterFinished, finishedCondition) {
+	if ttlSecondsAfterFinished == nil || finishedCondition == nil {
 		return expireAt
 	}
 
