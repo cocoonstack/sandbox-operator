@@ -21,6 +21,6 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X github.com/cocoonstack/sandbox-operator/internal/version.gitVersion=${GIT_VERSION} -X github.com/cocoonstack/sandbox-operator/internal/version.gitSHA=${GIT_SHA} -X github.com/cocoonstack/sandbox-operator/internal/version.buildDate=${BUILD_DATE}" \
     -o /sandbox-operator ./cmd/sandbox-operator
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 COPY --from=builder /sandbox-operator /sandbox-operator
 ENTRYPOINT ["/sandbox-operator"]
