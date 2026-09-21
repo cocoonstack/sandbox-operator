@@ -142,25 +142,22 @@ func main() {
 
 		round := map[string]any{
 			"target": n, "ready": ready,
-			"sandbox_cr_total":  sbLat.count,
-			"cluster_pod_total": podLat.count,
-			// client-observed LIST wall-clock
-			"client_list_sandboxes": msStats(sbLat),
-			"client_list_pods":      msStats(podLat),
-			// apiserver-side LIST mean over the window
+			"sandbox_cr_total":                sbLat.count,
+			"cluster_pod_total":               podLat.count,
+			"client_list_sandboxes":           msStats(sbLat),
+			"client_list_pods":                msStats(podLat),
 			"apiserver_list_sandboxes_avg_ms": benchutil.Round2(deltaAvgMs(prev, last, "list_sandboxes")),
 			"apiserver_list_pods_avg_ms":      benchutil.Round2(deltaAvgMs(prev, last, "list_pods")),
-			// the vk LIST priority level under load
-			"vke_seats_nominal":            last["vke_nominal"],
-			"vke_seats_inuse_peak":         benchutil.Round2(peakInUse),
-			"vke_inqueue_peak":             benchutil.Round2(peakInqueue),
-			"vke_wait_avg_ms":              benchutil.Round2(deltaAvgMs(prev, last, "vke_wait")),
-			"vke_dispatched_delta":         benchutil.Round0(last["vke_dispatched"] - prev["vke_dispatched"]),
-			"vke_rejected_timeout_delta":   benchutil.Round0(last["vke_rej_timeout"] - prev["vke_rej_timeout"]),
-			"vke_rejected_cancelled_delta": benchutil.Round0(last["vke_rej_cancelled"] - prev["vke_rej_cancelled"]),
-			"node_distribution":            dist,
-			"prod_intact":                  prodNow,
-			"window_sec":                   benchutil.Round1(curT.Sub(prevT).Seconds()),
+			"vke_seats_nominal":               last["vke_nominal"],
+			"vke_seats_inuse_peak":            benchutil.Round2(peakInUse),
+			"vke_inqueue_peak":                benchutil.Round2(peakInqueue),
+			"vke_wait_avg_ms":                 benchutil.Round2(deltaAvgMs(prev, last, "vke_wait")),
+			"vke_dispatched_delta":            benchutil.Round0(last["vke_dispatched"] - prev["vke_dispatched"]),
+			"vke_rejected_timeout_delta":      benchutil.Round0(last["vke_rej_timeout"] - prev["vke_rej_timeout"]),
+			"vke_rejected_cancelled_delta":    benchutil.Round0(last["vke_rej_cancelled"] - prev["vke_rej_cancelled"]),
+			"node_distribution":               dist,
+			"prod_intact":                     prodNow,
+			"window_sec":                      benchutil.Round1(curT.Sub(prevT).Seconds()),
 		}
 		rounds = append(rounds, round)
 		fmt.Printf("[N=%d] sbCR=%d pods=%d | client LIST sb p50=%.0f/p95=%.0fms pods p50=%.0f/p95=%.0fms | apiserver LIST sb=%.0fms pods=%.1fms | %s seats %.0f/%.0f peak inq=%.0f wait=%.0fms disp+%.0f REJECT_timeout+%.0f | dist=%v prod=%d\n",

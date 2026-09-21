@@ -190,9 +190,6 @@ type SandboxBlueprint struct {
 
 // SandboxSpec defines the desired state of Sandbox.
 type SandboxSpec struct {
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
 	// SandboxBlueprint defines the workload configuration shared with SandboxTemplate.
 	// NOTE: Once a field is added here, it is promoted to both Sandbox and SandboxTemplate.
 	// Since moving fields out is breaking, if unsure whether a new field should be shared,
@@ -236,7 +233,7 @@ type SandboxStatus struct {
 	// +optional
 	ServiceFQDN string `json:"serviceFQDN,omitempty"`
 
-	// service is a sandbox-example
+	// Service is the headless Service name fronting the Sandbox pod, set once the controller creates it and cleared when it is removed.
 	// +optional
 	Service string `json:"service,omitempty"`
 

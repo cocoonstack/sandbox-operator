@@ -177,7 +177,6 @@ func crossCheck(ctx context.Context) (readyReplicas, sandboxCR, pods int) {
 	return
 }
 
-// podCount counts Running pods in namespace on the given node.
 func podCount(ctx context.Context, namespace, nodeName string) int {
 	pl := &corev1.PodList{}
 	if err := cl.List(ctx, pl, ctrlclient.InNamespace(namespace)); err != nil {

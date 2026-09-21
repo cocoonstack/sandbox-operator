@@ -40,7 +40,6 @@ func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 	ConvertSpecTo(&s.Spec, &dst.Spec)
 	ConvertStatusTo(&s.Status, &dst.Status)
 
-	// Preserve the fields v1beta1 cannot represent for lossless round-tripping
 	if dst.Annotations == nil {
 		dst.Annotations = make(map[string]string)
 	}
@@ -63,14 +62,12 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 	ConvertSpecFrom(&src.Spec, &s.Spec)
 	ConvertStatusFrom(&src.Status, &s.Status)
 
-	// Set best-effort default for Status.Replicas based on OperatingMode.
 	if src.Spec.OperatingMode == v1beta1.SandboxOperatingModeSuspended {
 		s.Status.Replicas = 0
 	} else {
 		s.Status.Replicas = 1
 	}
 
-	// Restore original v1alpha1 state if present to ensure lossless conversion
 	if stateJSON, ok := s.Annotations[v1alpha1SandboxStateAnnotation]; ok {
 		// Strip the state annotation so it doesn't leak to clients and get sent back on updates
 		delete(s.Annotations, v1alpha1SandboxStateAnnotation)

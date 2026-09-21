@@ -139,7 +139,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /sandboxes/{sandboxID}/timeout", s.auth(http.HandlerFunc(s.setTimeout)))
 	mux.Handle("POST /sandboxes/{sandboxID}/refreshes", s.auth(http.HandlerFunc(s.refresh)))
 
-	// Lifecycle verbs.
 	mux.Handle("POST /sandboxes/{sandboxID}/pause", s.auth(http.HandlerFunc(s.pauseSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/fork", s.auth(http.HandlerFunc(s.forkSandbox)))
@@ -206,7 +205,6 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool, timeoutSeconds(req.Timeout))
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
-			// Retryable: warm capacity refills asynchronously on the node.
 			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf(
 				"no warm sandbox available for template %q; retry as warm capacity refills", req.TemplateID))
 			return
@@ -333,9 +331,7 @@ func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op strin
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
 // but cocoon does not track per sandbox (disk size) are reported as zero values
-// rather than omitted, so the SDK's decoder stays happy. envdAccessToken is one
-// of them on this path: the token is handed out once at claim time and node
-// inventory deliberately carries no per-sandbox secret.
+// rather than omitted, so the SDK's decoder stays happy.
 func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	started := sb.CreationTimestamp.Time
 	if started.IsZero() {

@@ -236,8 +236,6 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
 		inv, invErr := s.src.NodeInventory(gctx, node)
 		if invErr != nil {
-			// Partitioned / lost inventory: skip this node's sandboxes rather
-			// than failing the list. They reappear on the node's next publish.
 			s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
 				"node", node, "err", invErr.Error())
 			return nil
@@ -358,7 +356,6 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	if err != nil {
 		return err
 	}
-	// The uniform fleet api_token authorizes release by id.
 	if err := cl.Release(ctx, id, s.sandboxdToken); err != nil {
 		return fmt.Errorf("scale: sandboxd release of %q on node %q: %w", id, node, err)
 	}
@@ -379,10 +376,7 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 	return w, nil
 }
 
-// findEntry resolves the first entry matching match, synthesized as a Sandbox.
-// It reads the node the index last saw holding key and only sweeps the whole
-// fleet on a miss, canceling the rest of the sweep on the hit. Nil with a nil
-// error means no entry matched.
+// findEntry resolves the first match via the last-known node (index) or, on a miss, a fleet sweep that cancels on first hit. Nil, nil means no match.
 func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
 		if sb := s.matchOnNode(ctx, node, match); sb != nil {
@@ -453,9 +447,7 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match
 	return nil
 }
 
-// warmCandidates lists every node advertising warm capacity for pool, fanning
-// out per node like List. A node whose inventory is unavailable is skipped, not
-// fatal: the fleet stays claimable while one node is partitioned.
+// warmCandidates fans out per node like List, skipping (not failing) a node whose inventory is unavailable.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
 	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
 		addr, pools, err := s.src.NodeCapacity(gctx, n)
@@ -839,9 +831,7 @@ func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ct
 	return slices.Concat(perNode...), nil
 }
 
-// poolCapacityMatches reports whether a node's advertised pool capacity serves the
-// requested pool key, normalizing the net/size defaults on both sides so an unset
-// axis matches its default-named pool.
+// poolCapacityMatches compares pc against key, defaulting each unset net/size axis.
 func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 	return pc.Template == key.Template &&
 		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&

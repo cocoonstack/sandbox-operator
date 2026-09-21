@@ -49,8 +49,6 @@ const (
 	dryRunUnsupported = "dry-run is not supported for sandbox mutations"
 )
 
-// The verb set an aggregated, scatter-gather resource implements: the read triad
-// plus a node-local claim (Create) and release (GracefulDeleter).
 var (
 	_ rest.Storage              = (*sandboxREST)(nil)
 	_ rest.Scoper               = (*sandboxREST)(nil)
@@ -63,11 +61,7 @@ var (
 	_ rest.SingularNameProvider = (*sandboxREST)(nil)
 )
 
-// sandboxREST is the aggregated-apiserver storage for sandboxes.agents.x-k8s.io.
-// It is backed by a scale.SandboxStore (scatter-gather over node inventory), NOT
-// by the etcd-backed generic registry — so List/Get/Watch are synthesized from
-// live node state and Create/Delete are synchronous node-local claim/release; no
-// per-sandbox object ever exists in etcd.
+// sandboxREST backs sandboxes.agents.x-k8s.io via scale.SandboxStore (scatter-gather), not the etcd generic registry: List/Get/Watch synthesize from live nodes, Create/Delete are synchronous node-local claim/release.
 type sandboxREST struct {
 	store          scale.SandboxStore
 	tableConvertor rest.TableConvertor
@@ -117,8 +111,6 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 		}
 	}
 
-	// Identity: namespace from the request path, name (honoring generateName) from
-	// the submitted object.
 	namespace := genericapirequest.NamespaceValue(ctx)
 	namespace = cmp.Or(namespace, sb.Namespace)
 	name := sb.Name
@@ -137,8 +129,6 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	assignment, err := r.store.Claim(ctx, namespace, name, pool, ttlSeconds)
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
-			// Retryable: warm capacity refills asynchronously (the node's sandboxd
-			// pool), so tell the client to retry rather than surfacing a 500.
 			return nil, apierrors.NewServiceUnavailable(fmt.Sprintf(
 				"no warm sandbox available for pool (template=%q net=%q size=%q); retry as warm capacity refills",
 				pool.Template, pool.Net, pool.Size))
@@ -167,17 +157,14 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 
 	node := sb.Status.NodeName
 	if node == "" {
-		// The inventory entry exists but names no node, so the release cannot be
-		// routed. Reporting success here would leak the microVM to its TTL.
+		// reporting success here would leak the microVM to its TTL
 		return nil, false, apierrors.NewInternalError(fmt.Errorf(
 			"cannot delete sandbox %s/%s: inventory entry names no owning node; refusing to report it released",
 			namespace, name))
 	}
 	claimID := sb.Annotations[ClaimIDAnnotation]
 	if claimID == "" {
-		// The node knows the sandbox but has not published its sandboxd claim id.
-		// Releasing by the k8s name would target the wrong claim (or none), so
-		// fail loud rather than silently mis-releasing or leaking the microVM.
+		// releasing by the k8s name would target the wrong claim (or none)
 		return nil, false, apierrors.NewInternalError(fmt.Errorf(
 			"cannot delete sandbox %s/%s: node %q inventory carries no %s (sandboxd claim id); refusing to release by name",
 			namespace, name, node, ClaimIDAnnotation))
@@ -208,11 +195,7 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 	return o
 }
 
-// poolKeyForSandbox derives the warm-pool key from a Sandbox: the template is the
-// first container's image, the size is a t-shirt class mapped from that container's
-// resources, and the net comes from the NetAnnotation on the Sandbox object or its
-// pod template (default "none"). The warm-pool driver provisions from a template's
-// pod-template annotation, so a lane has to appear there for a pool to exist.
+// poolKeyForSandbox derives the pool key via scale.PoolKeyFor/NetForAnnotations; the resolved lane must appear in a template's pod-template annotation for the warm-pool driver to provision it.
 func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
 	net := scale.NetForAnnotations(sb.Annotations, sb.Spec.PodTemplate.ObjectMeta.Annotations)
 	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, net)
@@ -239,11 +222,7 @@ func ttlSecondsForSandbox(sb *sandboxv1beta1.Sandbox, now time.Time) (int, error
 	return v, nil
 }
 
-// synthesizeClaimedSandbox builds the Sandbox object Create returns: the submitted
-// spec echoed back under the request name/namespace, a fresh UID/creationTimestamp,
-// the claim id + address + granted-deadline annotations, and a Ready status
-// pointing at the owning node. It is never persisted — it is the response for a
-// node-local claim.
+// synthesizeClaimedSandbox builds Create's response Sandbox (never persisted): the submitted spec echoed back with a fresh identity and the claim's annotations/status.
 func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox, a scale.Assignment) *sandboxv1beta1.Sandbox {
 	out := in.DeepCopy()
 	out.Namespace = namespace

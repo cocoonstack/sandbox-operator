@@ -118,8 +118,7 @@ func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (Sandbo
 }
 
 // nodeClient resolves a node's advertised sandboxd address and returns a client
-// for it, failing closed when claim routing was never configured. verb and id
-// name the operation in the error so a routing failure is diagnosable.
+// for it, failing closed when claim routing was never configured.
 func (s *scatterGatherStore) nodeClient(ctx context.Context, node, verb, id string) (SandboxdClient, error) {
 	if s.sandboxdFactory == nil {
 		return nil, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")

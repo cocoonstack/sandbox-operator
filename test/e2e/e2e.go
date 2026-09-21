@@ -592,7 +592,6 @@ func scConversion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create v1alpha1: %w", err)
 	}
 	defer deleteSandbox(ctx, name)
-	// read back as v1beta1 (conversion webhook)
 	b := &sandboxv1beta1.Sandbox{}
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, b); err != nil {
 		return "", fmt.Errorf("read as v1beta1: %w", err)

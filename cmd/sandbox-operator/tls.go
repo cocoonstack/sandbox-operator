@@ -47,10 +47,8 @@ const (
 	tlsPrivateKey = "tls.key"
 )
 
-// generateWebhookCerts generates a self-signed CA and a server certificate signed by that CA,
-// or loads them from a shared Kubernetes Secret if it already exists.
-// It writes the server certificate (tls.crt) and key (tls.key) to the certDir.
-// It returns the PEM-encoded CA certificate, which is the caBundle to patch into the CRDs.
+// generateWebhookCerts loads the shared webhook certificate Secret, renewing it if expiring or adopting it if fresh,
+// or generates and publishes a new self-signed CA and server certificate if none exists; it returns the PEM-encoded CA certificate (the caBundle to patch into the CRDs).
 func generateWebhookCerts(ctx context.Context, c client.Client, certDir string, serviceName, namespace, clusterDomain string) ([]byte, error) {
 	secret := &corev1.Secret{}
 	getErr := c.Get(ctx, types.NamespacedName{Name: webhookSecretName, Namespace: namespace}, secret)

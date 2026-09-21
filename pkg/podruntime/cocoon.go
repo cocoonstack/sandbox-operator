@@ -21,11 +21,8 @@ const (
 
 	ModeVKCocoon = "vk-cocoon"
 	ModeStandard = "standard"
-	// ModeSandboxd routes a Sandbox Pod to the sandboxd hot-pool data plane —
-	// the vk-sandbox virtual node, which serves the claim from a
-	// node-local sandboxd (github.com/cocoonstack/sandbox) in sub-millisecond
-	// time. This is the successor to ModeVKCocoon for agent-sandbox workloads;
-	// vk-cocoon no longer answers sandbox Pods when this mode is selected.
+	// ModeSandboxd routes a Sandbox Pod to the sandboxd hot-pool data plane (vk-sandbox virtual
+	// node, github.com/cocoonstack/sandbox, sub-ms serve); vk-cocoon no longer answers Sandbox Pods.
 	ModeSandboxd = "sandboxd"
 	// DefaultMode keeps ordinary kubelet scheduling unless a Sandbox explicitly
 	// opts into a virtual-node contract.

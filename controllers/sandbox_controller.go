@@ -321,8 +321,7 @@ func (r *SandboxReconciler) computeReadyCondition(sandbox *sandboxv1beta1.Sandbo
 
 	message, podReady := podReadiness(pod)
 
-	// svcRequired: true if the sandbox explicitly requests a service or if a
-	// service already exists.
+	// svcRequired: true if the sandbox explicitly requests a service or one already exists.
 	svcRequired := false
 	if sandbox.Spec.Service != nil {
 		svcRequired = *sandbox.Spec.Service
@@ -543,13 +542,11 @@ func (r *SandboxReconciler) createHeadlessService(ctx context.Context, sandbox *
 	return service, nil
 }
 
-// setServiceStatus updates the sandbox status with the service name and FQDN.
 func (r *SandboxReconciler) setServiceStatus(sandbox *sandboxv1beta1.Sandbox, service *corev1.Service) {
 	sandbox.Status.Service = service.Name
 	sandbox.Status.ServiceFQDN = service.Name + "." + service.Namespace + ".svc." + r.ClusterDomain
 }
 
-// clearServiceStatus clears the service-related fields from sandbox status.
 func (r *SandboxReconciler) clearServiceStatus(sandbox *sandboxv1beta1.Sandbox) {
 	sandbox.Status.Service = ""
 	sandbox.Status.ServiceFQDN = ""
@@ -1047,7 +1044,6 @@ func setSandboxExpiredCondition(sandbox *sandboxv1beta1.Sandbox) {
 	})
 }
 
-// sandboxMarkedExpired checks if the sandbox is already marked as expired.
 func sandboxMarkedExpired(sandbox *sandboxv1beta1.Sandbox) bool {
 	cond := meta.FindStatusCondition(sandbox.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 	return cond != nil && (cond.Reason == sandboxv1beta1.SandboxReasonExpired)
@@ -1074,7 +1070,6 @@ func podReadiness(pod *corev1.Pod) (message string, ready bool) {
 	return "Pod is Ready", true
 }
 
-// isAdoptable reports whether obj carries the warm-pool adoptable label.
 func isAdoptable(obj client.Object) bool {
 	return obj.GetLabels()[sandboxv1beta1.SandboxAdoptableLabel] == "true"
 }
@@ -1089,7 +1084,6 @@ func resolvePodName(sandbox *sandboxv1beta1.Sandbox) string {
 	return sandbox.Name
 }
 
-// podIPsFromStatus converts the K8s PodIP slice to a plain string slice.
 func podIPsFromStatus(podIPs []corev1.PodIP) []string {
 	if len(podIPs) == 0 {
 		return nil

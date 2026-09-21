@@ -72,8 +72,7 @@ func main() {
 	}
 }
 
-// options holds every operator flag. It is one struct so main stays a
-// sequence of named phases rather than a 400-line body.
+// options holds every operator flag.
 type options struct {
 	metricsAddr             string
 	probeAddr               string

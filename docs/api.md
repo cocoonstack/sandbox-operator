@@ -185,7 +185,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serviceFQDN` _string_ | serviceFQDN that is valid for default cluster settings<br />The domain defaults to cluster.local but is configurable via the controller's --cluster-domain flag. |  |  |
-| `service` _string_ | service is a sandbox-example |  |  |
+| `service` _string_ | Service is the headless Service name fronting the Sandbox pod, set once the controller creates it and cleared when it is removed. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#condition-v1-meta) array_ | conditions defines the status conditions array |  |  |
 | `replicas` _integer_ | replicas is the number of actual replicas. |  | Minimum: 0 <br /> |
 | `selector` _string_ | selector is the label selector for pods. |  |  |
@@ -579,7 +579,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `serviceFQDN` _string_ | serviceFQDN that is valid for default cluster settings<br />The domain defaults to cluster.local but is configurable via the controller's --cluster-domain flag. |  |  |
-| `service` _string_ | service is a sandbox-example |  |  |
+| `service` _string_ | Service is the headless Service name fronting the Sandbox pod, set once the controller creates it and cleared when it is removed. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#condition-v1-meta) array_ | conditions defines the status conditions array |  |  |
 | `selector` _string_ | selector is the label selector for pods. |  |  |
 | `podIPs` _string array_ | podIPs are the IP addresses of the underlying pod.<br />A pod may have multiple IPs in dual-stack clusters. |  |  |

@@ -94,8 +94,7 @@ var (
 		Help:    "Latency of the FIRST successful Delete call (exact-VM release), excluding read-view NotFound retries.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
 	})
-	// execSeconds is the metric that matters: wall time from Create() start to a
-	// successful exec inside the delivered sandbox — the real "usable" latency.
+	// execSeconds is the metric that matters: the real "usable" latency.
 	execSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sandbox_sdk_exec_seconds",
 		Help:    "Latency from Create(Sandbox) start to first successful in-sandbox exec (create->exec).",
@@ -287,7 +286,6 @@ func main() {
 		fmt.Printf("ERROR: %d sandbox(es) leaked — their node claims were left for the TTL reaper. Do NOT scale this run up until the leak is explained.\n", summary.leaked)
 	}
 
-	// Keep /metrics alive so the final histogram/counters remain scrapeable.
 	fmt.Println("run complete; serving /metrics until terminated")
 	<-ctx.Done()
 }
@@ -500,7 +498,6 @@ func releaseWithRetry(ctx context.Context, cl client.Client, o *options, sb *san
 			deletesTotal.Inc()
 			return true
 		case apierrors.IsNotFound(err):
-			// Read view lag — retry until the object appears.
 			deleteRetries.Inc()
 		default:
 			logSampledf("delete", "delete %s/%s failed (attempt %d): %v", sb.Namespace, sb.Name, attempt, err)

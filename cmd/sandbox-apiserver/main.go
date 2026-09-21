@@ -257,8 +257,6 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 	if err != nil {
 		return nil, fmt.Errorf("build inventory cache: %w", err)
 	}
-	// Register the informer up front: with ReaderFailOnMissingInformer set,
-	// reads never create informers implicitly.
 	if _, err := invCache.GetInformer(ctx, inv); err != nil {
 		return nil, fmt.Errorf("register node inventory informer: %w", err)
 	}
@@ -320,10 +318,8 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	return nil
 }
 
-// startE2BServer starts the e2b-compatible REST surface on its own listener and
-// stops it when ctx is canceled. It shares the aggregated apiserver's store, so
-// there is no second source of truth: a claim made here is the same node-local
-// claim, released the same way, and listed by the same scatter-gather read.
+// startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
+// the same way, and listed by the same scatter-gather read.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) error {
 	keys, err := o.e2bAPIKeys()
 	if err != nil {

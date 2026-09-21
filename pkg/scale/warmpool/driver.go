@@ -329,8 +329,7 @@ func syncRequest(context.Context, client.Object) []reconcile.Request {
 	return []reconcile.Request{{Name: "sync"}}
 }
 
-// distribute spreads total warm targets evenly across nodes (base + remainder to
-// the first nodes), matching the aggregated apiserver's most-warm-first node pick.
+// distribute spreads total warm targets evenly across nodes (base + remainder to the first nodes).
 func distribute(replicas int32, nodes []nodeView) map[string]int {
 	targets := make(map[string]int, len(nodes))
 	if len(nodes) == 0 {

@@ -170,9 +170,7 @@ func (r *SandboxTemplateReconciler) ensureTemplateRefHashLabel(ctx context.Conte
 	return nil
 }
 
-// dropManagedNetworkPolicy removes the NetworkPolicy this controller previously
-// created for a template that has since opted out. A policy someone else owns is
-// left in place.
+// dropManagedNetworkPolicy deletes the template's owned NetworkPolicy; a policy it doesn't own is left in place.
 func (r *SandboxTemplateReconciler) dropManagedNetworkPolicy(ctx context.Context, template *extensionsv1beta1.SandboxTemplate, npName, npNamespace string) error {
 	logger := log.FromContext(ctx)
 	existingNP := &networkingv1.NetworkPolicy{}

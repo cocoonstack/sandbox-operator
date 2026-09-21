@@ -30,11 +30,9 @@ var (
 // lifecycleREST is the shared plumbing of the action subresources: resolve the
 // named sandbox through the store, then run one verb against its owning node.
 type lifecycleREST struct {
-	store scale.SandboxStore
-	// newOptions builds the request body type this subresource accepts.
+	store      scale.SandboxStore
 	newOptions func() runtime.Object
-	// verb performs the action and returns the response object.
-	verb func(ctx context.Context, store scale.SandboxStore, sb *sandboxv1beta1.Sandbox, opts runtime.Object) (runtime.Object, error)
+	verb       func(ctx context.Context, store scale.SandboxStore, sb *sandboxv1beta1.Sandbox, opts runtime.Object) (runtime.Object, error)
 }
 
 func (r *lifecycleREST) New() runtime.Object { return r.newOptions() }
@@ -71,8 +69,7 @@ func (r *lifecycleREST) Create(ctx context.Context, name string, obj runtime.Obj
 			"sandbox %s/%s has no owning node; cannot run a lifecycle verb against it", namespace, name))
 	}
 	if claimID(sb) == "" {
-		// Releasing or pausing by k8s name would target the wrong claim, so a
-		// sandbox whose node has not published its claim id fails loud.
+		// releasing or pausing by k8s name would target the wrong claim
 		return nil, apierrors.NewInternalError(fmt.Errorf(
 			"sandbox %s/%s carries no %s (node-local claim id); refusing to act by name",
 			namespace, name, ClaimIDAnnotation))
@@ -164,7 +161,6 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 	}
 }
 
-// claimID reports the node-local claim id the store's verbs address.
 func claimID(sb *sandboxv1beta1.Sandbox) string { return sb.Annotations[ClaimIDAnnotation] }
 
 func verbError(verb string, sb *sandboxv1beta1.Sandbox, err error) error {

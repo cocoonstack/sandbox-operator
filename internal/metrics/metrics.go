@@ -26,7 +26,7 @@ import (
 const (
 	LaunchTypeWarm    = "warm"
 	LaunchTypeCold    = "cold"
-	LaunchTypeUnknown = "unknown" // Sandbox is nil during failure
+	LaunchTypeUnknown = "unknown" // fallback for a nil Sandbox and for NormalizeCreatedBy
 
 	// ObservabilityAnnotation is the annotation key for the time the controller first observed the claim.
 	ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"
@@ -77,10 +77,8 @@ var (
 		[]string{"namespace", "sandbox_template", "launch_type", "warmpool_name", "pod_condition", "created_by"},
 	)
 
-	// WarmPoolSandboxCreatedTotal counts Sandboxes created by the warm-pool
-	// controller (pool fill and claim-consumed replacement alike). Event-level
-	// counter so per-interval fill rates survive scrape gaps and do not depend
-	// on any external watcher.
+	// WarmPoolSandboxCreatedTotal counts Sandboxes created by the warm-pool controller (pool fill and
+	// claim-consumed replacement alike); an event counter, so per-interval fill rates survive scrape gaps.
 	WarmPoolSandboxCreatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "agent_sandbox_warm_created_total",
@@ -166,8 +164,7 @@ func NormalizeCreatedBy(createdBy string) string {
 	}
 }
 
-// RecordSandboxClaimCreation increments the total count of created sandbox claims.
-// The createdBy value is automatically normalized.
+// RecordSandboxClaimCreation increments the created-claims total; createdBy is normalized automatically.
 func RecordSandboxClaimCreation(namespace, templateName, launchType, warmPoolName, podCondition, createdBy string) {
 	SandboxClaimCreationTotal.WithLabelValues(namespace, templateName, launchType, warmPoolName, podCondition, NormalizeCreatedBy(createdBy)).Inc()
 }
