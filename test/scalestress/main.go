@@ -113,8 +113,8 @@ func main() {
 
 	for _, n := range steps {
 		fmt.Printf("\n=== ramp to %d ===\n", n)
-		setReplicas(ctx, int32(n))
-		ready := waitReady(ctx, n, *stepWait)
+		benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, int32(n), map[string]string{runLabel: runVal})
+		ready := benchutil.WaitReady(ctx, cl, *ns, poolName, n, *stepWait)
 		time.Sleep(time.Duration(*settle) * time.Second)
 
 		if prodNow := prodPods(ctx, *prodNS, hosts); prodNow != prodBase {
@@ -255,16 +255,8 @@ func ensureTemplate(ctx context.Context, hosts []string) {
 		})
 }
 
-func setReplicas(ctx context.Context, n int32) {
-	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, n, map[string]string{runLabel: runVal})
-}
-
 func ourReady(ctx context.Context) (total, ready int) {
 	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
-}
-
-func waitReady(ctx context.Context, target, timeoutSec int) int {
-	return benchutil.WaitReady(ctx, cl, *ns, poolName, target, timeoutSec)
 }
 
 func nodeDistribution(ctx context.Context) map[string]int {

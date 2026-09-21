@@ -98,9 +98,9 @@ func main() {
 	ensureTemplate(ctx)
 
 	fmt.Printf("[fill] creating pool %s replicas=%d on %s\n", poolName, *poolSize, *node)
-	ensurePool(ctx, int32(*poolSize))
+	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, int32(*poolSize), map[string]string{runLabel: runVal})
 	admissionPass := true
-	filled := waitReady(ctx, *poolSize, *fillWait)
+	filled := benchutil.WaitReady(ctx, cl, *ns, poolName, *poolSize, *fillWait)
 	if filled < *poolSize {
 		admissionPass = false
 		fmt.Printf("[fill] WARN only %d/%d ready before timeout\n", filled, *poolSize)
@@ -162,17 +162,9 @@ func ensureTemplate(ctx context.Context) {
 		})
 }
 
-func ensurePool(ctx context.Context, replicas int32) {
-	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, replicas, map[string]string{runLabel: runVal})
-}
-
 // ourSandboxes returns the Sandbox CRs this run's pool owns and how many are Ready.
 func ourSandboxes(ctx context.Context) (total, ready int) {
 	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
-}
-
-func waitReady(ctx context.Context, target, timeoutSec int) int {
-	return benchutil.WaitReady(ctx, cl, *ns, poolName, target, timeoutSec)
 }
 
 func crossCheck(ctx context.Context) (readyReplicas, sandboxCR, pods int) {

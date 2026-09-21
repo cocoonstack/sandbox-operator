@@ -148,16 +148,12 @@ func ensureTemplate(ctx context.Context) {
 	})
 }
 
-func ensurePool(ctx context.Context, replicas int32) {
-	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, replicas, nil)
-}
-
 func readySandboxes(ctx context.Context) (total, ready int) {
 	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
 }
 
 func fillPool(ctx context.Context, target int) map[string]any {
-	ensurePool(ctx, int32(target))
+	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, int32(target), nil)
 	start := time.Now()
 	deadline := start.Add(time.Duration(*fillWait) * time.Second)
 	series := []map[string]any{}
