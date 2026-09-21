@@ -131,7 +131,7 @@ func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
 	}
 	gone := apierrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc123")
 	store := &fakeStore{getSandbox: sb, verbErr: gone}
-	for name, rest := range map[string]struct {
+	for name, tc := range map[string]struct {
 		storage rest.Storage
 		body    runtime.Object
 	}{
@@ -140,7 +140,7 @@ func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
 		"fork":     {NewSandboxForkREST(store), &sandboxv1beta1.SandboxForkOptions{}},
 		"snapshot": {NewSandboxSnapshotREST(store), &sandboxv1beta1.SandboxSnapshotOptions{}},
 	} {
-		_, err := rest.storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", rest.body, nil, &metav1.CreateOptions{})
+		_, err := tc.storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", tc.body, nil, &metav1.CreateOptions{})
 		require.Error(t, err, name)
 		assert.True(t, apierrors.IsNotFound(err), "%s: the node's 404 must stay a NotFound, got %v", name, err)
 	}
