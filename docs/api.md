@@ -9,9 +9,6 @@
 
 ## agents.x-k8s.io/v1alpha1
 
-Package v1alpha1 contains API Schema definitions for the agents v1alpha1 API group
-
-
 Package v1alpha1 contains API Schema definitions for the agents v1alpha1 API group.
 
 ### Resource Types
@@ -216,9 +213,6 @@ _Appears in:_
 
 
 ## agents.x-k8s.io/v1beta1
-
-Package v1beta1 contains API Schema definitions for the agents v1beta1 API group
-
 
 Package v1beta1 contains API Schema definitions for the agents v1beta1 API group.
 
@@ -613,8 +607,6 @@ _Appears in:_
 
 
 ## extensions.agents.x-k8s.io/v1alpha1
-
-Package v1alpha1 contains API Schema definitions for the extensions v1alpha1 API group
 
 Package v1alpha1 contains API Schema definitions for the extensions.agents v1alpha1 API group.
 
@@ -1047,8 +1039,6 @@ _Appears in:_
 
 
 ## extensions.agents.x-k8s.io/v1beta1
-
-Package v1beta1 contains API Schema definitions for the extensions v1beta1 API group
 
 Package v1beta1 contains API Schema definitions for the extensions.agents v1beta1 API group.
 
