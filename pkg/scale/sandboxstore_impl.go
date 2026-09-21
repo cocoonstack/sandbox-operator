@@ -556,10 +556,10 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, labelSel labels.Selector, fieldSel fields.Selector) []sandboxv1beta1.Sandbox {
 	out := make([]sandboxv1beta1.Sandbox, 0, len(inv.Entries))
 	for i := range inv.Entries {
-		sb := entryToSandbox(inv.Node, inv.Entries[i])
-		if namespace != "" && sb.Namespace != namespace {
+		if ns, _ := splitNamespacedName(inv.Entries[i].Name); namespace != "" && ns != namespace {
 			continue
 		}
+		sb := entryToSandbox(inv.Node, inv.Entries[i])
 		if !labelSel.Matches(labels.Set(sb.Labels)) {
 			continue
 		}
