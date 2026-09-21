@@ -338,15 +338,10 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		updateStrategyType = warmPool.Spec.UpdateStrategy.Type
 	}
 
-	var updateStrategy extensionsv1beta1.SandboxWarmPoolUpdateStrategyType
-	switch updateStrategyType {
-	case extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType:
-		updateStrategy = extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType
-	case extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType, "":
-		updateStrategy = extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType
-	default:
+	recreate := updateStrategyType == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType
+	if !recreate && updateStrategyType != "" &&
+		updateStrategyType != extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType {
 		logger.Info("Unknown update strategy, defaulting to OnReplenish", "strategy", updateStrategyType)
-		updateStrategy = extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType
 	}
 
 	for i := range sandboxes {
@@ -364,7 +359,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 			continue
 		}
 
-		if tmplErr == nil && (updateStrategy == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType || isOrphan) {
+		if tmplErr == nil && (recreate || isOrphan) {
 			if r.isSandboxStale(ctx, sb, check) {
 				logger.Info("Deleting stale sandbox", "sandbox", sb.Name, "isOrphan", isOrphan)
 				if err := r.Delete(ctx, sb); err != nil {
