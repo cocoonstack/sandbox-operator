@@ -373,8 +373,9 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 	if _, _, err := parseSelectors(opts); err != nil {
 		return nil, err
 	}
-	w := newInventoryWatcher()
-	go s.runWatch(ctx, opts, w)
+	ch := make(chan watch.Event, 64)
+	w := watch.NewProxyWatcher(ch)
+	go s.runWatch(ctx, opts, w, ch)
 	return w, nil
 }
 
@@ -476,12 +477,19 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 	})
 }
 
-func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *inventoryWatcher) {
-	defer w.terminate()
+func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *watch.ProxyWatcher, ch chan watch.Event) {
+	defer close(ch)
 
 	known := map[string]*sandboxv1beta1.Sandbox{}
 	emit := func(t watch.EventType, sb *sandboxv1beta1.Sandbox) bool {
-		return w.send(ctx, watch.Event{Type: t, Object: sb})
+		select {
+		case ch <- watch.Event{Type: t, Object: sb}:
+			return true
+		case <-w.StopChan():
+			return false
+		case <-ctx.Done():
+			return false
+		}
 	}
 
 	if list, err := s.List(ctx, opts); err != nil {
@@ -507,7 +515,7 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		select {
 		case <-ctx.Done():
 			return
-		case <-w.done:
+		case <-w.StopChan():
 			return
 		case <-ticker.C:
 			list, err := s.List(ctx, opts)
@@ -592,43 +600,6 @@ func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
 		return candidates[j], j
 	}
 	return candidates[i], i
-}
-
-// inventoryWatcher is a watch.Interface fed by the store's poll-diff goroutine.
-type inventoryWatcher struct {
-	result chan watch.Event
-	done   chan struct{}
-	once   sync.Once
-}
-
-func newInventoryWatcher() *inventoryWatcher {
-	return &inventoryWatcher{
-		result: make(chan watch.Event, 64),
-		done:   make(chan struct{}),
-	}
-}
-
-func (w *inventoryWatcher) ResultChan() <-chan watch.Event { return w.result }
-
-// Stop signals the producer to exit; safe to call multiple times.
-func (w *inventoryWatcher) Stop() {
-	w.once.Do(func() { close(w.done) })
-}
-
-// terminate is called once by the producer goroutine as it exits, closing the
-// result channel so consumers observe end-of-stream.
-func (w *inventoryWatcher) terminate() { close(w.result) }
-
-// send delivers ev unless the watch has been stopped or the context is done.
-func (w *inventoryWatcher) send(ctx context.Context, ev watch.Event) bool {
-	select {
-	case w.result <- ev:
-		return true
-	case <-w.done:
-		return false
-	case <-ctx.Done():
-		return false
-	}
 }
 
 // NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
