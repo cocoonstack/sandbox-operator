@@ -271,7 +271,8 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	// only the original.
 	claimID := sb.Annotations[scale.ClaimIDAnnotation]
 	if err := s.store.Release(r.Context(), node, claimID); err != nil {
-		s.writeVerbError(w, err, id, "delete", "failed to release the sandbox")
+		s.opts.Log.Error(err, "e2b delete: release failed", "sandboxID", id, "claimID", claimID, "node", node)
+		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

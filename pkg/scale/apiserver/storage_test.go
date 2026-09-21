@@ -38,21 +38,6 @@ func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 	assert.Equal(t, "sb_abc123", store.releaseID, "must release by the sandboxd claim id, not the k8s name")
 }
 
-func TestDelete_NodeUnknownSandboxIsNotFound(t *testing.T) {
-	sb := &sandboxv1beta1.Sandbox{
-		Namespace:   "ns",
-		Name:        "s1",
-		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
-		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
-	}
-	store := &fakeStore{getSandbox: sb, releaseErr: apierrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc123")}
-	r := NewSandboxREST(store).(*sandboxREST)
-
-	_, _, err := r.Delete(nsCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
-	require.Error(t, err)
-	assert.True(t, apierrors.IsNotFound(err), "a sandbox the node already reaped is NotFound, not a 500: %v", err)
-}
-
 func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	sb := &sandboxv1beta1.Sandbox{
 		Namespace: "ns", Name: "s1",

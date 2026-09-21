@@ -3,6 +3,9 @@ package scale
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -16,8 +19,7 @@ import (
 func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))
-	gone := &sandboxd.HTTPError{StatusCode: http.StatusNotFound, Message: "unknown sandbox"}
-	f := &recordingFactory{verbErr: gone, releaseErr: gone}
+	f := &recordingFactory{verbErr: &sandboxd.HTTPError{StatusCode: http.StatusNotFound, Message: "unknown sandbox"}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 	ctx := t.Context()
 
@@ -27,7 +29,6 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
 		"resume":   store.Resume(ctx, "n1", "sb_gone"),
-		"release":  store.Release(ctx, "n1", "sb_gone"),
 		"stats":    statsErr,
 		"fork":     forkErr,
 		"snapshot": snapErr,
@@ -40,4 +41,20 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	err := store.Pause(ctx, "n1", "sb_live")
 	require.Error(t, err)
 	assert.False(t, k8serrors.IsNotFound(err), "a transport failure is not NotFound: %v", err)
+}
+
+func TestReleaseOfAReapedSandboxIsASuccessThroughTheRealClient(t *testing.T) {
+	var releases atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		releases.Add(1)
+		assert.Equal(t, "/v1/sandboxes/sb_gone/release", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", strings.TrimPrefix(srv.URL, "http://")))
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", NewSandboxdClientFactory()))
+
+	require.NoError(t, store.Release(t.Context(), "n1", "sb_gone"), "the node's 404 on release means already gone, which the client reports as success")
+	require.Equal(t, int64(1), releases.Load())
 }
