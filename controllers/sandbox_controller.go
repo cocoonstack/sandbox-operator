@@ -60,9 +60,7 @@ const (
 	msgPodFailed      = "Pod failed"
 	msgSandboxExpired = "Sandbox has expired"
 
-	sandboxLabel = "agents.x-k8s.io/sandbox-name-hash"
-	// podSandboxNameHashIndex is a cache field index, so per-reconcile pod lookups are O(1).
-	podSandboxNameHashIndex     = ".metadata.labels[" + sandboxLabel + "]"
+	sandboxLabel                = "agents.x-k8s.io/sandbox-name-hash"
 	sandboxControllerFieldOwner = "sandbox-controller"
 	immediateRequeueDelay       = time.Millisecond
 )
@@ -183,11 +181,6 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, podSandboxNameHashIndex,
-		podSandboxNameHashIndexer); err != nil {
-		return fmt.Errorf("index pods by sandbox label: %w", err)
-	}
-
 	labelSelectorPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{
 			{
@@ -562,23 +555,8 @@ func (r *SandboxReconciler) clearServiceStatus(sandbox *sandboxv1beta1.Sandbox) 
 }
 
 func (r *SandboxReconciler) reconcilePod(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, nameHash string) (*corev1.Pod, error) {
-	logger := log.FromContext(ctx)
 	ctx, end := r.Tracer.StartSpan(ctx, nil, "reconcilePod", nil)
 	defer end()
-
-	// Only the count is read, so the cache may hand back its own objects.
-	podList := &corev1.PodList{}
-	if err := r.List(ctx, podList,
-		client.InNamespace(sandbox.Namespace),
-		client.MatchingFields{podSandboxNameHashIndex: nameHash},
-		client.UnsafeDisableDeepCopy,
-	); err != nil {
-		logger.Error(err, "Failed to list pods")
-		return nil, fmt.Errorf("pod list failed: %w", err)
-	}
-	if len(podList.Items) > 1 {
-		logger.Info("Multiple pods found for sandbox, this should not happen", "Sandbox", sandbox.Name, "PodCount", len(podList.Items))
-	}
 
 	pod, err := r.lookupTrackedPod(ctx, sandbox)
 	if err != nil {
@@ -1072,16 +1050,6 @@ func setSandboxExpiredCondition(sandbox *sandboxv1beta1.Sandbox) {
 func sandboxMarkedExpired(sandbox *sandboxv1beta1.Sandbox) bool {
 	cond := meta.FindStatusCondition(sandbox.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 	return cond != nil && (cond.Reason == sandboxv1beta1.SandboxReasonExpired)
-}
-
-// podSandboxNameHashIndexer extracts the sandboxLabel value for the
-// podSandboxNameHashIndex cache field index. Shared with tests so fake
-// clients register the same index the manager does.
-func podSandboxNameHashIndexer(obj client.Object) []string {
-	if v, ok := obj.GetLabels()[sandboxLabel]; ok {
-		return []string{v}
-	}
-	return nil
 }
 
 // podReadiness describes the pod half of the Sandbox Ready condition. A pod is
