@@ -231,19 +231,10 @@ func writeCertFiles(certDir string, serverPEM, serverKeyPEM []byte) error {
 	if err := os.MkdirAll(certDir, 0o750); err != nil {
 		return err
 	}
-
-	certPath := filepath.Join(certDir, tlsCertKey)
-	keyPath := filepath.Join(certDir, tlsPrivateKey)
-
-	if err := os.WriteFile(certPath, serverPEM, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(certDir, tlsCertKey), serverPEM, 0o600); err != nil {
 		return err
 	}
-
-	if err := os.WriteFile(keyPath, serverKeyPEM, 0o600); err != nil {
-		return err
-	}
-
-	return nil
+	return os.WriteFile(filepath.Join(certDir, tlsPrivateKey), serverKeyPEM, 0o600)
 }
 
 // patchCRDs patches the CRDs in the cluster with the generated CA certificate and service details using a merge patch.
