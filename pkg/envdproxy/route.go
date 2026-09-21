@@ -20,7 +20,7 @@ const (
 // internalPaths are envd's own control surface (x-internal in its spec). They
 // reconfigure or freeze the guest and are never part of the SDK's data plane,
 // so the edge refuses them rather than relaying a client into them.
-var internalPaths = []string{"/init", "/freeze", "/unfreeze", "/fsfreeze", "/collapse"}
+var internalPaths = []string{"/init", "/freeze", "/unfreeze", "/fsfreeze", "/fsthaw", "/collapse"}
 
 // route is one request's resolved destination.
 type route struct {

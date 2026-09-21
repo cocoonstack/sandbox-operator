@@ -97,7 +97,7 @@ func TestProxyRefusesEnvdInternalPaths(t *testing.T) {
 	node := newFakeNode(t, guestEcho)
 	h := newTestProxy(t, node.resolver())
 
-	for _, path := range []string{"/init", "/freeze", "/unfreeze", "/fsfreeze", "/collapse", "/init/", "/INIT"} {
+	for _, path := range []string{"/init", "/freeze", "/unfreeze", "/fsfreeze", "/fsthaw", "/collapse", "/init/", "/INIT"} {
 		t.Run(path, func(t *testing.T) {
 			resp := request(t, h, "49983-sb-abc."+testDomain, path, "tok")
 			defer resp.Body.Close()
@@ -183,13 +183,11 @@ func TestProxyReportsAnUnreachableNode(t *testing.T) {
 	}
 }
 
-func TestProxyCarriesHTTP2ToTheGuest(t *testing.T) {
-	node := newFakeNode(t, func(c net.Conn) {
-		srv := &http2.Server{}
-		srv.ServeConn(c, &http2.ServeConnOpts{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "proto=%d authority=%s", r.ProtoMajor, r.Host)
-		})})
-	})
+// TestProxyDowngradesToTheGuestsProtocol pins the default that keeps envd
+// reachable: the client may speak HTTP/2 to the edge, but the guest side stays
+// HTTP/1.1 unless the deployment says that daemon serves h2c.
+func TestProxyDowngradesToTheGuestsProtocol(t *testing.T) {
+	node := newFakeNode(t, guestEcho)
 	h := newTestProxy(t, node.resolver())
 
 	ts := httptest.NewUnstartedServer(h)
@@ -197,14 +195,38 @@ func TestProxyCarriesHTTP2ToTheGuest(t *testing.T) {
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
 
-	client := ts.Client()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/filesystem.Filesystem/Stat", strings.NewReader("{}"))
+	resp, err := ts.Client().Do(sandboxRequest(t, ts.URL+"/filesystem.Filesystem/Stat", "49983-sb-abc."+testDomain))
 	if err != nil {
-		t.Fatalf("request: %v", err)
+		t.Fatalf("do: %v", err)
 	}
-	req.Host = "49983-sb-abc." + testDomain
-	req.Header.Set(accessTokenHeader, "tok")
-	resp, err := client.Do(req)
+	defer resp.Body.Close()
+	if resp.ProtoMajor != 2 {
+		t.Errorf("edge answered over HTTP/%d, want HTTP/2 to the client", resp.ProtoMajor)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "HTTP/1.1") {
+		t.Errorf("guest saw %q, want an HTTP/1.1 request", body)
+	}
+	if !strings.Contains(string(body), "Host: 49983-sb-abc."+testDomain) {
+		t.Errorf("guest saw %q, want the per-sandbox authority", body)
+	}
+}
+
+func TestProxyCarriesHTTP2ToTheGuestWhenAsked(t *testing.T) {
+	node := newFakeNode(t, func(c net.Conn) {
+		srv := &http2.Server{}
+		srv.ServeConn(c, &http2.ServeConnOpts{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "proto=%d authority=%s", r.ProtoMajor, r.Host)
+		})})
+	})
+	h := newTestProxy(t, node.resolver(), func(o *Options) { o.GuestHTTP2 = true })
+
+	ts := httptest.NewUnstartedServer(h)
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+
+	resp, err := ts.Client().Do(sandboxRequest(t, ts.URL+"/filesystem.Filesystem/Stat", "49983-sb-abc."+testDomain))
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
@@ -218,6 +240,8 @@ func TestProxyCarriesHTTP2ToTheGuest(t *testing.T) {
 	}
 }
 
+// TestProxyServesCleartextHTTP2 covers the edge behind a TLS-terminating
+// front: the client's h2 must survive it, so the deck is h2c on both sides.
 func TestProxyServesCleartextHTTP2(t *testing.T) {
 	node := newFakeNode(t, func(c net.Conn) {
 		srv := &http.Server{Protocols: Protocols(), Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +253,7 @@ func TestProxyServesCleartextHTTP2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	edge := &http.Server{Protocols: Protocols(), Handler: newTestProxy(t, node.resolver())}
+	edge := &http.Server{Protocols: Protocols(), Handler: newTestProxy(t, node.resolver(), func(o *Options) { o.GuestHTTP2 = true })}
 	go func() { _ = edge.Serve(ln) }()
 	t.Cleanup(func() { _ = edge.Close() })
 
@@ -265,13 +289,28 @@ func TestNewServerRequiresADomainAndAResolver(t *testing.T) {
 	}
 }
 
-func newTestProxy(t *testing.T, r Resolver) http.Handler {
+func newTestProxy(t *testing.T, r Resolver, opts ...func(*Options)) http.Handler {
 	t.Helper()
-	s, err := NewServer(r, Options{Domain: testDomain, Log: logr.Discard()})
+	o := Options{Domain: testDomain, Log: logr.Discard()}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	s, err := NewServer(r, o)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
 	return s.Handler()
+}
+
+func sandboxRequest(t *testing.T, url, host string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Host = host
+	req.Header.Set(accessTokenHeader, "tok")
+	return req
 }
 
 func request(t *testing.T, h http.Handler, host, path, token string) *http.Response {

@@ -51,6 +51,7 @@ envd-proxy \
 | `--namespace` | `default` | Namespace sandbox lookups are scoped to; empty matches every namespace. |
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Key for the above; the two must be set together. |
+| `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. `envd` 0.8.0 does not serve it. |
 
 The deployment needs wildcard DNS for `*.{domain}` pointing at the proxy, and a
 certificate covering it. `GET /healthz` is unauthenticated, for probes.
@@ -93,18 +94,24 @@ guest: `X-Access-Token` authorizes the proxy→node hop only, and a guest that
 learned it could drive its own sandbox's control plane. `X-API-KEY` never
 belongs to `envd` either.
 
-`envd`'s own internal endpoints — `/init`, `/freeze`, `/unfreeze`, `/fsfreeze`,
-`/collapse` — are refused at the edge with `404`. They reconfigure or freeze the
+`envd`'s own internal endpoints — the ones its spec marks `x-internal`:
+`/init`, `/freeze`, `/unfreeze`, `/fsfreeze`, `/fsthaw`, `/collapse` — are refused
+at the edge with `404`. They reconfigure or freeze the
 guest and are not part of the SDK's data plane; pausing is the control plane's
 job, through `POST /sandboxes/{id}/pause`.
 
 ## Protocols
 
-The relay is a **raw byte** passthrough, so HTTP/1.1 and HTTP/2 both survive.
-This matters: ConnectRPC's streaming methods (`Process/Start`, `WatchDir`,
-`StreamInput`) require HTTP/2, and `envd` serves h2c. The proxy speaks to the
-guest over whatever the client used, and offers HTTP/2 both over TLS and in the
-clear so a stream survives an edge that terminated TLS in front of it.
+The relay is a **raw byte** passthrough, so HTTP/1.1 and HTTP/2 both survive it
+untouched. The two legs are chosen separately:
+
+- **Client → proxy** offers HTTP/1.1 and HTTP/2, the latter both over TLS and in
+  the clear, so ConnectRPC keeps working behind an edge that already terminated
+  TLS. That is `Protocols()`, which the binary hands to its `http.Server`.
+- **Proxy → guest** is HTTP/1.1. `envd` 0.8.0 installs no h2c handler — measured,
+  not assumed: `envdsmoke`'s "envd serves http/1.1 only" step fails the day that
+  changes. Forwarding HTTP/2 upstream would break every request, so `--guest-http2`
+  is opt-in, for a guest daemon on another port that does serve h2c.
 
 Connections are not pooled across requests: one would outlive the sandboxd relay
 carrying it, and an open relay holds the sandbox's idle clock, which would keep
@@ -118,7 +125,7 @@ fake node. The hardware half is `test/envdproxysmoke` (build tag
 listener inside a live microVM:
 
 ```bash
-# on the node: claim a sandbox and start the listener in it
+# on the node: claim a sandbox and start a listener in it
 portsmoke -addr 127.0.0.1:7990 -token <node-token> -template <ref> \
   -listener ./guestserver -hold 300s          # prints: SANDBOX <id> <token> <owner> <port>
 
@@ -126,9 +133,12 @@ go run -tags envdproxysmoke ./test/envdproxysmoke \
   -node <owner> -sandbox <id> -token <token> -port 49983
 ```
 
-`portsmoke` and `guestserver` live in the sandbox repo (`e2e/cmd/`); the stock
-image ships no HTTP listener, so the stand-in for `envd` is uploaded into the
-guest. `scripts/port-e2e.sh` there runs the node half on its own.
+`-guest envd` swaps the assertions for the real daemon (health, a ConnectRPC
+unary) when the sandbox came from the `e2b-rt` flavor; `envdsmoke -hold` in the
+sandbox repo prepares that one. Default `-guest echo` expects `guestserver`,
+which reports back what the guest received and is what proves the credential
+stripping. Both harnesses, and `scripts/port-e2e.sh` for the node half alone,
+live in the sandbox repo under `e2e/cmd/`.
 
 ## Failures
 

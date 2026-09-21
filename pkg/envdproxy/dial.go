@@ -104,9 +104,9 @@ func (e nodeStatusError) Error() string {
 	return fmt.Sprintf("node refused the guest-port relay: %d", e.status)
 }
 
-// guestTransport speaks to the guest over whatever the client used. envd serves
-// ConnectRPC, whose streaming methods need HTTP/2, while its file endpoints are
-// plain HTTP/1 — so the protocol is matched rather than chosen.
+// guestTransport carries a request to the guest daemon over the protocol that
+// daemon serves, which is not the one the client used: the edge may answer
+// HTTP/2 while the guest speaks only HTTP/1.1.
 type guestTransport struct {
 	h1 *http.Transport
 	h2 *http.Transport

@@ -55,6 +55,8 @@ type options struct {
 	Namespace string
 	CertFile  string
 	KeyFile   string
+	// GuestHTTP2 forwards to the guest over cleartext HTTP/2.
+	GuestHTTP2 bool
 }
 
 func (o *options) addFlags(fs *pflag.FlagSet) {
@@ -66,6 +68,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.CertFile, "tls-cert-file", o.CertFile,
 		"Wildcard certificate for *.{domain}. Omit to serve cleartext h2c behind an edge that terminates TLS.")
 	fs.StringVar(&o.KeyFile, "tls-private-key-file", o.KeyFile, "Private key for --tls-cert-file.")
+	fs.BoolVar(&o.GuestHTTP2, "guest-http2", o.GuestHTTP2,
+		"Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2.")
 }
 
 func main() {
@@ -100,7 +104,11 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return err
 	}
-	srv, err := envdproxy.NewServer(resolver, envdproxy.Options{Domain: o.Domain, Log: ctrl.Log.WithName("envd-proxy")})
+	srv, err := envdproxy.NewServer(resolver, envdproxy.Options{
+		Domain:     o.Domain,
+		GuestHTTP2: o.GuestHTTP2,
+		Log:        ctrl.Log.WithName("envd-proxy"),
+	})
 	if err != nil {
 		return err
 	}

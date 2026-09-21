@@ -36,20 +36,22 @@ func main() {
 	sandboxID := flag.String("sandbox", "", "node-local claim id")
 	token := flag.String("token", "", "per-sandbox access token")
 	port := flag.Uint("port", 49983, "guest port the listener is on")
+	guestHTTP2 := flag.Bool("guest-http2", false, "forward to the guest over cleartext HTTP/2")
+	mode := flag.String("guest", "echo", "what listens in the guest: echo (guestserver) or envd")
 	flag.Parse()
 
 	if *node == "" || *sandboxID == "" || *token == "" {
 		fmt.Fprintln(os.Stderr, "envdproxysmoke: -node, -sandbox and -token are required")
 		os.Exit(1)
 	}
-	if err := run(*node, *sandboxID, *token, uint16(*port)); err != nil {
+	if err := run(*node, *sandboxID, *token, uint16(*port), *guestHTTP2, *mode); err != nil {
 		fmt.Fprintln(os.Stderr, "envdproxysmoke:", err)
 		os.Exit(1)
 	}
 	fmt.Println("ENVDPROXYSMOKE PASS")
 }
 
-func run(node, sandboxID, token string, port uint16) error {
+func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -57,7 +59,7 @@ func run(node, sandboxID, token string, port uint16) error {
 	// hands it to the SDK; the proxy must resolve it back to the claim id.
 	publicID := e2bcompat.PublicID(sandboxID)
 	srv, err := envdproxy.NewServer(staticResolver{claimID: sandboxID, address: node, publicID: publicID},
-		envdproxy.Options{Domain: domain, Log: logr.Discard()})
+		envdproxy.Options{Domain: domain, GuestHTTP2: guestHTTP2, Log: logr.Discard()})
 	if err != nil {
 		return err
 	}
@@ -72,19 +74,40 @@ func run(node, sandboxID, token string, port uint16) error {
 	c := &client{base: "http://" + ln.Addr().String(), host: fmt.Sprintf("%d-%s.%s", port, publicID, domain), token: token}
 	fmt.Printf("proxying %s -> %s/%s:%d\n", c.host, node, sandboxID, port)
 
-	for _, step := range []struct {
+	steps := []struct {
 		name string
 		run  func(context.Context, *client) error
 	}{
-		{"http/1.1 reaches the guest", stepHTTP1},
-		{"h2c reaches the guest", stepH2C},
-		{"host credentials are stripped", stepStripped},
-		{"header routing", stepHeaderRouting},
 		{"missing token is 401", stepNoToken},
 		{"wrong token is 401", stepWrongToken},
 		{"envd internal path is 404", stepInternalPath},
 		{"unknown sandbox is 502", stepUnknownSandbox},
-	} {
+	}
+	switch mode {
+	case "envd":
+		steps = append([]struct {
+			name string
+			run  func(context.Context, *client) error
+		}{
+			{"http/1.1 reaches envd", stepEnvdHealth},
+			{"http/2 client reaches envd", stepEnvdHealthH2},
+			{"connect unary through the proxy", stepEnvdConnect},
+			{"header routing", stepEnvdHeaderRouting},
+		}, steps...)
+	case "echo":
+		steps = append([]struct {
+			name string
+			run  func(context.Context, *client) error
+		}{
+			{"http/1.1 reaches the guest", stepHTTP1},
+			{"http/2 client reaches the guest", stepH2Client},
+			{"host credentials are stripped", stepStripped},
+			{"header routing", stepHeaderRouting},
+		}, steps...)
+	default:
+		return fmt.Errorf("unknown -guest %q", mode)
+	}
+	for _, step := range steps {
 		t0 := time.Now()
 		if err := step.run(ctx, c); err != nil {
 			return fmt.Errorf("%s: %w", step.name, err)
@@ -102,14 +125,11 @@ func stepHTTP1(ctx context.Context, c *client) error {
 	return wantReport(body, "proto=1", "path=/echo?probe=1")
 }
 
-// stepH2C proves ConnectRPC's transport survives the relay: the SDK's
-// streaming methods are HTTP/2 and nothing on this path may reframe them.
-func stepH2C(ctx context.Context, c *client) error {
-	body, err := c.get(ctx, true, "/process.Process/Start", c.host, c.token, nil)
-	if err != nil {
-		return err
-	}
-	return wantReport(body, "proto=2")
+// stepH2Client proves an HTTP/2 client is served end to end: ConnectRPC uses
+// it, and the guest leg's own protocol must not leak back into that.
+func stepH2Client(ctx context.Context, c *client) error {
+	_, err := c.get(ctx, true, "/process.Process/Start", c.host, c.token, nil)
+	return err
 }
 
 // stepStripped proves a host-side credential never crosses into the guest: a
@@ -143,6 +163,58 @@ func stepHeaderRouting(ctx context.Context, c *client) error {
 		return err
 	}
 	return wantReport(body, "proto=1", "path=/echo")
+}
+
+// stepEnvdHealth is the first thing an e2b SDK does after create.
+func stepEnvdHealth(ctx context.Context, c *client) error {
+	return c.wantStatus(ctx, "/health", c.host, c.token, http.StatusNoContent)
+}
+
+func stepEnvdHealthH2(ctx context.Context, c *client) error {
+	resp, err := c.send(ctx, true, http.MethodGet, "/health", c.host, c.token, nil, "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.ProtoMajor != 2 {
+		return fmt.Errorf("edge answered over HTTP/%d, want HTTP/2 to the client", resp.ProtoMajor)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("status %s, want 204", resp.Status)
+	}
+	return nil
+}
+
+// stepEnvdConnect drives the RPC surface every SDK file and process call rides.
+func stepEnvdConnect(ctx context.Context, c *client) error {
+	extra := http.Header{
+		"Content-Type":             []string{"application/json"},
+		"Connect-Protocol-Version": []string{"1"},
+		"X-User":                   []string{"root"},
+	}
+	body, err := c.post(ctx, "/filesystem.Filesystem/Stat", c.host, c.token, extra, `{"path":"/etc/envd-version"}`)
+	if err != nil {
+		return err
+	}
+	return wantReport(body, "entry")
+}
+
+func stepEnvdHeaderRouting(ctx context.Context, c *client) error {
+	label, _, _ := strings.Cut(c.host, ".")
+	port, sandboxID, _ := strings.Cut(label, "-")
+	extra := http.Header{
+		"E2b-Sandbox-Id":   []string{sandboxID},
+		"E2b-Sandbox-Port": []string{port},
+	}
+	resp, err := c.send(ctx, false, http.MethodGet, "/health", "sandbox."+domain, c.token, extra, "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("status %s, want 204", resp.Status)
+	}
+	return nil
 }
 
 func stepNoToken(ctx context.Context, c *client) error {
@@ -184,7 +256,7 @@ type client struct {
 }
 
 func (c *client) get(ctx context.Context, h2 bool, path, host, token string, extra http.Header) (string, error) {
-	resp, err := c.do(ctx, h2, path, host, token, extra)
+	resp, err := c.send(ctx, h2, http.MethodPost, path, host, token, extra, "{}")
 	if err != nil {
 		return "", err
 	}
@@ -199,8 +271,24 @@ func (c *client) get(ctx context.Context, h2 bool, path, host, token string, ext
 	return string(body), nil
 }
 
+func (c *client) post(ctx context.Context, path, host, token string, extra http.Header, body string) (string, error) {
+	resp, err := c.send(ctx, false, http.MethodPost, path, host, token, extra, body)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %s: %s", resp.Status, out)
+	}
+	return string(out), nil
+}
+
 func (c *client) wantStatus(ctx context.Context, path, host, token string, want int) error {
-	resp, err := c.do(ctx, false, path, host, token, nil)
+	resp, err := c.send(ctx, false, http.MethodGet, path, host, token, nil, "")
 	if err != nil {
 		return err
 	}
@@ -212,14 +300,18 @@ func (c *client) wantStatus(ctx context.Context, path, host, token string, want 
 	return nil
 }
 
-func (c *client) do(ctx context.Context, h2 bool, path, host, token string, extra http.Header) (*http.Response, error) {
+func (c *client) send(ctx context.Context, h2 bool, method, path, host, token string, extra http.Header, body string) (*http.Response, error) {
 	tr := &http.Transport{}
 	if h2 {
 		var protocols http.Protocols
 		protocols.SetUnencryptedHTTP2(true)
 		tr.Protocols = &protocols
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, strings.NewReader("{}"))
+	var payload io.Reader
+	if body != "" {
+		payload = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, payload)
 	if err != nil {
 		return nil, err
 	}

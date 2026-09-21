@@ -42,6 +42,11 @@ type Options struct {
 	// "{port}-{sandboxID}.{domain}". It must match the apiserver's
 	// --e2b-domain or the two disagree about what a sandbox is called.
 	Domain string
+	// GuestHTTP2 forwards to the guest over cleartext HTTP/2. It is off because
+	// envd 0.8.0 installs no h2c handler and refuses the prior-knowledge
+	// upgrade, which would fail every request; turn it on for a guest daemon
+	// that serves h2c, such as a user's own server on another port.
+	GuestHTTP2 bool
 	// DialTimeout overrides DefaultDialTimeout.
 	DialTimeout time.Duration
 	// Log receives request-level failures.
@@ -109,11 +114,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "sandbox unavailable")
 		return
 	}
+	// The client's own protocol is not forwarded: HTTP/2 to the edge is normal
+	// (ConnectRPC needs it), while the guest side is whatever that daemon
+	// serves, and ReverseProxy normalizes the outbound request either way.
 	s.proxy(rt).ServeHTTP(w, r.WithContext(withTarget(r.Context(), target{
 		owner: owner,
 		port:  rt.port,
 		token: token,
-		h2:    r.ProtoMajor == 2,
+		h2:    s.opts.GuestHTTP2,
 	})))
 }
 
