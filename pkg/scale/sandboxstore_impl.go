@@ -885,7 +885,7 @@ func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 			Conditions: []metav1.Condition{{
 				Type:    string(sandboxv1beta1.SandboxConditionReady),
 				Status:  readyStatus(e.Phase),
-				Reason:  readyReason(e.Phase),
+				Reason:  cmp.Or(e.Phase, "Unknown"),
 				Message: fmt.Sprintf("phase %q reported by node %q inventory", e.Phase, node),
 			}},
 		},
@@ -947,10 +947,6 @@ func readyStatus(phase string) metav1.ConditionStatus {
 		return metav1.ConditionTrue
 	}
 	return metav1.ConditionFalse
-}
-
-func readyReason(phase string) string {
-	return cmp.Or(phase, "Unknown")
 }
 
 // resourceVersionFor derives a deterministic, content-sensitive ResourceVersion
