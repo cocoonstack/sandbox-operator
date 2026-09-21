@@ -110,7 +110,7 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
   per-node control plane owns.
 
 - [Snapshot placement](snapshot-placement.md) — where a checkpoint lives, how a
-  branch reaches it from another node (local hit, gossip + redirect, peer heal),
+  branch reaches it from another node (local hit, probe + redirect, peer heal),
   why shared filesystems are ruled out, and the durability this does *not* give
 
 ## Repository

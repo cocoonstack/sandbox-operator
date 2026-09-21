@@ -53,7 +53,7 @@ already uses, and the client retries there with `no_redirect: true`.
 
 The record does not move. The clone still happens on a node whose disk already
 holds the data, on its local fast path. Cross-node correctness is bought with
-one extra round trip and **zero** bytes transferred.
+one probe fan-out, one extra client round trip, and **zero** bytes transferred.
 
 This is the tier that makes "snapshot on node A, branch from anywhere" work.
 
@@ -68,7 +68,7 @@ over sandboxd's own peer transport, publishes it into its local store through
 the same atomic staging path a locally-created checkpoint takes, and then
 serves the branch locally.
 
-The cost is paid **once**: afterwards this node is itself an owner, gossips the
+The cost is paid **once**: afterwards this node is itself an owner, answers probes for the
 record, and serves later branches of it at L1 speed.
 
 It is **off by default**. Trading a transfer for availability is an operator's
@@ -92,14 +92,14 @@ outside the destination this node chose.
 
 ## Why not JuiceFS (or any shared filesystem)
 
-Two independent reasons, either of which is sufficient:
+One reason is decisive, and a second makes the alternative pointless:
 
 1. **It destroys the fast path.** JuiceFS does not support reflink. Putting
    checkpoints on it turns every clone from "hardlink + reflink, 28 ms, zero
    bytes moved" into a full read over the network. The system's headline number
    is the thing being traded away.
 
-2. **It does not solve the stated problem.** JuiceFS is a metadata engine plus
+2. **There is a simpler way to get the same reach.** JuiceFS is a metadata engine plus
    an object store. With no S3 available, running JuiceFS means first running
    MinIO/SeaweedFS — at which point object storage exists, and the
    already-implemented `s3` store backend is strictly simpler than adding a

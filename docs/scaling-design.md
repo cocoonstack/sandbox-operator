@@ -97,7 +97,7 @@ the claim path needs the scheduler, kubelet bind, or image pull.
 |---|---|---|
 | Two claims race one warm Sandbox | `resourceVersion` PATCH conflict; loser adopts the next candidate | No — standard optimistic concurrency |
 | Warm pool exhausted | Claim stays `Pending` until replenish (unchanged) | No |
-| Operator shard dies mid-claim | Lease expiry → another replica resumes; claim is idempotent | No |
+| The leader operator dies mid-claim | Lease expiry → another replica resumes; claim is idempotent | No |
 | Stale informer picks an already-claimed Sandbox | PATCH precondition fails → next candidate | No |
 
 **Acceptance:** claim p50 stays near-constant from a 100-pool to a 2000+-pool
