@@ -90,7 +90,7 @@ func NewSandboxPauseREST(store scale.SandboxStore) rest.Storage {
 		newOptions: func() runtime.Object { return &sandboxv1beta1.SandboxPauseOptions{} },
 		verb: func(ctx context.Context, st scale.SandboxStore, sb *sandboxv1beta1.Sandbox, _ runtime.Object) (runtime.Object, error) {
 			if err := st.Pause(ctx, sb.Status.NodeName, claimID(sb)); err != nil {
-				return nil, apierrors.NewInternalError(fmt.Errorf("pause sandbox %s/%s: %w", sb.Namespace, sb.Name, err))
+				return nil, verbError("pause", sb, err)
 			}
 			return &sandboxv1beta1.SandboxPauseOptions{}, nil
 		},
@@ -104,7 +104,7 @@ func NewSandboxResumeREST(store scale.SandboxStore) rest.Storage {
 		newOptions: func() runtime.Object { return &sandboxv1beta1.SandboxResumeOptions{} },
 		verb: func(ctx context.Context, st scale.SandboxStore, sb *sandboxv1beta1.Sandbox, _ runtime.Object) (runtime.Object, error) {
 			if err := st.Resume(ctx, sb.Status.NodeName, claimID(sb)); err != nil {
-				return nil, apierrors.NewInternalError(fmt.Errorf("resume sandbox %s/%s: %w", sb.Namespace, sb.Name, err))
+				return nil, verbError("resume", sb, err)
 			}
 			return &sandboxv1beta1.SandboxResumeOptions{}, nil
 		},
@@ -128,7 +128,7 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 			}
 			children, err := st.Fork(ctx, sb.Status.NodeName, claimID(sb), count, int(opts.TTLSeconds))
 			if err != nil {
-				return nil, apierrors.NewInternalError(fmt.Errorf("fork sandbox %s/%s: %w", sb.Namespace, sb.Name, err))
+				return nil, verbError("fork", sb, err)
 			}
 			out := &sandboxv1beta1.SandboxForkResult{Children: make([]sandboxv1beta1.ForkedSandbox, 0, len(children))}
 			for _, c := range children {
@@ -155,7 +155,7 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 			}
 			snap, err := st.Snapshot(ctx, sb.Status.NodeName, claimID(sb), opts.Name)
 			if err != nil {
-				return nil, apierrors.NewInternalError(fmt.Errorf("snapshot sandbox %s/%s: %w", sb.Namespace, sb.Name, err))
+				return nil, verbError("snapshot", sb, err)
 			}
 			return &sandboxv1beta1.SandboxSnapshotResult{
 				SnapshotID:        snap.ID,
@@ -169,3 +169,10 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 
 // claimID reports the node-local claim id the store's verbs address.
 func claimID(sb *sandboxv1beta1.Sandbox) string { return sb.Annotations[ClaimIDAnnotation] }
+
+func verbError(verb string, sb *sandboxv1beta1.Sandbox, err error) error {
+	if apierrors.IsNotFound(err) {
+		return err
+	}
+	return apierrors.NewInternalError(fmt.Errorf("%s sandbox %s/%s: %w", verb, sb.Namespace, sb.Name, err))
+}

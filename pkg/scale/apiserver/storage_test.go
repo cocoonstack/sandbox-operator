@@ -10,8 +10,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/rest"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -120,9 +122,34 @@ func TestCreate_ReportsGrantedDeadline(t *testing.T) {
 	assert.Nil(t, out.Spec.ShutdownTime, "the submitted spec is echoed, not rewritten")
 }
 
+func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
+	sb := &sandboxv1beta1.Sandbox{
+		Namespace:   "ns",
+		Name:        "s1",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}
+	gone := apierrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc123")
+	store := &fakeStore{getSandbox: sb, verbErr: gone}
+	for name, rest := range map[string]struct {
+		storage rest.Storage
+		body    runtime.Object
+	}{
+		"pause":    {NewSandboxPauseREST(store), &sandboxv1beta1.SandboxPauseOptions{}},
+		"resume":   {NewSandboxResumeREST(store), &sandboxv1beta1.SandboxResumeOptions{}},
+		"fork":     {NewSandboxForkREST(store), &sandboxv1beta1.SandboxForkOptions{}},
+		"snapshot": {NewSandboxSnapshotREST(store), &sandboxv1beta1.SandboxSnapshotOptions{}},
+	} {
+		_, err := rest.storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", rest.body, nil, &metav1.CreateOptions{})
+		require.Error(t, err, name)
+		assert.True(t, apierrors.IsNotFound(err), "%s: the node's 404 must stay a NotFound, got %v", name, err)
+	}
+}
+
 type fakeStore struct {
 	getSandbox *sandboxv1beta1.Sandbox
 	getErr     error
+	verbErr    error
 
 	claimCalls  int
 	claimTTL    int
@@ -157,16 +184,16 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
-func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
+func (f *fakeStore) Pause(context.Context, string, string) error { return f.verbErr }
 
-func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+func (f *fakeStore) Resume(context.Context, string, string) error { return f.verbErr }
 
 func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
-	return nil, nil
+	return nil, f.verbErr
 }
 
 func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
-	return scale.Snapshot{}, nil
+	return scale.Snapshot{}, f.verbErr
 }
 
 func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }

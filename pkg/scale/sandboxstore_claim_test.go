@@ -218,6 +218,7 @@ type recordingFactory struct {
 	claimResult sandboxd.ClaimResult
 	claimErr    error
 	releaseErr  error
+	verbErr     error
 }
 
 func (f *recordingFactory) factory() SandboxdClientFactory {
@@ -246,16 +247,16 @@ func (c *recordingClient) Release(_ context.Context, id, token string) error {
 	return c.f.releaseErr
 }
 
-func (c *recordingClient) Hibernate(context.Context, string) error { return nil }
+func (c *recordingClient) Hibernate(context.Context, string) error { return c.f.verbErr }
 
-func (c *recordingClient) Wake(context.Context, string) error { return nil }
+func (c *recordingClient) Wake(context.Context, string) error { return c.f.verbErr }
 
 func (c *recordingClient) Fork(context.Context, string, sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
-	return sandboxd.ForkResult{}, nil
+	return sandboxd.ForkResult{}, c.f.verbErr
 }
 
 func (c *recordingClient) Checkpoint(context.Context, string, sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error) {
-	return sandboxd.Checkpoint{}, nil
+	return sandboxd.Checkpoint{}, c.f.verbErr
 }
 
 func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, error) {
@@ -265,5 +266,5 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
 
 func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
-	return sandboxd.SandboxStats{}, nil
+	return sandboxd.SandboxStats{}, c.f.verbErr
 }

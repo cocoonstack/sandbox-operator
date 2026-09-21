@@ -2,8 +2,13 @@ package scale
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
@@ -13,7 +18,7 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 		return err
 	}
 	if err := cl.Hibernate(ctx, id); err != nil {
-		return fmt.Errorf("scale: sandboxd pause of %q on node %q: %w", id, node, err)
+		return nodeVerbError(err, "pause", id, node)
 	}
 	return nil
 }
@@ -24,7 +29,7 @@ func (s *scatterGatherStore) Resume(ctx context.Context, node, id string) error 
 		return err
 	}
 	if err := cl.Wake(ctx, id); err != nil {
-		return fmt.Errorf("scale: sandboxd resume of %q on node %q: %w", id, node, err)
+		return nodeVerbError(err, "resume", id, node)
 	}
 	return nil
 }
@@ -39,7 +44,7 @@ func (s *scatterGatherStore) Fork(ctx context.Context, node, id string, count, t
 	}
 	res, err := cl.Fork(ctx, id, sandboxd.ForkSpec{Count: count, TTLSeconds: ttlSeconds})
 	if err != nil {
-		return nil, fmt.Errorf("scale: sandboxd fork of %q on node %q: %w", id, node, err)
+		return nil, nodeVerbError(err, "fork", id, node)
 	}
 	out := make([]Assignment, 0, len(res.Children))
 	for _, c := range res.Children {
@@ -61,7 +66,7 @@ func (s *scatterGatherStore) Snapshot(ctx context.Context, node, id, name string
 	}
 	ck, err := cl.Checkpoint(ctx, id, sandboxd.CheckpointSpec{Name: name})
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("scale: sandboxd snapshot of %q on node %q: %w", id, node, err)
+		return Snapshot{}, nodeVerbError(err, "snapshot", id, node)
 	}
 	return snapshotFrom(ck, node), nil
 }
@@ -100,7 +105,7 @@ func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (Sandbo
 	}
 	st, err := cl.Stats(ctx, id)
 	if err != nil {
-		return SandboxStats{}, fmt.Errorf("scale: sandboxd stats of %q on node %q: %w", id, node, err)
+		return SandboxStats{}, nodeVerbError(err, "stats", id, node)
 	}
 	return SandboxStats{
 		CPUCount:        st.CPUCount,
@@ -130,6 +135,13 @@ func (s *scatterGatherStore) nodeClient(ctx context.Context, node, verb, id stri
 		return nil, fmt.Errorf("scale: node %q advertises no sandboxd address for %s of %q", node, verb, id)
 	}
 	return s.sandboxdFactory(addr, s.sandboxdToken), nil
+}
+
+func nodeVerbError(err error, verb, id, node string) error {
+	if he, ok := errors.AsType[*sandboxd.HTTPError](err); ok && he.StatusCode == http.StatusNotFound {
+		return k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), id)
+	}
+	return fmt.Errorf("scale: sandboxd %s of %q on node %q: %w", verb, id, node, err)
 }
 
 // snapshotFrom converts a node's checkpoint record to the store's shape.
