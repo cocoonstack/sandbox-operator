@@ -1802,12 +1802,7 @@ func sandboxConditionChanged(oldSb, newSb *v1beta1.Sandbox, conditionType string
 
 // isSandboxReady checks if a sandbox has Ready=True condition.
 func isSandboxReady(sb *v1beta1.Sandbox) bool {
-	for _, cond := range sb.Status.Conditions {
-		if cond.Type == string(v1beta1.SandboxConditionReady) && cond.Status == metav1.ConditionTrue {
-			return true
-		}
-	}
-	return false
+	return meta.IsStatusConditionTrue(sb.Status.Conditions, string(v1beta1.SandboxConditionReady))
 }
 
 func isRestrictedDomain(domain string) bool {
