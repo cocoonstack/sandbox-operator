@@ -93,19 +93,9 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if template.Spec.NetworkPolicy == nil {
 		desiredSpec = buildDefaultNetworkPolicySpec(template.Name, r.RouterNamespace)
 	} else {
-		desiredSpec = networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					sandboxTemplateRefHash: SandboxTemplateRefHash(template.Name),
-				},
-			},
-			PolicyTypes: []networkingv1.PolicyType{
-				networkingv1.PolicyTypeIngress,
-				networkingv1.PolicyTypeEgress,
-			},
-			Ingress: template.Spec.NetworkPolicy.Ingress,
-			Egress:  template.Spec.NetworkPolicy.Egress,
-		}
+		desiredSpec = baseNetworkPolicySpec(template.Name)
+		desiredSpec.Ingress = template.Spec.NetworkPolicy.Ingress
+		desiredSpec.Egress = template.Spec.NetworkPolicy.Egress
 	}
 
 	existingNP := &networkingv1.NetworkPolicy{}
@@ -224,6 +214,44 @@ func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) network
 		},
 	}
 
+	spec := baseNetworkPolicySpec(templateName)
+	spec.Ingress = []networkingv1.NetworkPolicyIngressRule{
+		{
+			From: peers,
+		},
+	}
+	spec.Egress = []networkingv1.NetworkPolicyEgressRule{
+		// Blocking the private ranges also blocks cluster DNS, so agents cannot
+		// probe service discovery and leak internal service names.
+		{
+			To: []networkingv1.NetworkPolicyPeer{
+				{
+					IPBlock: &networkingv1.IPBlock{
+						CIDR: "0.0.0.0/0",
+						Except: []string{
+							"10.0.0.0/8",
+							"172.16.0.0/12",
+							"192.168.0.0/16",
+							"169.254.0.0/16", // metadata server
+						},
+					},
+				},
+				{
+					IPBlock: &networkingv1.IPBlock{
+						CIDR: "::/0",
+						Except: []string{
+							"fc00::/7",
+							"fe80::/10",
+						},
+					},
+				},
+			},
+		},
+	}
+	return spec
+}
+
+func baseNetworkPolicySpec(templateName string) networkingv1.NetworkPolicySpec {
 	return networkingv1.NetworkPolicySpec{
 		PodSelector: metav1.LabelSelector{
 			MatchLabels: map[string]string{
@@ -233,39 +261,6 @@ func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) network
 		PolicyTypes: []networkingv1.PolicyType{
 			networkingv1.PolicyTypeIngress,
 			networkingv1.PolicyTypeEgress,
-		},
-		Ingress: []networkingv1.NetworkPolicyIngressRule{
-			{
-				From: peers,
-			},
-		},
-		Egress: []networkingv1.NetworkPolicyEgressRule{
-			// Blocking the private ranges also blocks cluster DNS, so agents cannot
-			// probe service discovery and leak internal service names.
-			{
-				To: []networkingv1.NetworkPolicyPeer{
-					{
-						IPBlock: &networkingv1.IPBlock{
-							CIDR: "0.0.0.0/0",
-							Except: []string{
-								"10.0.0.0/8",
-								"172.16.0.0/12",
-								"192.168.0.0/16",
-								"169.254.0.0/16", // metadata server
-							},
-						},
-					},
-					{
-						IPBlock: &networkingv1.IPBlock{
-							CIDR: "::/0",
-							Except: []string{
-								"fc00::/7",
-								"fe80::/10",
-							},
-						},
-					},
-				},
-			},
 		},
 	}
 }
