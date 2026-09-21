@@ -142,16 +142,9 @@ func restoreV1alpha1Spec(s *SandboxClaim, src *v1beta1.SandboxClaim) error {
 }
 
 func isWarmPoolRefMatching(actualName, expectedName, sandboxName string) bool {
-	if actualName == expectedName {
-		return true
-	}
-	if actualName == v1beta1.ShadowPoolPrefix+expectedName {
-		return true
-	}
-	if sandboxName != "" && (actualName == sandboxName || actualName == stripRandomSuffix(sandboxName)) {
-		return true
-	}
-	return false
+	return actualName == expectedName ||
+		actualName == v1beta1.ShadowPoolPrefix+expectedName ||
+		(sandboxName != "" && (actualName == sandboxName || actualName == stripRandomSuffix(sandboxName)))
 }
 
 func stripRandomSuffix(name string) string {
