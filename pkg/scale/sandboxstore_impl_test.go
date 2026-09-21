@@ -90,6 +90,22 @@ func TestScatterGatherList_HonorsFieldSelector(t *testing.T) {
 	assert.Equal(t, "c", byNode.Items[0].Name)
 }
 
+func TestScatterGatherList_RejectsAnUnsupportedFieldSelector(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(inv("n1", entry("ns/a", "Running")))
+	store := NewScatterGatherStore(src)
+
+	for _, sel := range []string{"spec.nonsense=x", "metadata.uid=abc"} {
+		_, err := store.List(t.Context(), ListOptions{FieldSelector: sel})
+		require.Error(t, err, sel)
+		assert.True(t, k8serrors.IsBadRequest(err), "%s: an unindexed field must be a 400, not an empty list: %v", sel, err)
+
+		_, err = store.Watch(t.Context(), ListOptions{FieldSelector: sel})
+		require.Error(t, err, sel)
+		assert.True(t, k8serrors.IsBadRequest(err), "%s: watch must reject it the same way: %v", sel, err)
+	}
+}
+
 func TestScatterGatherList_ToleratesPartitionedNode(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(inv("n1", entry("ns/s1", "Running")))

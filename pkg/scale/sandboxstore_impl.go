@@ -893,6 +893,12 @@ func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("scale: parse field selector %q: %w", opts.FieldSelector, err)
 	}
+	known := sandboxFields(&sandboxv1beta1.Sandbox{})
+	for _, req := range fieldSel.Requirements() {
+		if _, ok := known[req.Field]; !ok {
+			return nil, nil, k8serrors.NewBadRequest(fmt.Sprintf("field selector %q is not supported on sandboxes", req.Field))
+		}
+	}
 	return labelSel, fieldSel, nil
 }
 
