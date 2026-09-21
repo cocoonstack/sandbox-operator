@@ -351,9 +351,9 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 	if claim.Annotations == nil {
 		claim.Annotations = make(map[string]string)
 	}
-	// Only the keys staged here, so a replay says exactly what it means. Replaying
-	// the whole map happens to be safe — every other key is also in `before`, so
-	// the merge patch for it is empty — but it reads like it could undo a clear.
+	// Only the staged keys are replayed onto the object; the flush itself is a
+	// merge patch against `before`, so it also carries any other change this
+	// pass made in memory.
 	staged := map[string]string{}
 	if needObservability {
 		staged[asmetrics.ObservabilityAnnotation] = r.getOrRecordObservedTime(claim).Format(time.RFC3339Nano)
@@ -698,10 +698,11 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 	return nil, nil
 }
 
-// tryAdopt records the assignment on the claim and hands the Sandbox over. It
-// reports false when the candidate was lost to a competing claim or vanished,
-// which the caller answers by trying the next candidate. The claim Update is a
-// full-object CAS on purpose: it is what keeps one claim from adopting twice.
+// tryAdopt records the assignment on the claim and hands the Sandbox over. A
+// hand-over lost to a competing claim, or to a vanished candidate, reports
+// false and the caller tries the next candidate; a conflict on the claim
+// Update itself ends the pass. The claim Update is a full-object CAS on
+// purpose: it is what keeps one claim from adopting twice.
 func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, adopted *v1beta1.Sandbox, adoptedKey queue.SandboxKey, queueName string) (bool, error) {
 	logger := log.FromContext(ctx)
 	poolName := "none"
@@ -1656,8 +1657,8 @@ func isAdoptable(candidate *v1beta1.Sandbox) error {
 }
 
 func getWarmPoolName(obj metav1.Object) string {
-	if ctrl := metav1.GetControllerOf(obj); ctrl != nil && ctrl.Kind == warmPoolKind {
-		return ctrl.Name
+	if ref := metav1.GetControllerOf(obj); ref != nil && ref.Kind == warmPoolKind {
+		return ref.Name
 	}
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Kind == warmPoolKind {

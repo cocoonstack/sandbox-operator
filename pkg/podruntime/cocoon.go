@@ -159,7 +159,7 @@ func routeToVirtualNode(pod *corev1.Pod, mode, labelKey, labelValue string) erro
 	}
 	pod.Spec.NodeSelector[labelKey] = labelValue
 
-	if !toleratesVKCocoon(pod.Spec.Tolerations) {
+	if !toleratesVKProvider(pod.Spec.Tolerations) {
 		pod.Spec.Tolerations = append(pod.Spec.Tolerations, corev1.Toleration{
 			Key:      vkProviderTaintKey,
 			Operator: corev1.TolerationOpExists,
@@ -181,7 +181,7 @@ func requestedMode(pod *corev1.Pod, defaultMode string) (string, bool) {
 	return defaultMode, false
 }
 
-func toleratesVKCocoon(tolerations []corev1.Toleration) bool {
+func toleratesVKProvider(tolerations []corev1.Toleration) bool {
 	return slices.ContainsFunc(tolerations, func(t corev1.Toleration) bool {
 		return t.Key == vkProviderTaintKey && t.Operator == corev1.TolerationOpExists &&
 			(t.Effect == "" || t.Effect == corev1.TaintEffectNoSchedule)

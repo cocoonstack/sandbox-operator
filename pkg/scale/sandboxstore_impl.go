@@ -259,15 +259,11 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	return list, nil
 }
 
-// Get routes to the owning node's authoritative inventory. It resolves which
-// node holds namespace/name and returns that entry synthesized as a Sandbox.
-// The per-node sweep fans out like List and cancels on the first hit — a
-// sandbox lives on exactly one node, so first-found is the answer.
-//
-// In production this would RPC the owning node's live sandboxd for a
-// read-after-write answer; in this substrate the node's published NodeInventory
-// is the authoritative view available, so Get returns from it directly rather
-// than from an eventually-consistent cluster-wide summary.
+// Get resolves which node's published inventory holds namespace/name and
+// returns that entry synthesized as a Sandbox: the hinted node first, then a
+// fleet sweep that cancels on the first hit. Either way the answer lags a
+// claim by up to one publish interval; authoritative node routing is roadmap
+// work.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
 	found, err := s.findEntry(ctx, "get", nameKey(namespace, name), func(inv *NodeInventory, i int) bool {
 		ens, ename := splitNamespacedName(inv.Entries[i].Name)

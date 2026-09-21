@@ -61,7 +61,7 @@ func TestMutatePod(t *testing.T) {
 				if _, found := pod.Spec.NodeSelector[vkNodeLabelKey]; found {
 					t.Errorf("standard runtime leaked node selector %s", vkNodeLabelKey)
 				}
-				if toleratesVKCocoon(pod.Spec.Tolerations) {
+				if toleratesVKProvider(pod.Spec.Tolerations) {
 					t.Errorf("standard runtime leaked vk-cocoon toleration")
 				}
 				for _, key := range []string{cocoonModeAnnotation, cocoonManagedAnnotation, cocoonImageAnnotation, cocoonOSAnnotation, cocoonVMNameAnnotation} {

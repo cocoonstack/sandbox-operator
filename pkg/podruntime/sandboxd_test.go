@@ -38,7 +38,7 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	if _, ok := pod.Annotations[cocoonModeAnnotation]; ok {
 		t.Fatal("sandboxd pod must not carry cocoon vk-cocoon annotations")
 	}
-	if !toleratesVKCocoon(pod.Spec.Tolerations) {
+	if !toleratesVKProvider(pod.Spec.Tolerations) {
 		t.Fatal("sandboxd pod must tolerate the vk-provider taint")
 	}
 }

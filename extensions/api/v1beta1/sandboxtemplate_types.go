@@ -23,9 +23,8 @@ import (
 )
 
 const (
-	// SandboxIDLabel is the label key applied to the Pod to identify the owning Claim UID.
-	// The SandboxClaim controller injects this label into the Pod
-	// System-injected labels/annotations shouldn't be touched.
+	// SandboxIDLabel is the label the SandboxClaim controller sets on a Sandbox and
+	// its pod template to identify the owning Claim UID; it does not reach the Pod.
 	SandboxIDLabel = "agents.x-k8s.io/claim-uid"
 
 	// NetworkPolicyManagementManaged means the controller will ensure a shared NetworkPolicy exists.
