@@ -316,6 +316,9 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	if err != nil {
 		return Assignment{}, err
 	}
+	if len(candidates) == 0 {
+		return Assignment{}, fmt.Errorf("scale: claim %s/%s: no node advertises warm capacity for template %q net %q size %q: %w", namespace, name, pool.Template, pool.Net, pool.Size, ErrNoWarmCapacity)
+	}
 
 	// Inventory is 5-30s stale, so a node can advertise warm capacity it no
 	// longer has. Reporting the whole fleet exhausted because one sampled node
