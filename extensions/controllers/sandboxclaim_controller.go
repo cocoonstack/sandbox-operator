@@ -947,14 +947,7 @@ func (r *SandboxClaimReconciler) injectEnvs(logger logr.Logger, container *corev
 	}
 
 	for _, claimEnv := range envsToInject {
-		existingIdx := -1
-		for j, env := range container.Env {
-			if env.Name == claimEnv.Name {
-				existingIdx = j
-				break
-			}
-		}
-
+		existingIdx := slices.IndexFunc(container.Env, func(e corev1.EnvVar) bool { return e.Name == claimEnv.Name })
 		if existingIdx >= 0 {
 			if policy != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
 				err := fmt.Errorf("environment variable override is not allowed by the template policy for variable %q", claimEnv.Name)
