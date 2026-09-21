@@ -102,6 +102,9 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
 - [e2b-compatible API](e2b-compat.md) — serving the e2b REST surface from the
   aggregated apiserver so an unmodified e2b SDK claims from these warm pools:
   flags, endpoint mapping, and the limits worth knowing
+- [envd-proxy](envd-proxy.md) — the data-plane half of that surface: one public
+  entry point that carries `files`, `commands` and `pty` into the right
+  sandbox's guest port, over vsock and without exposing a node
 - [Lifecycle verbs](lifecycle.md) — pause, resume, fork and snapshot as
   subresources, plus a runnable walk-through over both API surfaces.
 

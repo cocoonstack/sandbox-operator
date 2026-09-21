@@ -94,7 +94,7 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	// client kept and leaves the field empty when it kept none.
 	writeJSON(w, status, Sandbox{
 		TemplateID:      templateOf(sb),
-		SandboxID:       publicID(claimIDOf(sb)),
+		SandboxID:       PublicID(claimIDOf(sb)),
 		ClientID:        sb.Status.NodeName,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: r.Header.Get(accessTokenHeader),
@@ -151,7 +151,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	for _, child := range children {
 		out = append(out, SandboxForkResult{Sandbox: &Sandbox{
 			TemplateID:      template,
-			SandboxID:       publicID(child.SandboxName),
+			SandboxID:       PublicID(child.SandboxName),
 			ClientID:        child.Node,
 			EnvdVersion:     s.opts.EnvdVersion,
 			EnvdAccessToken: child.Token,

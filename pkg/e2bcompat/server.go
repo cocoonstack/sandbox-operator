@@ -237,7 +237,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, Sandbox{
 		TemplateID:      req.TemplateID,
-		SandboxID:       publicID(assignment.SandboxName),
+		SandboxID:       PublicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: assignment.Token,
@@ -349,7 +349,7 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 		return nil, errSandboxNotFound
 	}
 	sb, err := s.resolver.GetByClaimID(r.Context(), s.opts.Namespace, id, func(claimID string) bool {
-		return matchesID(claimID, id)
+		return MatchesID(claimID, id)
 	})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -382,7 +382,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 	return SandboxDetail{
 		TemplateID:  templateOf(sb),
-		SandboxID:   publicID(sb.Annotations[scale.ClaimIDAnnotation]),
+		SandboxID:   PublicID(sb.Annotations[scale.ClaimIDAnnotation]),
 		ClientID:    sb.Status.NodeName,
 		StartedAt:   started.UTC().Format(time.RFC3339),
 		EndAt:       endAt.UTC().Format(time.RFC3339),

@@ -5,6 +5,9 @@ MAIN := ./cmd/sandbox-operator
 APISERVER_BINARY := bin/sandbox-apiserver
 APISERVER_MAIN := ./cmd/sandbox-apiserver
 APISERVER_IMG ?= ghcr.io/cocoonstack/sandbox-apiserver:dev
+ENVDPROXY_BINARY := bin/envd-proxy
+ENVDPROXY_MAIN := ./cmd/envd-proxy
+ENVDPROXY_IMG ?= ghcr.io/cocoonstack/envd-proxy:dev
 VERSION_PKG := github.com/cocoonstack/sandbox-operator/internal/version
 
 GIT_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
@@ -71,6 +74,15 @@ apiserver-build: ## Build the aggregated sandbox-apiserver binary.
 .PHONY: apiserver-image
 apiserver-image: ## Build the aggregated sandbox-apiserver image (override APISERVER_IMG).
 	docker build -f Dockerfile.apiserver -t $(APISERVER_IMG) .
+
+.PHONY: envdproxy-build
+envdproxy-build: ## Build the envd-proxy binary.
+	mkdir -p bin
+	go build -ldflags "-s -w" -o $(ENVDPROXY_BINARY) $(ENVDPROXY_MAIN)
+
+.PHONY: envdproxy-image
+envdproxy-image: ## Build the envd-proxy image (override ENVDPROXY_IMG).
+	docker build -f Dockerfile.envdproxy -t $(ENVDPROXY_IMG) .
 
 .PHONY: test
 test: vet ## Run unit tests.

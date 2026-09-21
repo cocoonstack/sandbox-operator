@@ -5,11 +5,11 @@ import (
 	"unicode/utf8"
 )
 
-// publicID renders a node-local claim id as a DNS-label-safe sandbox id, the
+// PublicID renders a node-local claim id as a DNS-label-safe sandbox id, the
 // form handed to e2b clients. A claim id is "sb_" + hex, and the SDK derives
 // the envd host as "{port}-{sandboxID}.{domain}", so the underscore would make
 // a created sandbox unreachable.
-func publicID(claimID string) string {
+func PublicID(claimID string) string {
 	if !needsRewrite(claimID) {
 		return claimID
 	}
@@ -21,11 +21,11 @@ func publicID(claimID string) string {
 	}, strings.ToLower(claimID))
 }
 
-// matchesID reports whether a live sandbox's claim id is the one a client asked
+// MatchesID reports whether a live sandbox's claim id is the one a client asked
 // for, accepting both the raw claim id and its published DNS-safe rendering.
 // The rendering is compared in place: the store sweep calls this per scanned
-// entry, and building publicID per candidate would allocate O(fleet) per lookup.
-func matchesID(claimID, requested string) bool {
+// entry, and building PublicID per candidate would allocate O(fleet) per lookup.
+func MatchesID(claimID, requested string) bool {
 	if claimID == "" || requested == "" {
 		return false
 	}
@@ -33,7 +33,7 @@ func matchesID(claimID, requested string) bool {
 		return true
 	}
 	if !isASCII(claimID) {
-		return publicID(claimID) == requested
+		return PublicID(claimID) == requested
 	}
 	if len(claimID) != len(requested) {
 		return false

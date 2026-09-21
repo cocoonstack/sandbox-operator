@@ -1,0 +1,38 @@
+# RBAC for envd-proxy, least privilege: get/list/watch on the O(nodes)
+# NodeInventory objects it resolves a sandbox's owning node from. It reads
+# nothing else and writes nothing — the per-sandbox credential travels with the
+# client request, so the proxy holds no cluster authority over sandboxes.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: envd-proxy-inventory-reader
+  labels:
+    app.kubernetes.io/name: envd-proxy
+    app.kubernetes.io/component: data-plane-proxy
+rules:
+- apiGroups:
+  - extensions.agents.x-k8s.io
+  resources:
+  - nodeinventories
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: envd-proxy-inventory-reader
+  labels:
+    app.kubernetes.io/name: envd-proxy
+    app.kubernetes.io/component: data-plane-proxy
+subjects:
+- kind: ServiceAccount
+  name: envd-proxy
+  namespace: sandbox-system
+roleRef:
+  kind: ClusterRole
+  name: envd-proxy-inventory-reader
+  apiGroup: rbac.authorization.k8s.io

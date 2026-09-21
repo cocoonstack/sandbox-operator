@@ -389,7 +389,7 @@ func TestLookupUsesClaimIDResolver(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, "/sandboxes/x", nil)
 
-	for _, id := range []string{"sb_0123abcd", publicID("sb_0123abcd")} {
+	for _, id := range []string{"sb_0123abcd", PublicID("sb_0123abcd")} {
 		sb, err := s.lookup(req, id)
 		if err != nil {
 			t.Fatalf("lookup(%q): %v", id, err)
