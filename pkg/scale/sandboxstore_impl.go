@@ -304,8 +304,8 @@ func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id str
 	return found, nil
 }
 
-// Claim picks the node with the most warm capacity for pool and hands over one of
-// its already-running microVMs via that node's sandboxd, returning the assignment.
+// Claim samples two nodes advertising warm capacity for pool, takes the warmer,
+// and hands over one of its running microVMs via that node's sandboxd.
 // No per-sandbox object is written to etcd. It fails closed if claim routing is
 // not configured, and returns ErrNoWarmCapacity when no warm node is available.
 func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error) {
