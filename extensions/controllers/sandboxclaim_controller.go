@@ -1662,12 +1662,7 @@ func getWarmPoolName(obj metav1.Object) string {
 }
 
 func shouldSuppressError(err error) bool {
-	for _, target := range suppressErrors {
-		if errors.Is(err, target) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(suppressErrors, func(target error) bool { return errors.Is(err, target) })
 }
 
 // soonerRequeue returns the earlier of a pending requeue and a proposed delay,
