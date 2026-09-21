@@ -20,14 +20,8 @@ import (
 
 func TestAShadowPoolClaimColdStartsFromItsTemplate(t *testing.T) {
 	scheme := newScheme(t)
-	template := &extensionsv1beta1.SandboxTemplate{
-		Name: "tpl", Namespace: "default",
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
-		}}},
-	}
 	claim := shadowPoolClaim("legacy", extensionsv1alpha1.ShadowPoolPrefix+"tpl")
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(template, claim).WithStatusSubresource(claim).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(shadowPoolTemplate(), claim).WithStatusSubresource(claim).Build()
 	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: queue.NewSimpleSandboxQueue(), Tracer: asmetrics.NewNoOp()}
 
 	if _, err := r.Reconcile(t.Context(), ctrl.Request{Namespace: "default", Name: "legacy"}); err != nil {
@@ -43,6 +37,28 @@ func TestAShadowPoolClaimColdStartsFromItsTemplate(t *testing.T) {
 	}
 	if got := sandbox.Spec.PodTemplate.Spec.Containers[0].Image; got != "img" {
 		t.Fatalf("sandbox image = %q, want the template's", got)
+	}
+}
+
+func TestAPoolNamedWithTheShadowPrefixIsStillAPool(t *testing.T) {
+	scheme := newScheme(t)
+	pool := &extensionsv1beta1.SandboxWarmPool{
+		Name: extensionsv1alpha1.ShadowPoolPrefix + "foo", Namespace: "default", UID: "pool-uid",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}},
+	}
+	claim := shadowPoolClaim("named", pool.Name)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(shadowPoolTemplate(), pool, claim).WithStatusSubresource(claim).Build()
+	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: queue.NewSimpleSandboxQueue(), Tracer: asmetrics.NewNoOp()}
+
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{Namespace: "default", Name: "named"}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	sandbox := &sandboxv1beta1.Sandbox{}
+	if err := c.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "named"}, sandbox); err != nil {
+		t.Fatalf("a claim naming a real pool must cold-start from that pool's template when the pool is empty: %v", err)
+	}
+	if got := sandbox.Spec.PodTemplate.Spec.Containers[0].Image; got != "img" {
+		t.Fatalf("sandbox image = %q, want the pool template's", got)
 	}
 }
 
@@ -62,6 +78,15 @@ func TestAShadowPoolClaimReportsAMissingTemplateNotAMissingPool(t *testing.T) {
 	ready := meta.FindStatusCondition(got.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 	if ready == nil || ready.Reason != reasonTemplateNotFound {
 		t.Fatalf("Ready condition = %+v, want reason %s", ready, reasonTemplateNotFound)
+	}
+}
+
+func shadowPoolTemplate() *extensionsv1beta1.SandboxTemplate {
+	return &extensionsv1beta1.SandboxTemplate{
+		Name: "tpl", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
+		}}},
 	}
 }
 

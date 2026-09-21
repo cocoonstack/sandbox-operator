@@ -1310,15 +1310,14 @@ func (r *SandboxClaimReconciler) initializeSandboxLaunchTypeLabel(ctx context.Co
 
 func (r *SandboxClaimReconciler) getTemplate(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*extensionsv1beta1.SandboxTemplate, error) {
 	templateName, shadow := strings.CutPrefix(claim.Spec.WarmPoolRef.Name, extensionsv1alpha1.ShadowPoolPrefix)
-	if !shadow {
-		warmPool := &extensionsv1beta1.SandboxWarmPool{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); err != nil {
-			if k8errors.IsNotFound(err) {
-				return nil, ErrWarmPoolNotFound
-			}
-			return nil, fmt.Errorf("failed to get sandbox warm pool %q: %w", claim.Spec.WarmPoolRef.Name, err)
-		}
+	warmPool := &extensionsv1beta1.SandboxWarmPool{}
+	switch err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); {
+	case err == nil:
 		templateName = warmPool.Spec.TemplateRef.Name
+	case !k8errors.IsNotFound(err):
+		return nil, fmt.Errorf("failed to get sandbox warm pool %q: %w", claim.Spec.WarmPoolRef.Name, err)
+	case !shadow:
+		return nil, ErrWarmPoolNotFound
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
