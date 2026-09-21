@@ -48,7 +48,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extensionsv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/internal/lifecycle"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
@@ -1309,7 +1308,7 @@ func (r *SandboxClaimReconciler) initializeSandboxLaunchTypeLabel(ctx context.Co
 }
 
 func (r *SandboxClaimReconciler) getTemplate(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*extensionsv1beta1.SandboxTemplate, error) {
-	templateName, shadow := strings.CutPrefix(claim.Spec.WarmPoolRef.Name, extensionsv1alpha1.ShadowPoolPrefix)
+	templateName, shadow := strings.CutPrefix(claim.Spec.WarmPoolRef.Name, extensionsv1beta1.ShadowPoolPrefix)
 	warmPool := &extensionsv1beta1.SandboxWarmPool{}
 	switch err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); {
 	case err == nil:

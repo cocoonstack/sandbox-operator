@@ -28,6 +28,9 @@ const (
 	// AssignedSandboxNameAnnotation is the annotation key applied to the claim to identify the adopted Sandbox Name.
 	AssignedSandboxNameAnnotation = "agents.x-k8s.io/sandbox-name"
 
+	// ShadowPoolPrefix marks a warmPoolRef that a v1alpha1 claim derived from its template.
+	ShadowPoolPrefix = "shadow-pool-"
+
 	// WarmPoolRefField is the field used for indexing SandboxClaims by their warm pool reference name.
 	WarmPoolRefField = ".spec.warmPoolRef.name"
 

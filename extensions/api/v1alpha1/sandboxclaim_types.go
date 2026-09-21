@@ -28,8 +28,6 @@ const (
 	// AssignedSandboxNameAnnotation is the annotation key applied to the claim to identify the adopted Sandbox Name.
 	AssignedSandboxNameAnnotation = "agents.x-k8s.io/sandbox-name"
 
-	ShadowPoolPrefix = "shadow-pool-"
-
 	// WarmPoolPolicyNone indicates that no warm pool should be used.
 	// A fresh sandbox will always be created.
 	WarmPoolPolicyNone WarmPoolPolicy = "none"

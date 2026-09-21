@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extensionsv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 	"github.com/cocoonstack/sandbox-operator/internal/queue"
@@ -20,7 +19,7 @@ import (
 
 func TestAShadowPoolClaimColdStartsFromItsTemplate(t *testing.T) {
 	scheme := newScheme(t)
-	claim := shadowPoolClaim("legacy", extensionsv1alpha1.ShadowPoolPrefix+"tpl")
+	claim := shadowPoolClaim("legacy", extensionsv1beta1.ShadowPoolPrefix+"tpl")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(shadowPoolTemplate(), claim).WithStatusSubresource(claim).Build()
 	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: queue.NewSimpleSandboxQueue(), Tracer: asmetrics.NewNoOp()}
 
@@ -43,7 +42,7 @@ func TestAShadowPoolClaimColdStartsFromItsTemplate(t *testing.T) {
 func TestAPoolNamedWithTheShadowPrefixIsStillAPool(t *testing.T) {
 	scheme := newScheme(t)
 	pool := &extensionsv1beta1.SandboxWarmPool{
-		Name: extensionsv1alpha1.ShadowPoolPrefix + "foo", Namespace: "default", UID: "pool-uid",
+		Name: extensionsv1beta1.ShadowPoolPrefix + "foo", Namespace: "default", UID: "pool-uid",
 		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}},
 	}
 	claim := shadowPoolClaim("named", pool.Name)
@@ -64,7 +63,7 @@ func TestAPoolNamedWithTheShadowPrefixIsStillAPool(t *testing.T) {
 
 func TestAShadowPoolClaimReportsAMissingTemplateNotAMissingPool(t *testing.T) {
 	scheme := newScheme(t)
-	claim := shadowPoolClaim("legacy", extensionsv1alpha1.ShadowPoolPrefix+"missing")
+	claim := shadowPoolClaim("legacy", extensionsv1beta1.ShadowPoolPrefix+"missing")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).WithStatusSubresource(claim).Build()
 	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: queue.NewSimpleSandboxQueue(), Tracer: asmetrics.NewNoOp()}
 
