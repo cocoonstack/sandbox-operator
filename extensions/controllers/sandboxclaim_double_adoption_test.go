@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -67,8 +68,51 @@ func TestARequeuedCandidateIsAdoptedByOneClaimOnly(t *testing.T) {
 		t.Fatalf("the warm sandbox changed hands %d times, want exactly 1: a stale-base transfer must be rejected", got)
 	}
 	boundA, boundB := boundSandbox(t, base, "claim-a"), boundSandbox(t, base, "claim-b")
-	if boundA == boundB {
-		t.Fatalf("both claims report status.sandbox.name=%q: one warm sandbox was handed to two claims", boundA)
+	if boundA != "claim-a" || boundB != "pool-abcde" {
+		t.Fatalf("claim-a bound to %q and claim-b to %q: the winner keeps the warm sandbox and the loser cold-starts", boundA, boundB)
+	}
+}
+
+func TestAStaleCandidateReadFinishesTheWarmAdoptionOnALaterPass(t *testing.T) {
+	scheme := newScheme(t)
+	claim := doubleAdoptionClaim("claim-a")
+	q := queue.NewSimpleSandboxQueue()
+	q.Add(queue.GetNamespacedWarmPoolName("default", "pool"), queue.SandboxKey{Namespace: "default", Name: "pool-abcde"})
+	base := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(doubleAdoptionTemplate(), doubleAdoptionPool(), claim, doubleAdoptionWarmSandbox()).
+		WithStatusSubresource(claim, &sandboxv1beta1.Sandbox{}).Build()
+
+	var lagging atomic.Bool
+	lagging.Store(true)
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := cl.Get(ctx, key, obj, opts...); err != nil {
+				return err
+			}
+			if sb, ok := obj.(*sandboxv1beta1.Sandbox); ok && sb.Name == "pool-abcde" && lagging.Load() {
+				sb.ResourceVersion = "1"
+			}
+			return nil
+		},
+	})
+	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: q, Tracer: asmetrics.NewNoOp()}
+	req := ctrl.Request{Namespace: "default", Name: "claim-a"}
+
+	if _, err := r.Reconcile(t.Context(), req); err != nil {
+		t.Fatalf("reconcile against a lagging cache: %v", err)
+	}
+	if err := base.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "claim-a"}, &sandboxv1beta1.Sandbox{}); !k8errors.IsNotFound(err) {
+		t.Fatalf("the claim cold-started with a warm sandbox assigned to it: get sandbox claim-a = %v", err)
+	}
+
+	lagging.Store(false)
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), req); err != nil {
+			t.Fatalf("reconcile after the cache converged: %v", err)
+		}
+	}
+	if got := boundSandbox(t, base, "claim-a"); got != "pool-abcde" {
+		t.Fatalf("claim bound to %q, want the warm sandbox pool-abcde", got)
 	}
 }
 

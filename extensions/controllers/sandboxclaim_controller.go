@@ -674,6 +674,7 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 	logger := log.FromContext(ctx)
 	namespacedWarmPoolNameForQueue := queue.GetNamespacedWarmPoolName(claim.Namespace, claim.Spec.WarmPoolRef.Name)
 
+	var pending error
 	for range 3 {
 		adopted, adoptedKey, err := r.getCandidate(ctx, claim)
 		if err != nil {
@@ -685,6 +686,10 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 		}
 
 		success, err := r.tryAdopt(ctx, claim, adopted, adoptedKey, namespacedWarmPoolNameForQueue)
+		if errors.Is(err, errAdoptionTriggeredRetry) {
+			pending = err
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -692,17 +697,21 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 		if success {
 			return adopted, nil
 		}
+		pending = nil
 	}
 
+	if pending != nil {
+		return nil, pending
+	}
 	logger.Info("Failed to adopt sandbox after max retries", "claim", claim.Name)
 	return nil, nil
 }
 
 // tryAdopt records the assignment on the claim and hands the Sandbox over. A
-// hand-over lost to a competing claim, or to a vanished candidate, reports
-// false and the caller tries the next candidate; a conflict on the claim
-// Update itself ends the pass. The claim Update is a full-object CAS on
-// purpose: it is what keeps one claim from adopting twice.
+// vanished candidate reports false and the caller tries the next one; a
+// conflicted hand-over reports errAdoptionTriggeredRetry and the caller picks
+// another attempt or ends the pass on the recorded assignment. A conflict on the
+// claim Update ends the pass: that full-object CAS keeps one claim from adopting twice.
 func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, adopted *v1beta1.Sandbox, adoptedKey queue.SandboxKey, queueName string) (bool, error) {
 	logger := log.FromContext(ctx)
 	poolName := "none"
@@ -729,7 +738,7 @@ func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensions
 		}
 		r.WarmSandboxQueue.Add(queueName, adoptedKey)
 		if k8errors.IsConflict(adoptErr) {
-			return false, nil
+			return false, fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, adopted.Name)
 		}
 		logger.Error(adoptErr, "Failed to complete adoption for candidate sandbox", "sandbox candidate", adopted.Name, "claim", claim.Name)
 		return false, adoptErr
