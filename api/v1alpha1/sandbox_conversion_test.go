@@ -196,7 +196,7 @@ func TestConvertFromLegacyFullObjectState(t *testing.T) {
 	five := int32(5)
 	legacy := &Sandbox{
 		Spec:   SandboxSpec{Replicas: &five},
-		Status: SandboxStatus{Replicas: 4},
+		Status: SandboxStatus{Replicas: 0},
 	}
 	legacyJSON, err := json.Marshal(legacy)
 	if err != nil {
@@ -215,8 +215,29 @@ func TestConvertFromLegacyFullObjectState(t *testing.T) {
 	if got.Spec.Replicas == nil || *got.Spec.Replicas != 5 {
 		t.Fatalf("spec.replicas = %v, want 5", got.Spec.Replicas)
 	}
-	if got.Status.Replicas != 4 {
-		t.Fatalf("status.replicas = %d, want 4", got.Status.Replicas)
+	if got.Status.Replicas != 1 {
+		t.Fatalf("status.replicas = %d, want 1: a Running sandbox reports one replica whatever a client last echoed", got.Status.Replicas)
+	}
+}
+
+func TestConvertFromReportsReplicasFromOperatingMode(t *testing.T) {
+	state := []byte(`{"spec":{"replicas":1},"status":{}}`)
+	for mode, want := range map[v1beta1.SandboxOperatingMode]int32{
+		v1beta1.SandboxOperatingModeRunning:   1,
+		v1beta1.SandboxOperatingModeSuspended: 0,
+	} {
+		hub := &v1beta1.Sandbox{
+			Name: "created-through-v1alpha1", Namespace: "default",
+			Annotations: map[string]string{v1alpha1SandboxStateAnnotation: string(state)},
+			Spec:        v1beta1.SandboxSpec{OperatingMode: mode},
+		}
+		got := &Sandbox{}
+		if err := got.ConvertFrom(hub); err != nil {
+			t.Fatalf("convert from: %v", err)
+		}
+		if got.Status.Replicas != want {
+			t.Fatalf("mode %s: status.replicas = %d, want %d (the scale subresource reads this field)", mode, got.Status.Replicas, want)
+		}
 	}
 }
 
