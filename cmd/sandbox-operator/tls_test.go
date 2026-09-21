@@ -15,11 +15,17 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,6 +146,54 @@ func TestGenerateWebhookCerts(t *testing.T) {
 	})
 }
 
+func TestGenerateWebhookCertsRenewsAnExpiringSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	for name, notAfter := range map[string]time.Time{
+		"expired":       time.Now().Add(-24 * time.Hour),
+		"expiring soon": time.Now().Add(certRenewBefore / 2),
+	} {
+		t.Run(name, func(t *testing.T) {
+			certDir := t.TempDir()
+			stale := &corev1.Secret{
+				Name: "sandbox-webhook-certs", Namespace: "test-namespace",
+				Data: certPairEndingAt(t, notAfter),
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale).Build()
+
+			caPEM, err := generateWebhookCerts(t.Context(), fakeClient, certDir, "test-service", "test-namespace", "cluster.local")
+			require.NoError(t, err)
+			assert.NotEqual(t, stale.Data["ca.crt"], caPEM, "an expiring pair must be replaced, not adopted")
+
+			renewed := &corev1.Secret{}
+			require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandbox-webhook-certs", Namespace: "test-namespace"}, renewed))
+			assert.Equal(t, caPEM, renewed.Data["ca.crt"], "the renewed CA must be the one shared through the Secret")
+			served, err := os.ReadFile(filepath.Join(certDir, "tls.crt"))
+			require.NoError(t, err)
+			assert.Equal(t, renewed.Data["tls.crt"], served)
+			assert.True(t, parseCert(t, served).NotAfter.After(time.Now().Add(certRenewBefore)), "the served cert must outlive the renewal window")
+		})
+	}
+}
+
+func TestGenerateWebhookCertsAdoptsAValidSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	certDir := t.TempDir()
+	valid := &corev1.Secret{
+		Name: "sandbox-webhook-certs", Namespace: "test-namespace",
+		Data: certPairEndingAt(t, time.Now().Add(certValidity)),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(valid).Build()
+
+	caPEM, err := generateWebhookCerts(t.Context(), fakeClient, certDir, "test-service", "test-namespace", "cluster.local")
+	require.NoError(t, err)
+	assert.Equal(t, valid.Data["ca.crt"], caPEM)
+	served, err := os.ReadFile(filepath.Join(certDir, "tls.crt"))
+	require.NoError(t, err)
+	assert.Equal(t, valid.Data["tls.crt"], served)
+}
+
 func TestPatchCRDs(t *testing.T) {
 	scheme := runtime.NewScheme()
 	err := apiextensionsv1.AddToScheme(scheme)
@@ -253,4 +307,39 @@ func TestPatchCRDs(t *testing.T) {
 		assert.Equal(t, []byte("old-ca"), untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)
 		assert.Equal(t, "old-service", untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 	})
+}
+
+func certPairEndingAt(t *testing.T, notAfter time.Time) map[string][]byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-service.test-namespace.svc"},
+		NotBefore:             notAfter.Add(-certValidity),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	return map[string][]byte{
+		"ca.crt":  certPEM,
+		"tls.crt": certPEM,
+		"tls.key": pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+	}
+}
+
+func parseCert(t *testing.T, certPEM []byte) *x509.Certificate {
+	t.Helper()
+	block, _ := pem.Decode(certPEM)
+	require.NotNil(t, block)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+	return cert
 }
