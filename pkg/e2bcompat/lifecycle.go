@@ -375,7 +375,7 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool
 }
 
 func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg string) {
-	if k8serrors.IsNotFound(err) {
+	if k8serrors.IsNotFound(err) || errors.Is(err, errSandboxNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
 		return
 	}

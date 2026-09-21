@@ -328,12 +328,7 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 }
 
 func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op string) {
-	if errors.Is(err, errSandboxNotFound) {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
-		return
-	}
-	s.opts.Log.Error(err, "e2b "+op+": lookup failed", "sandboxID", id)
-	writeError(w, http.StatusInternalServerError, "failed to resolve the sandbox")
+	s.writeVerbError(w, err, id, op+": lookup", "failed to resolve the sandbox")
 }
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
