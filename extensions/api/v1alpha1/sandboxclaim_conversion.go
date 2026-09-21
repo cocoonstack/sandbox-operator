@@ -127,7 +127,7 @@ func isWarmPoolRefMatching(actualName, expectedName, sandboxName string) bool {
 	if actualName == expectedName {
 		return true
 	}
-	if actualName == fmt.Sprintf("shadow-pool-%s", expectedName) {
+	if actualName == ShadowPoolPrefix+expectedName {
 		return true
 	}
 	if sandboxName != "" && (actualName == sandboxName || actualName == stripRandomSuffix(sandboxName)) {
@@ -165,7 +165,7 @@ func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, cl
 			}
 		} else {
 			dst.WarmPoolRef = v1beta1.SandboxWarmPoolRef{
-				Name: fmt.Sprintf("shadow-pool-%s", src.TemplateRef.Name),
+				Name: ShadowPoolPrefix + src.TemplateRef.Name,
 			}
 		}
 	}
@@ -197,7 +197,7 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 		dst.Lifecycle = nil
 	}
 
-	if templateName, ok := strings.CutPrefix(src.WarmPoolRef.Name, "shadow-pool-"); ok {
+	if templateName, ok := strings.CutPrefix(src.WarmPoolRef.Name, ShadowPoolPrefix); ok {
 		dst.TemplateRef = SandboxTemplateRef{
 			Name: templateName,
 		}

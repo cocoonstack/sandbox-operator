@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	extensionsv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/internal/lifecycle"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
@@ -1299,23 +1300,27 @@ func (r *SandboxClaimReconciler) initializeSandboxLaunchTypeLabel(ctx context.Co
 }
 
 func (r *SandboxClaimReconciler) getTemplate(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*extensionsv1beta1.SandboxTemplate, error) {
-	warmPool := &extensionsv1beta1.SandboxWarmPool{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); err != nil {
-		if k8errors.IsNotFound(err) {
-			return nil, ErrWarmPoolNotFound
+	templateName, shadow := strings.CutPrefix(claim.Spec.WarmPoolRef.Name, extensionsv1alpha1.ShadowPoolPrefix)
+	if !shadow {
+		warmPool := &extensionsv1beta1.SandboxWarmPool{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); err != nil {
+			if k8errors.IsNotFound(err) {
+				return nil, ErrWarmPoolNotFound
+			}
+			return nil, fmt.Errorf("failed to get sandbox warm pool %q: %w", claim.Spec.WarmPoolRef.Name, err)
 		}
-		return nil, fmt.Errorf("failed to get sandbox warm pool %q: %w", claim.Spec.WarmPoolRef.Name, err)
+		templateName = warmPool.Spec.TemplateRef.Name
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		Namespace: claim.Namespace,
-		Name:      warmPool.Spec.TemplateRef.Name,
+		Name:      templateName,
 	}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(template), template); err != nil {
 		if k8errors.IsNotFound(err) {
-			return nil, fmt.Errorf(`SandboxTemplate %q not found: %w`, warmPool.Spec.TemplateRef.Name, ErrTemplateNotFound)
+			return nil, fmt.Errorf(`SandboxTemplate %q not found: %w`, templateName, ErrTemplateNotFound)
 		}
-		return nil, fmt.Errorf("failed to get sandbox template %q: %w", warmPool.Spec.TemplateRef.Name, err)
+		return nil, fmt.Errorf("failed to get sandbox template %q: %w", templateName, err)
 	}
 
 	return template, nil
