@@ -552,11 +552,8 @@ func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.
 		return notReady(claim, failure{reason: v1beta1.SandboxReasonExpired, message: "Underlying Sandbox resource has expired independently of the Claim."})
 	}
 
-	// Forward the condition from Sandbox Status
-	for _, condition := range sandbox.Status.Conditions {
-		if condition.Type == string(v1beta1.SandboxConditionReady) {
-			return condition
-		}
+	if ready := meta.FindStatusCondition(sandbox.Status.Conditions, string(v1beta1.SandboxConditionReady)); ready != nil {
+		return *ready
 	}
 
 	return metav1.Condition{
