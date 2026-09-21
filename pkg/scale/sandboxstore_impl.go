@@ -885,11 +885,11 @@ func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {
 	labelSel, err := labels.Parse(opts.LabelSelector)
 	if err != nil {
-		return nil, nil, fmt.Errorf("scale: parse label selector %q: %w", opts.LabelSelector, err)
+		return nil, nil, k8serrors.NewBadRequest(fmt.Sprintf("parse label selector %q: %v", opts.LabelSelector, err))
 	}
 	fieldSel, err := fields.ParseSelector(opts.FieldSelector)
 	if err != nil {
-		return nil, nil, fmt.Errorf("scale: parse field selector %q: %w", opts.FieldSelector, err)
+		return nil, nil, k8serrors.NewBadRequest(fmt.Sprintf("parse field selector %q: %v", opts.FieldSelector, err))
 	}
 	known := sandboxFields(&sandboxv1beta1.Sandbox{})
 	for _, req := range fieldSel.Requirements() {
