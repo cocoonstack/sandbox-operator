@@ -110,6 +110,26 @@ Connections are not pooled across requests: one would outlive the sandboxd relay
 carrying it, and an open relay holds the sandbox's idle clock, which would keep
 an unused sandbox from ever hibernating.
 
+## Proving it
+
+`pkg/envdproxy`'s tests cover the routing, stripping and error mapping against a
+fake node. The hardware half is `test/envdproxysmoke` (build tag
+`envdproxysmoke`), which serves the real proxy in-process and reaches an HTTP
+listener inside a live microVM:
+
+```bash
+# on the node: claim a sandbox and start the listener in it
+portsmoke -addr 127.0.0.1:7990 -token <node-token> -template <ref> \
+  -listener ./guestserver -hold 300s          # prints: SANDBOX <id> <token> <owner> <port>
+
+go run -tags envdproxysmoke ./test/envdproxysmoke \
+  -node <owner> -sandbox <id> -token <token> -port 49983
+```
+
+`portsmoke` and `guestserver` live in the sandbox repo (`e2e/cmd/`); the stock
+image ships no HTTP listener, so the stand-in for `envd` is uploaded into the
+guest. `scripts/port-e2e.sh` there runs the node half on its own.
+
 ## Failures
 
 | Status | Meaning |

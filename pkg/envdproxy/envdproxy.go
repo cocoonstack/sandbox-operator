@@ -103,7 +103,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// A caller must not learn from this whether the id exists, which node
 		// holds it, or whether the fleet is reachable.
-		if !errors.Is(err, errSandboxNotFound) {
+		if !errors.Is(err, ErrSandboxNotFound) {
 			s.opts.Log.Error(err, "envd-proxy: resolve sandbox", "sandboxID", rt.sandboxID)
 		}
 		writeError(w, http.StatusBadGateway, "sandbox unavailable")

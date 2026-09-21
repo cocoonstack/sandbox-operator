@@ -128,7 +128,7 @@ func TestProxyRejectsAnUnroutableHost(t *testing.T) {
 
 func TestProxyHidesAnUnknownSandbox(t *testing.T) {
 	h := newTestProxy(t, resolverFunc(func(context.Context, string) (Owner, error) {
-		return Owner{}, errSandboxNotFound
+		return Owner{}, ErrSandboxNotFound
 	}))
 
 	resp := request(t, h, "49983-sb-gone."+testDomain, "/files", "tok")
@@ -377,7 +377,7 @@ func (n *fakeNode) handle(conn net.Conn, guest func(net.Conn)) {
 func (n *fakeNode) resolver() Resolver {
 	return resolverFunc(func(_ context.Context, id string) (Owner, error) {
 		if id != "sb-abc" {
-			return Owner{}, errSandboxNotFound
+			return Owner{}, ErrSandboxNotFound
 		}
 		return Owner{ClaimID: "sb_abc", Address: n.addr}, nil
 	})

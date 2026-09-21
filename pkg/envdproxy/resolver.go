@@ -12,7 +12,10 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-var errSandboxNotFound = errors.New("sandbox not found")
+// ErrSandboxNotFound is what a Resolver returns for an id it cannot place. The
+// proxy answers it like any other failure — a caller must not be able to probe
+// which sandbox ids exist — but only this one is expected, so the rest are logged.
+var ErrSandboxNotFound = errors.New("envdproxy: sandbox not found")
 
 // Owner is where a sandbox's data plane lives: the node-local claim id and its
 // sandboxd's internal address. The address is the node's advertise_addr, never
@@ -51,20 +54,20 @@ func NewResolver(store scale.SandboxStore, inventory scale.InventorySource, name
 
 func (s *storeResolver) Owner(ctx context.Context, sandboxID string) (Owner, error) {
 	if strings.TrimSpace(sandboxID) == "" {
-		return Owner{}, errSandboxNotFound
+		return Owner{}, ErrSandboxNotFound
 	}
 	sb, err := s.claims.GetByClaimID(ctx, s.namespace, sandboxID, func(claimID string) bool {
 		return e2bcompat.MatchesID(claimID, sandboxID)
 	})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			return Owner{}, errSandboxNotFound
+			return Owner{}, ErrSandboxNotFound
 		}
 		return Owner{}, err
 	}
 	node := sb.Status.NodeName
 	if node == "" {
-		return Owner{}, errSandboxNotFound
+		return Owner{}, ErrSandboxNotFound
 	}
 	address, _, err := s.inventory.NodeCapacity(ctx, node)
 	if err != nil {

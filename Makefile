@@ -16,7 +16,7 @@ BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 LD_FLAGS := -s -w -X $(VERSION_PKG).gitVersion=$(GIT_VERSION) -X $(VERSION_PKG).gitSHA=$(GIT_SHA) -X $(VERSION_PKG).buildDate=$(BUILD_DATE)
 
 ## Build-tagged harnesses under test/, one tag per directory
-TAGGED_HARNESSES := e2e e2ebench l2bench l3bench poolbench scalebench scalestress
+TAGGED_HARNESSES := e2e e2ebench l2bench l3bench poolbench scalebench scalestress envdproxysmoke
 
 ## Target OSes for vet / lint
 GOOSES ?= linux darwin
