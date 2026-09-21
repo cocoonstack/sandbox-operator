@@ -166,10 +166,6 @@ func (o *options) validate() error {
 	return nil
 }
 
-func (o *options) totalWorkers() int {
-	return o.sandboxWorkers + o.claimWorkers + o.warmPoolWorkers + o.templateWorkers
-}
-
 func (o *options) run() error {
 	if err := o.validate(); err != nil {
 		return err
@@ -262,7 +258,7 @@ func (o *options) logSettings() {
 		"sandboxTemplate", o.templateWorkers,
 		"sandboxWarmPoolMaxBatchSize", o.warmPoolMaxBatchSize,
 	)
-	total := o.totalWorkers()
+	total := o.sandboxWorkers + o.claimWorkers + o.warmPoolWorkers + o.templateWorkers
 	if total > 1000 {
 		setupLog.Info("Warning: total concurrent workers exceeds 1000, which could lead to resource exhaustion", "total", total)
 	}
