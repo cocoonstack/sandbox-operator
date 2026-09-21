@@ -28,7 +28,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -231,7 +230,6 @@ func main() {
 }
 
 func ensureTemplate(ctx context.Context, hosts []string) {
-	svc := false
 	container := corev1.Container{
 		Name: "agent", Image: *sbImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
@@ -239,37 +237,22 @@ func ensureTemplate(ctx context.Context, hosts []string) {
 			corev1.ResourceMemory: resource.MustParse("16Mi"),
 		}},
 	}
-	t := &extv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: *ns},
-		Spec: extv1beta1.SandboxTemplateSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				Service: &svc,
-				PodTemplate: sandboxv1beta1.PodTemplate{
-					ObjectMeta: sandboxv1beta1.PodMetadata{Annotations: map[string]string{
-						"sandbox.cocoonstack.io/runtime": "vk-cocoon",
-					}},
-					Spec: corev1.PodSpec{
-						Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-									MatchExpressions: []corev1.NodeSelectorRequirement{{
-										Key:      "kubernetes.io/hostname",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   hosts,
-									}},
-								}},
-							},
+	benchutil.EnsureTemplate(ctx, cl, *ns, tmplName,
+		map[string]string{"sandbox.cocoonstack.io/runtime": "vk-cocoon"},
+		corev1.PodSpec{
+			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      "kubernetes.io/hostname",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   hosts,
 						}},
-						Containers: []corev1.Container{container},
-					},
+					}},
 				},
-			},
-			NetworkPolicyManagement: "Unmanaged",
-		},
-	}
-	if err := cl.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
-		benchutil.Must(err)
-	}
+			}},
+			Containers: []corev1.Container{container},
+		})
 }
 
 func setReplicas(ctx context.Context, n int32) {

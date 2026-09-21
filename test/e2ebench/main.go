@@ -37,7 +37,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -146,7 +145,6 @@ func main() {
 }
 
 func ensureTemplate(ctx context.Context) {
-	svc := false
 	container := corev1.Container{
 		Name: "agent", Image: *sbImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
@@ -154,30 +152,14 @@ func ensureTemplate(ctx context.Context) {
 			corev1.ResourceMemory: resource.MustParse("16Mi"),
 		}},
 	}
-	t := &extv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: *ns},
-		Spec: extv1beta1.SandboxTemplateSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				Service: &svc,
-				PodTemplate: sandboxv1beta1.PodTemplate{
-					// vk-cocoon runtime: the operator's podruntime mutator adds the
-					// mode/image/os + virtual-node selector + toleration. We pin the
-					// virtual node by hostname so the whole run lands on one node.
-					ObjectMeta: sandboxv1beta1.PodMetadata{Annotations: map[string]string{
-						"sandbox.cocoonstack.io/runtime": "vk-cocoon",
-					}},
-					Spec: corev1.PodSpec{
-						NodeSelector: map[string]string{"kubernetes.io/hostname": *node},
-						Containers:   []corev1.Container{container},
-					},
-				},
-			},
-			NetworkPolicyManagement: "Unmanaged",
-		},
-	}
-	if err := cl.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
-		benchutil.Must(err)
-	}
+	// the podruntime mutator adds mode/image/os, the virtual-node selector and the
+	// toleration; pinning the hostname keeps the whole run on one node
+	benchutil.EnsureTemplate(ctx, cl, *ns, tmplName,
+		map[string]string{"sandbox.cocoonstack.io/runtime": "vk-cocoon"},
+		corev1.PodSpec{
+			NodeSelector: map[string]string{"kubernetes.io/hostname": *node},
+			Containers:   []corev1.Container{container},
+		})
 }
 
 func ensurePool(ctx context.Context, replicas int32) {

@@ -63,6 +63,27 @@ func Round2(f float64) float64 { return float64(int(f*100)) / 100 }
 func Round3(f float64) float64 { return float64(int(f*1000)) / 1000 }
 func Round4(f float64) float64 { return float64(int(f*10000)) / 10000 }
 
+// EnsureTemplate creates the run's SandboxTemplate once; callers pass what differs between harnesses.
+func EnsureTemplate(ctx context.Context, cl client.Client, ns, name string, annotations map[string]string, spec corev1.PodSpec) {
+	svc := false
+	t := &extv1beta1.SandboxTemplate{
+		Name: name, Namespace: ns,
+		Spec: extv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
+				Service: &svc,
+				PodTemplate: sandboxv1beta1.PodTemplate{
+					ObjectMeta: sandboxv1beta1.PodMetadata{Annotations: annotations},
+					Spec:       spec,
+				},
+			},
+			NetworkPolicyManagement: "Unmanaged",
+		},
+	}
+	if err := cl.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
+		Must(err)
+	}
+}
+
 // EnsurePool creates the SandboxWarmPool (labels may be nil) or updates its
 // replica count.
 func EnsurePool(ctx context.Context, cl client.Client, ns, pool, template string, replicas int32, labels map[string]string) {

@@ -21,7 +21,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -120,7 +119,6 @@ func main() {
 }
 
 func ensureTemplate(ctx context.Context) {
-	svc := false
 	nodeSel := map[string]string{}
 	if kv := strings.SplitN(*nodeSelKV, "=", 2); len(kv) == 2 && kv[0] != "" {
 		nodeSel[kv[0]] = kv[1]
@@ -144,26 +142,10 @@ func ensureTemplate(ctx context.Context) {
 	if *snapPol != "" {
 		podAnnotations["cocoonset.cocoonstack.io/snapshot-policy"] = *snapPol
 	}
-	t := &extv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: *ns},
-		Spec: extv1beta1.SandboxTemplateSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				Service: &svc,
-				PodTemplate: sandboxv1beta1.PodTemplate{
-					ObjectMeta: sandboxv1beta1.PodMetadata{Annotations: podAnnotations},
-					Spec: corev1.PodSpec{
-						NodeSelector: nodeSel,
-						Containers:   []corev1.Container{container},
-					},
-				},
-			},
-			NetworkPolicyManagement: "Unmanaged",
-		},
-	}
-	err := cl.Create(ctx, t)
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		benchutil.Must(err)
-	}
+	benchutil.EnsureTemplate(ctx, cl, *ns, tmplName, podAnnotations, corev1.PodSpec{
+		NodeSelector: nodeSel,
+		Containers:   []corev1.Container{container},
+	})
 }
 
 func ensurePool(ctx context.Context, replicas int32) {
