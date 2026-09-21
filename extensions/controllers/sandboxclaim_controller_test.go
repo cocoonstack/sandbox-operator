@@ -3486,6 +3486,7 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	}
 
 	staleSandbox := adoptedSandbox.DeepCopy()
+	staleSandbox.ResourceVersion = "999"
 
 	sandboxPatches := 0
 	fakeClient := fake.NewClientBuilder().
@@ -3617,6 +3618,7 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	}
 
 	staleSandbox := adoptedSandbox.DeepCopy()
+	staleSandbox.ResourceVersion = "999"
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -3721,6 +3723,7 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 	}
 
 	staleSandbox := warmSandbox.DeepCopy()
+	staleSandbox.ResourceVersion = "999"
 
 	sandboxPatches := 0
 	fakeClient := fake.NewClientBuilder().

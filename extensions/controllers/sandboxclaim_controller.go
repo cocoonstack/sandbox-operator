@@ -823,7 +823,7 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 		return err
 	}
 
-	if err := r.Patch(ctx, adopted, client.MergeFrom(originalAdopted)); err != nil {
+	if err := r.Patch(ctx, adopted, client.MergeFromWithOptions(originalAdopted, client.MergeFromWithOptimisticLock{})); err != nil {
 		return err
 	}
 
@@ -1206,7 +1206,10 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 	if ref := metav1.GetControllerOf(sandbox); ref != nil && ref.Kind == warmPoolKind {
 		return nil, r.completePendingAdoption(ctx, claim, sandbox, sbName)
 	}
-	logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, falling through", "sandbox", sbName, "claim", claim.Name)
+	logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, removing stale reference", "sandbox", sbName, "claim", claim.Name)
+	if err := r.clearAssignedSandboxName(ctx, claim); err != nil {
+		return nil, fmt.Errorf("failed to remove a sandbox reference another claim owns: %w", err)
+	}
 	return nil, nil
 }
 
