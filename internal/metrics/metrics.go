@@ -68,9 +68,7 @@ var (
 		[]string{"namespace", "launch_type", "sandbox_template"},
 	)
 
-	// SandboxClaimCreationTotal counts created SandboxClaims. Label values:
-	// pod_condition "ready"|"not_ready"; created_by "go-client"|"python-client"|
-	// "controller"|"unknown".
+	// SandboxClaimCreationTotal counts created SandboxClaims.
 	SandboxClaimCreationTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "agent_sandbox_claim_creation_total",
@@ -92,8 +90,6 @@ var (
 	)
 
 	// AgentSandboxesDesc describes the point-in-time agent_sandboxes gauge.
-	// Label values: owned_by "SandboxClaim"|"SandboxWarmPool"|"None"; created_by
-	// as on SandboxClaimCreationTotal.
 	AgentSandboxesDesc = prometheus.NewDesc(
 		"agent_sandboxes",
 		"Monitor the point-in-time number of sandboxes in the cluster.",
@@ -160,8 +156,7 @@ func RecordSandboxCreationLatency(duration time.Duration, namespace, launchType,
 	SandboxCreationLatency.WithLabelValues(namespace, launchType, templateName).Observe(float64(duration.Milliseconds()))
 }
 
-// NormalizeCreatedBy returns the createdBy label normalized to a known allow-list
-// (go-client, python-client, controller) or "unknown" for anything else.
+// NormalizeCreatedBy maps a createdBy label outside the allow-list to "unknown".
 func NormalizeCreatedBy(createdBy string) string {
 	switch createdBy {
 	case "go-client", "python-client", "controller", "loadgen":
