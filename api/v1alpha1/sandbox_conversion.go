@@ -80,16 +80,10 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 			return fmt.Errorf("unmarshal v1alpha1 sandbox state: %w", err)
 		}
 
-		// Restore replicas field from original if OperatingMode matches original intent
-		switch src.Spec.OperatingMode {
-		case v1beta1.SandboxOperatingModeSuspended:
-			s.Spec.Replicas = new(int32(0))
-		case v1beta1.SandboxOperatingModeRunning:
-			if original.Spec.Replicas == nil || *original.Spec.Replicas != 0 {
-				s.Spec.Replicas = original.Spec.Replicas
-			} else {
-				s.Spec.Replicas = new(int32(1))
-			}
+		// A stashed 0 is the suspended marker, not a replica count: ConvertSpecFrom already derived the count from the mode.
+		if src.Spec.OperatingMode == v1beta1.SandboxOperatingModeRunning &&
+			(original.Spec.Replicas == nil || *original.Spec.Replicas != 0) {
+			s.Spec.Replicas = original.Spec.Replicas
 		}
 	}
 
