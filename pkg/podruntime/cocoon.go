@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 const (
@@ -36,11 +37,11 @@ const (
 
 	// sandboxd virtual-node contract: vk-sandbox advertises this label
 	// and taints with vkProviderTaintKey (Exists toleration covers both planes).
-	sandboxdNodeLabelKey   = "sandbox.cocoonstack.io/runtime"
-	sandboxdNodeLabelValue = "sandboxd"
-	// sandboxd claim axes — mirror pkg/scale selector keys and the
-	// vk-sandbox provider's AnnTemplate/AnnNet/AnnSize contract.
-	sandboxdTemplateAnnotation = "sandbox.cocoonstack.io/template"
+	sandboxdNodeLabelKey       = "sandbox.cocoonstack.io/runtime"
+	sandboxdNodeLabelValue     = "sandboxd"
+	sandboxdTemplateAnnotation = scale.SelectorTemplateKey
+	sandboxdNetAnnotation      = scale.SelectorNetKey
+	sandboxdSizeAnnotation     = scale.SelectorSizeKey
 
 	cocoonModeAnnotation    = "cocoonset.cocoonstack.io/mode"
 	cocoonManagedAnnotation = "cocoonset.cocoonstack.io/managed"
@@ -118,8 +119,8 @@ func (m *Mutator) mutateVKCocoon(sandbox *sandboxv1beta1.Sandbox, pod *corev1.Po
 }
 
 // mutateSandboxd routes the Pod to a vk-sandbox virtual node (sandboxd
-// hot pool). It sets the sandboxd claim template axis from the first container
-// image when unset, so the node provider always has a template to claim.
+// hot pool). It sets the sandboxd claim axes the warm-pool driver provisions
+// under, so the node provider claims from the pool that exists.
 func (m *Mutator) mutateSandboxd(pod *corev1.Pod, explicit bool) error {
 	if pod.Spec.RuntimeClassName != nil {
 		if explicit {
@@ -135,9 +136,10 @@ func (m *Mutator) mutateSandboxd(pod *corev1.Pod, explicit bool) error {
 		pod.Annotations = make(map[string]string)
 	}
 	setDefault(pod.Annotations, RuntimeAnnotation, ModeSandboxd)
-	if len(pod.Spec.Containers) > 0 {
-		setDefault(pod.Annotations, sandboxdTemplateAnnotation, pod.Spec.Containers[0].Image)
-	}
+	key := scale.PoolKeyFor(pod.Spec.Containers, scale.NetForAnnotations(pod.Annotations, nil))
+	setDefault(pod.Annotations, sandboxdTemplateAnnotation, key.Template)
+	setDefault(pod.Annotations, sandboxdNetAnnotation, key.Net)
+	setDefault(pod.Annotations, sandboxdSizeAnnotation, key.Size)
 	return nil
 }
 

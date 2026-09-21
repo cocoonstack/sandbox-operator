@@ -4,8 +4,10 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
@@ -38,6 +40,44 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	}
 	if !toleratesVKCocoon(pod.Spec.Tolerations) {
 		t.Fatal("sandboxd pod must tolerate the vk-provider taint")
+	}
+}
+
+func TestMutateSandboxdClaimsUnderThePoolKeyTheDriverProvisions(t *testing.T) {
+	m, _ := NewMutator(ModeSandboxd)
+	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
+	pod := sandboxdPod("base:24.04")
+	pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("4"),
+		corev1.ResourceMemory: resource.MustParse("8Gi"),
+	}
+	if err := m.MutatePod(t.Context(), sandbox, pod); err != nil {
+		t.Fatalf("MutatePod: %v", err)
+	}
+	want := scale.PoolKeyFor(pod.Spec.Containers, "")
+	got := scale.PoolKey{
+		Template: pod.Annotations[sandboxdTemplateAnnotation],
+		Net:      pod.Annotations[sandboxdNetAnnotation],
+		Size:     pod.Annotations[sandboxdSizeAnnotation],
+	}
+	if got != want {
+		t.Fatalf("pod claims %+v, the warm-pool driver provisions %+v: a claim outside the provisioned key never hits warm capacity", got, want)
+	}
+	if got.Size != scale.SizeClassMedium || got.Net != scale.NetDefault {
+		t.Fatalf("derived key %+v, want net=%s size=%s", got, scale.NetDefault, scale.SizeClassMedium)
+	}
+}
+
+func TestMutateSandboxdKeepsAnExplicitNet(t *testing.T) {
+	m, _ := NewMutator(ModeSandboxd)
+	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
+	pod := sandboxdPod("base:24.04")
+	pod.Annotations = map[string]string{sandboxdNetAnnotation: scale.NetEgress}
+	if err := m.MutatePod(t.Context(), sandbox, pod); err != nil {
+		t.Fatalf("MutatePod: %v", err)
+	}
+	if pod.Annotations[sandboxdNetAnnotation] != scale.NetEgress {
+		t.Fatalf("net = %q, want the pod's own %s", pod.Annotations[sandboxdNetAnnotation], scale.NetEgress)
 	}
 }
 
