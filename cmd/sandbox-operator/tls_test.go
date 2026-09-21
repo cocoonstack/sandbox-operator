@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -307,6 +308,38 @@ func TestPatchCRDs(t *testing.T) {
 		assert.Equal(t, []byte("old-ca"), untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)
 		assert.Equal(t, "old-service", untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 	})
+}
+
+func TestPatchCRDsKeepsAnUnexpiredAuthorityBesideTheNewOne(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiextensionsv1.AddToScheme(scheme))
+	now := time.Now()
+	previous := certPairEndingAt(t, now.Add(200*24*time.Hour))["ca.crt"]
+	expired := certPairEndingAt(t, now.Add(-time.Hour))["ca.crt"]
+	renewed := certPairEndingAt(t, now.Add(certValidity))["ca.crt"]
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		Name: "sandboxes.agents.x-k8s.io",
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Conversion: &apiextensionsv1.CustomResourceConversion{
+				Strategy: apiextensionsv1.WebhookConverter,
+				Webhook: &apiextensionsv1.WebhookConversion{ClientConfig: &apiextensionsv1.WebhookClientConfig{
+					CABundle: append(append([]byte{}, expired...), previous...),
+				}},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crd).Build()
+
+	for range 2 {
+		require.NoError(t, patchCRDs(t.Context(), c, renewed, "svc", "ns", false))
+	}
+	got := &apiextensionsv1.CustomResourceDefinition{}
+	require.NoError(t, c.Get(t.Context(), types.NamespacedName{Name: crd.Name}, got))
+	bundle := got.Spec.Conversion.Webhook.ClientConfig.CABundle
+	assert.True(t, bytes.Contains(bundle, previous), "a replica still serving the previous authority must keep verifying")
+	assert.True(t, bytes.Contains(bundle, renewed), "the renewed authority must be in the bundle")
+	assert.False(t, bytes.Contains(bundle, expired), "an expired authority must be dropped")
+	assert.Equal(t, 2, bytes.Count(bundle, []byte("-----BEGIN CERTIFICATE-----")), "a second patch with the same authority must not duplicate it")
 }
 
 func certPairEndingAt(t *testing.T, notAfter time.Time) map[string][]byte {

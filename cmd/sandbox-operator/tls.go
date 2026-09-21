@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/ecdsa"
@@ -294,7 +295,7 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 		webhook.ClientConfig.Service.Namespace = namespace
 		path := "/convert"
 		webhook.ClientConfig.Service.Path = &path
-		webhook.ClientConfig.CABundle = caPEM
+		webhook.ClientConfig.CABundle = mergeCABundle(webhook.ClientConfig.CABundle, caPEM)
 
 		crd.Spec.Conversion.Webhook = webhook
 
@@ -307,4 +308,19 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 	}
 
 	return nil
+}
+
+func mergeCABundle(bundle, caPEM []byte) []byte {
+	var merged, fresh []byte
+	if block, _ := pem.Decode(caPEM); block != nil {
+		fresh = block.Bytes
+	}
+	for block, rest := pem.Decode(bundle); block != nil; block, rest = pem.Decode(rest) {
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil || time.Now().After(cert.NotAfter) || bytes.Equal(block.Bytes, fresh) {
+			continue
+		}
+		merged = append(merged, pem.EncodeToMemory(block)...)
+	}
+	return append(merged, caPEM...)
 }
