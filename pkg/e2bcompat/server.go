@@ -361,17 +361,11 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 }
 
-// templateOf reports the pool template a sandbox was claimed from. A sandbox
-// synthesized from node inventory carries it as a label; only an object that
-// still holds its own pod spec can be read for the container image.
+// templateOf reports the pool template a sandbox was claimed from: the label the
+// store stamps, which is the only place it survives (a synthesized Sandbox holds
+// no pod spec).
 func templateOf(sb *sandboxv1beta1.Sandbox) string {
-	if t := sb.Labels[scale.TemplateLabel]; t != "" {
-		return t
-	}
-	if c := sb.Spec.PodTemplate.Spec.Containers; len(c) > 0 {
-		return c[0].Image
-	}
-	return ""
+	return sb.Labels[scale.TemplateLabel]
 }
 
 // netFor maps e2b's allow_internet_access onto the pool's network axis.
