@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,6 +68,9 @@ func TestARequeuedCandidateIsAdoptedByOneClaimOnly(t *testing.T) {
 	if got := handovers.Load(); got != 1 {
 		t.Fatalf("the warm sandbox changed hands %d times, want exactly 1: a stale-base transfer must be rejected", got)
 	}
+	if _, err := rA.Reconcile(t.Context(), ctrl.Request{Namespace: "default", Name: "claim-a"}); err != nil {
+		t.Fatalf("claim-a second pass: %v", err)
+	}
 	boundA, boundB := boundSandbox(t, base, "claim-a"), boundSandbox(t, base, "claim-b")
 	if boundA != "claim-a" || boundB != "pool-abcde" {
 		t.Fatalf("claim-a bound to %q and claim-b to %q: the winner keeps the warm sandbox and the loser cold-starts", boundA, boundB)
@@ -113,6 +117,58 @@ func TestAStaleCandidateReadFinishesTheWarmAdoptionOnALaterPass(t *testing.T) {
 	}
 	if got := boundSandbox(t, base, "claim-a"); got != "pool-abcde" {
 		t.Fatalf("claim bound to %q, want the warm sandbox pool-abcde", got)
+	}
+}
+
+func TestAConflictedAssignmentIsSettledLaterEvenWhenTheQueueRunsDry(t *testing.T) {
+	scheme := newScheme(t)
+	claim := doubleAdoptionClaim("claim-a")
+	q := queue.NewSimpleSandboxQueue()
+	q.Add(queue.GetNamespacedWarmPoolName("default", "pool"), queue.SandboxKey{Namespace: "default", Name: "pool-abcde"})
+	base := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(doubleAdoptionTemplate(), doubleAdoptionPool(), claim, doubleAdoptionWarmSandbox()).
+		WithStatusSubresource(claim, &sandboxv1beta1.Sandbox{}).Build()
+
+	var conflicted atomic.Bool
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, p client.Patch, opts ...client.PatchOption) error {
+			if sb, ok := obj.(*sandboxv1beta1.Sandbox); ok && sb.Name == "pool-abcde" && conflicted.CompareAndSwap(false, true) {
+				return k8errors.NewConflict(sandboxv1beta1.Resource("sandboxes"), sb.Name, errors.New("another writer"))
+			}
+			return cl.Patch(ctx, obj, p, opts...)
+		},
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := cl.Get(ctx, key, obj, opts...); err != nil {
+				return err
+			}
+			if sb, ok := obj.(*sandboxv1beta1.Sandbox); ok && sb.Name == "pool-abcde" && conflicted.Load() {
+				sb.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+			}
+			return nil
+		},
+	})
+	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: q, Tracer: asmetrics.NewNoOp()}
+	req := ctrl.Request{Namespace: "default", Name: "claim-a"}
+
+	if _, err := r.Reconcile(t.Context(), req); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if err := base.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "claim-a"}, &sandboxv1beta1.Sandbox{}); !k8errors.IsNotFound(err) {
+		t.Fatalf("the claim cold-started in the pass whose hand-over conflicted: get sandbox claim-a = %v", err)
+	}
+	got := &extensionsv1beta1.SandboxClaim{}
+	if err := base.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "claim-a"}, got); err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if v := got.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]; v != "pool-abcde" {
+		t.Fatalf("recorded assignment = %q, want pool-abcde kept for the next pass", v)
+	}
+
+	if _, err := r.Reconcile(t.Context(), req); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if got := boundSandbox(t, base, "claim-a"); got != "claim-a" {
+		t.Fatalf("claim bound to %q after the candidate went away, want its own cold-started sandbox", got)
 	}
 }
 

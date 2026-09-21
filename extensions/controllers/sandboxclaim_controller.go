@@ -680,6 +680,9 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 			return nil, err
 		}
 		if adopted == nil {
+			if pending != nil {
+				return nil, pending
+			}
 			logger.Info("Failed to adopt any sandbox after checking all candidates", "claim", claim.Name)
 			return nil, nil // Warm pool is truly empty, fall completely to cold start
 		}
