@@ -47,10 +47,8 @@ const (
 	tlsPrivateKey = "tls.key"
 )
 
-// generateWebhookCerts generates a self-signed CA and a server certificate signed by that CA,
-// or loads them from a shared Kubernetes Secret if it already exists.
-// It writes the server certificate (tls.crt) and key (tls.key) to the certDir.
-// It returns the PEM-encoded CA certificate, which is the caBundle to patch into the CRDs.
+// generateWebhookCerts loads the shared webhook certificate Secret, renewing it if expiring or adopting it if fresh,
+// or generates and publishes a new self-signed CA and server certificate if none exists; it returns the PEM-encoded CA certificate (the caBundle to patch into the CRDs).
 func generateWebhookCerts(ctx context.Context, c client.Client, certDir string, serviceName, namespace, clusterDomain string) ([]byte, error) {
 	secret := &corev1.Secret{}
 	getErr := c.Get(ctx, types.NamespacedName{Name: webhookSecretName, Namespace: namespace}, secret)
@@ -231,19 +229,10 @@ func writeCertFiles(certDir string, serverPEM, serverKeyPEM []byte) error {
 	if err := os.MkdirAll(certDir, 0o750); err != nil {
 		return err
 	}
-
-	certPath := filepath.Join(certDir, tlsCertKey)
-	keyPath := filepath.Join(certDir, tlsPrivateKey)
-
-	if err := os.WriteFile(certPath, serverPEM, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(certDir, tlsCertKey), serverPEM, 0o600); err != nil {
 		return err
 	}
-
-	if err := os.WriteFile(keyPath, serverKeyPEM, 0o600); err != nil {
-		return err
-	}
-
-	return nil
+	return os.WriteFile(filepath.Join(certDir, tlsPrivateKey), serverKeyPEM, 0o600)
 }
 
 // patchCRDs patches the CRDs in the cluster with the generated CA certificate and service details using a merge patch.

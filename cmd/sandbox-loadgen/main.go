@@ -54,8 +54,7 @@ const (
 )
 
 var (
-	// claimSeconds: client-observed time from SandboxClaim create to Ready
-	// (a warm sandbox delivered). Fine buckets — checkout is typically sub-second.
+	// claimSeconds: fine buckets — checkout is typically sub-second.
 	claimSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sandbox_loadgen_claim_seconds",
 		Help:    "Time to claim a pre-warmed sandbox from the warmpool (create SandboxClaim -> Ready).",
@@ -69,7 +68,7 @@ var (
 	})
 	claimFailed = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "sandbox_loadgen_claim_failed_total", Help: "Failed claim operations by reason.",
-	}, []string{"reason"}) // create | timeout | delete
+	}, []string{"reason"})
 	inflight = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "sandbox_loadgen_inflight", Help: "Claims currently outstanding (serial => 0 or 1).",
 	})
@@ -212,7 +211,6 @@ func (l *loadgen) setup(ctx context.Context) error {
 	return nil
 }
 
-// waitPoolWarm blocks until the warmpool has at least one ready sandbox.
 func (l *loadgen) waitPoolWarm(ctx context.Context) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -269,7 +267,6 @@ func (l *loadgen) claimLoop(ctx context.Context) {
 			"claims", served.Load(), "concurrency", workers, "elapsed", time.Since(start).String())
 		return
 	}
-	// unbounded run: block until the context is canceled, then drain.
 	<-ctx.Done()
 	wg.Wait()
 }

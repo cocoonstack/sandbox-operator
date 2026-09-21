@@ -139,7 +139,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /sandboxes/{sandboxID}/timeout", s.auth(http.HandlerFunc(s.setTimeout)))
 	mux.Handle("POST /sandboxes/{sandboxID}/refreshes", s.auth(http.HandlerFunc(s.refresh)))
 
-	// Lifecycle verbs.
 	mux.Handle("POST /sandboxes/{sandboxID}/pause", s.auth(http.HandlerFunc(s.pauseSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/fork", s.auth(http.HandlerFunc(s.forkSandbox)))
@@ -206,7 +205,6 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool, timeoutSeconds(req.Timeout))
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
-			// Retryable: warm capacity refills asynchronously on the node.
 			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf(
 				"no warm sandbox available for template %q; retry as warm capacity refills", req.TemplateID))
 			return
@@ -328,19 +326,12 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 }
 
 func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op string) {
-	if errors.Is(err, errSandboxNotFound) {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
-		return
-	}
-	s.opts.Log.Error(err, "e2b "+op+": lookup failed", "sandboxID", id)
-	writeError(w, http.StatusInternalServerError, "failed to resolve the sandbox")
+	s.writeVerbError(w, err, id, op+": lookup", "failed to resolve the sandbox")
 }
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
 // but cocoon does not track per sandbox (disk size) are reported as zero values
-// rather than omitted, so the SDK's decoder stays happy. envdAccessToken is one
-// of them on this path: the token is handed out once at claim time and node
-// inventory deliberately carries no per-sandbox secret.
+// rather than omitted, so the SDK's decoder stays happy.
 func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	started := sb.CreationTimestamp.Time
 	if started.IsZero() {
@@ -366,17 +357,11 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 }
 
-// templateOf reports the pool template a sandbox was claimed from. A sandbox
-// synthesized from node inventory carries it as a label; only an object that
-// still holds its own pod spec can be read for the container image.
+// templateOf reports the pool template a sandbox was claimed from: the label the
+// store stamps, which is the only place it survives (a synthesized Sandbox holds
+// no pod spec).
 func templateOf(sb *sandboxv1beta1.Sandbox) string {
-	if t := sb.Labels[scale.TemplateLabel]; t != "" {
-		return t
-	}
-	if c := sb.Spec.PodTemplate.Spec.Containers; len(c) > 0 {
-		return c[0].Image
-	}
-	return ""
+	return sb.Labels[scale.TemplateLabel]
 }
 
 // netFor maps e2b's allow_internet_access onto the pool's network axis.

@@ -47,9 +47,7 @@ func preserveUnknownObject() spec.Schema {
 }
 
 // sandboxOpenAPIDefinitions supplies just enough OpenAPI to register the
-// Sandbox and SandboxList GVKs with the managed-fields TypeConverter. Replaces
-// the former empty map, which left the writable Create path logging
-// [SHOULD NOT HAPPEN] on every request.
+// Sandbox and SandboxList GVKs with the managed-fields TypeConverter.
 func sandboxOpenAPIDefinitions(ref openapicommon.ReferenceCallback) map[string]openapicommon.OpenAPIDefinition {
 	sandbox := openapicommon.OpenAPIDefinition{
 		Schema: spec.Schema{

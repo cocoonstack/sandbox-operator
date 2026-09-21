@@ -133,9 +133,6 @@ type PersistentVolumeClaimTemplate struct {
 
 // SandboxSpec defines the desired state of Sandbox.
 type SandboxSpec struct {
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
 	// podTemplate describes the pod spec that will be used to create an agent sandbox.
 	// +required
 	PodTemplate PodTemplate `json:"podTemplate"`
@@ -194,7 +191,7 @@ type SandboxStatus struct {
 	// +optional
 	ServiceFQDN string `json:"serviceFQDN,omitempty"`
 
-	// service is a sandbox-example
+	// Service is the headless Service name fronting the Sandbox pod, set once the controller creates it and cleared when it is removed.
 	// +optional
 	Service string `json:"service,omitempty"`
 

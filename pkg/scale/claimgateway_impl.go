@@ -107,10 +107,7 @@ type GatewayConfig struct {
 	Logger logr.Logger
 }
 
-// delivered is the ownership credential the gateway holds for a sandbox it handed
-// over: the sandboxd id and the sandbox's own token, both required to Release it.
-// Holding this is what makes the gateway (not pod-level state) the only party able
-// to destroy the VM.
+// delivered is the ownership credential (sandboxd id + token) a claim holds; only the gateway holding it can Release the VM.
 type delivered struct {
 	id    string
 	token string
@@ -118,9 +115,7 @@ type delivered struct {
 
 var _ ClaimGateway = (*nodeClaimGateway)(nil)
 
-// nodeClaimGateway is the concrete L2 ClaimGateway: it authorizes inline, delivers
-// a warm sandbox from the node's sandboxd, returns the Assignment immediately, and
-// records Bound asynchronously.
+// nodeClaimGateway is the concrete L2 ClaimGateway: it authorizes inline, delivers a sandbox, and records Bound asynchronously.
 type nodeClaimGateway struct {
 	node          string
 	client        SandboxdClient
@@ -203,8 +198,6 @@ func (g *nodeClaimGateway) Release(ctx context.Context, a Assignment) error {
 	delete(g.holdings, a.SandboxName) // no-op when absent
 	g.mu.Unlock()
 	if !ok {
-		// Unknown to this gateway: nothing was delivered here to release. Do NOT
-		// fabricate an id/token, and do NOT destroy anything.
 		return fmt.Errorf("scale: release of sandbox %q not delivered by node %q; refusing to destroy", a.SandboxName, g.node)
 	}
 	if err := g.client.Release(ctx, d.id, d.token); err != nil {
@@ -234,9 +227,6 @@ func (g *nodeClaimGateway) enqueueRecord(ns, name string, a Assignment) {
 	})
 }
 
-// specFor derives a sandboxd ClaimSpec from the request, letting the Selector
-// override each axis and falling back to gateway defaults (and, for the template,
-// finally to the WarmPool name).
 func (g *nodeClaimGateway) specFor(req ClaimRequest) sandboxd.ClaimSpec {
 	return sandboxd.ClaimSpec{
 		Template:   cmp.Or(req.Selector[SelectorTemplateKey], g.tmpl, req.WarmPool),
@@ -246,10 +236,7 @@ func (g *nodeClaimGateway) specFor(req ClaimRequest) sandboxd.ClaimSpec {
 	}
 }
 
-// clientClaimRecorder records Bound by patching the SandboxClaim status:
-// status.sandbox.name is set to the delivered sandbox (the same "Bound" marker the
-// L1 path uses) and a Bound condition is added. It is idempotent and safe for the
-// async and orphan-reconcile paths to both call.
+// clientClaimRecorder patches SandboxClaim status to Bound (idempotent), the same status.sandbox.name field the L1 path sets.
 type clientClaimRecorder struct {
 	c client.Client
 }
@@ -335,8 +322,6 @@ func (o *OrphanReconciler) Reconcile(ctx context.Context) (int, error) {
 		getErr := o.reader.Get(ctx, types.NamespacedName{Namespace: d.ClaimNS, Name: d.ClaimName}, cur)
 		if getErr != nil {
 			if k8serrors.IsNotFound(getErr) {
-				// The owning SandboxClaim is genuinely gone. We NEVER destroy the
-				// VM here (audit-and-adopt only); owner-authorized teardown owns that.
 				o.log.V(1).Info("delivery has no SandboxClaim object; leaving VM intact (no destroy)",
 					"namespace", d.ClaimNS, "claim", d.ClaimName, "sandbox", d.SandboxName)
 				continue
@@ -346,7 +331,6 @@ func (o *OrphanReconciler) Reconcile(ctx context.Context) (int, error) {
 		if cur.Status.SandboxStatus.Name != "" {
 			continue // already Bound — not an orphan
 		}
-		// Orphan binding: delivered but never recorded. Adopt it (converge).
 		a := Assignment{SandboxName: d.SandboxName, Node: d.Node, Address: d.Address}
 		if err := o.recorder.RecordBound(ctx, d.ClaimNS, d.ClaimName, a); err != nil {
 			return reconciled, fmt.Errorf("scale: adopt orphan binding %s/%s: %w", d.ClaimNS, d.ClaimName, err)
@@ -356,11 +340,7 @@ func (o *OrphanReconciler) Reconcile(ctx context.Context) (int, error) {
 	return reconciled, nil
 }
 
-// SubjectAccessReviewer creates a SubjectAccessReview and returns the decided
-// object — the shape of client-go's
-// authorizationv1client.SubjectAccessReviewInterface.Create, narrowed to an
-// interface so the gateway needs no direct authz-client dependency and tests can
-// inject a fake.
+// SubjectAccessReviewer narrows client-go's SubjectAccessReviewInterface.Create so the gateway needs no direct authz-client dependency and tests can inject a fake.
 type SubjectAccessReviewer interface {
 	Create(ctx context.Context, sar *authzv1.SubjectAccessReview, opts metav1.CreateOptions) (*authzv1.SubjectAccessReview, error)
 }

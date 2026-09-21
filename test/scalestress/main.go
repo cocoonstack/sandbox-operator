@@ -28,7 +28,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -114,8 +113,8 @@ func main() {
 
 	for _, n := range steps {
 		fmt.Printf("\n=== ramp to %d ===\n", n)
-		setReplicas(ctx, int32(n))
-		ready := waitReady(ctx, n, *stepWait)
+		benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, int32(n), map[string]string{runLabel: runVal})
+		ready := benchutil.WaitReady(ctx, cl, *ns, poolName, n, *stepWait)
 		time.Sleep(time.Duration(*settle) * time.Second)
 
 		if prodNow := prodPods(ctx, *prodNS, hosts); prodNow != prodBase {
@@ -143,25 +142,22 @@ func main() {
 
 		round := map[string]any{
 			"target": n, "ready": ready,
-			"sandbox_cr_total":  sbLat.count,
-			"cluster_pod_total": podLat.count,
-			// client-observed LIST wall-clock
-			"client_list_sandboxes": msStats(sbLat),
-			"client_list_pods":      msStats(podLat),
-			// apiserver-side LIST mean over the window
+			"sandbox_cr_total":                sbLat.count,
+			"cluster_pod_total":               podLat.count,
+			"client_list_sandboxes":           msStats(sbLat),
+			"client_list_pods":                msStats(podLat),
 			"apiserver_list_sandboxes_avg_ms": benchutil.Round2(deltaAvgMs(prev, last, "list_sandboxes")),
 			"apiserver_list_pods_avg_ms":      benchutil.Round2(deltaAvgMs(prev, last, "list_pods")),
-			// the vk LIST priority level under load
-			"vke_seats_nominal":            last["vke_nominal"],
-			"vke_seats_inuse_peak":         benchutil.Round2(peakInUse),
-			"vke_inqueue_peak":             benchutil.Round2(peakInqueue),
-			"vke_wait_avg_ms":              benchutil.Round2(deltaAvgMs(prev, last, "vke_wait")),
-			"vke_dispatched_delta":         benchutil.Round0(last["vke_dispatched"] - prev["vke_dispatched"]),
-			"vke_rejected_timeout_delta":   benchutil.Round0(last["vke_rej_timeout"] - prev["vke_rej_timeout"]),
-			"vke_rejected_cancelled_delta": benchutil.Round0(last["vke_rej_cancelled"] - prev["vke_rej_cancelled"]),
-			"node_distribution":            dist,
-			"prod_intact":                  prodNow,
-			"window_sec":                   benchutil.Round1(curT.Sub(prevT).Seconds()),
+			"vke_seats_nominal":               last["vke_nominal"],
+			"vke_seats_inuse_peak":            benchutil.Round2(peakInUse),
+			"vke_inqueue_peak":                benchutil.Round2(peakInqueue),
+			"vke_wait_avg_ms":                 benchutil.Round2(deltaAvgMs(prev, last, "vke_wait")),
+			"vke_dispatched_delta":            benchutil.Round0(last["vke_dispatched"] - prev["vke_dispatched"]),
+			"vke_rejected_timeout_delta":      benchutil.Round0(last["vke_rej_timeout"] - prev["vke_rej_timeout"]),
+			"vke_rejected_cancelled_delta":    benchutil.Round0(last["vke_rej_cancelled"] - prev["vke_rej_cancelled"]),
+			"node_distribution":               dist,
+			"prod_intact":                     prodNow,
+			"window_sec":                      benchutil.Round1(curT.Sub(prevT).Seconds()),
 		}
 		rounds = append(rounds, round)
 		fmt.Printf("[N=%d] sbCR=%d pods=%d | client LIST sb p50=%.0f/p95=%.0fms pods p50=%.0f/p95=%.0fms | apiserver LIST sb=%.0fms pods=%.1fms | %s seats %.0f/%.0f peak inq=%.0f wait=%.0fms disp+%.0f REJECT_timeout+%.0f | dist=%v prod=%d\n",
@@ -231,7 +227,6 @@ func main() {
 }
 
 func ensureTemplate(ctx context.Context, hosts []string) {
-	svc := false
 	container := corev1.Container{
 		Name: "agent", Image: *sbImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
@@ -239,49 +234,26 @@ func ensureTemplate(ctx context.Context, hosts []string) {
 			corev1.ResourceMemory: resource.MustParse("16Mi"),
 		}},
 	}
-	t := &extv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: tmplName, Namespace: *ns},
-		Spec: extv1beta1.SandboxTemplateSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				Service: &svc,
-				PodTemplate: sandboxv1beta1.PodTemplate{
-					ObjectMeta: sandboxv1beta1.PodMetadata{Annotations: map[string]string{
-						"sandbox.cocoonstack.io/runtime": "vk-cocoon",
-					}},
-					Spec: corev1.PodSpec{
-						Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-									MatchExpressions: []corev1.NodeSelectorRequirement{{
-										Key:      "kubernetes.io/hostname",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   hosts,
-									}},
-								}},
-							},
+	benchutil.EnsureTemplate(ctx, cl, *ns, tmplName,
+		map[string]string{"sandbox.cocoonstack.io/runtime": "vk-cocoon"},
+		corev1.PodSpec{
+			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      "kubernetes.io/hostname",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   hosts,
 						}},
-						Containers: []corev1.Container{container},
-					},
+					}},
 				},
-			},
-			NetworkPolicyManagement: "Unmanaged",
-		},
-	}
-	if err := cl.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
-		benchutil.Must(err)
-	}
-}
-
-func setReplicas(ctx context.Context, n int32) {
-	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, n, map[string]string{runLabel: runVal})
+			}},
+			Containers: []corev1.Container{container},
+		})
 }
 
 func ourReady(ctx context.Context) (total, ready int) {
 	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
-}
-
-func waitReady(ctx context.Context, target, timeoutSec int) int {
-	return benchutil.WaitReady(ctx, cl, *ns, poolName, target, timeoutSec)
 }
 
 func nodeDistribution(ctx context.Context) map[string]int {

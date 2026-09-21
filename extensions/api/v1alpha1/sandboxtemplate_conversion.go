@@ -33,7 +33,6 @@ func (s *SandboxTemplate) ConvertTo(dstRaw conversion.Hub) error {
 	s.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	convertTemplateSpecTo(&s.Spec, &dst.Spec)
 
-	// Restore v1beta1-only VolumeClaimTemplatesPolicy if present in annotations
 	if policy, ok := s.Annotations["api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy"]; ok {
 		switch v1beta1.VolumeClaimTemplatesPolicy(policy) {
 		case v1beta1.VolumeClaimTemplatesPolicyDisallowed, v1beta1.VolumeClaimTemplatesPolicyAllowed, v1beta1.VolumeClaimTemplatesPolicyOverrides:
@@ -60,7 +59,6 @@ func (s *SandboxTemplate) ConvertFrom(srcRaw conversion.Hub) error {
 	// Strip the state annotation if present so it doesn't leak to clients and get sent back on updates
 	delete(s.Annotations, v1alpha1SandboxTemplateStateAnnotation)
 
-	// Preserve v1beta1-only VolumeClaimTemplatesPolicy for round-tripping
 	if src.Spec.VolumeClaimTemplatesPolicy != "" {
 		if s.Annotations == nil {
 			s.Annotations = make(map[string]string)

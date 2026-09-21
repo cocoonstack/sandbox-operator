@@ -321,8 +321,7 @@ func (r *SandboxReconciler) computeReadyCondition(sandbox *sandboxv1beta1.Sandbo
 
 	message, podReady := podReadiness(pod)
 
-	// svcRequired: true if the sandbox explicitly requests a service or if a
-	// service already exists.
+	// svcRequired: true if the sandbox explicitly requests a service or one already exists.
 	svcRequired := false
 	if sandbox.Spec.Service != nil {
 		svcRequired = *sandbox.Spec.Service
@@ -543,13 +542,11 @@ func (r *SandboxReconciler) createHeadlessService(ctx context.Context, sandbox *
 	return service, nil
 }
 
-// setServiceStatus updates the sandbox status with the service name and FQDN.
 func (r *SandboxReconciler) setServiceStatus(sandbox *sandboxv1beta1.Sandbox, service *corev1.Service) {
 	sandbox.Status.Service = service.Name
 	sandbox.Status.ServiceFQDN = service.Name + "." + service.Namespace + ".svc." + r.ClusterDomain
 }
 
-// clearServiceStatus clears the service-related fields from sandbox status.
 func (r *SandboxReconciler) clearServiceStatus(sandbox *sandboxv1beta1.Sandbox) {
 	sandbox.Status.Service = ""
 	sandbox.Status.ServiceFQDN = ""
@@ -1047,7 +1044,6 @@ func setSandboxExpiredCondition(sandbox *sandboxv1beta1.Sandbox) {
 	})
 }
 
-// sandboxMarkedExpired checks if the sandbox is already marked as expired.
 func sandboxMarkedExpired(sandbox *sandboxv1beta1.Sandbox) bool {
 	cond := meta.FindStatusCondition(sandbox.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 	return cond != nil && (cond.Reason == sandboxv1beta1.SandboxReasonExpired)
@@ -1074,7 +1070,6 @@ func podReadiness(pod *corev1.Pod) (message string, ready bool) {
 	return "Pod is Ready", true
 }
 
-// isAdoptable reports whether obj carries the warm-pool adoptable label.
 func isAdoptable(obj client.Object) bool {
 	return obj.GetLabels()[sandboxv1beta1.SandboxAdoptableLabel] == "true"
 }
@@ -1089,7 +1084,6 @@ func resolvePodName(sandbox *sandboxv1beta1.Sandbox) string {
 	return sandbox.Name
 }
 
-// podIPsFromStatus converts the K8s PodIP slice to a plain string slice.
 func podIPsFromStatus(podIPs []corev1.PodIP) []string {
 	if len(podIPs) == 0 {
 		return nil
@@ -1106,25 +1100,19 @@ type (
 	keyCallback  func(string)
 )
 
-// hasSystemReservedPrefix reports whether a key uses a label/annotation prefix
-// reserved for the sandbox system or its extensions.
-func hasSystemReservedPrefix(key string) bool {
+// isSystemLabel reports whether a key uses a label or annotation prefix reserved
+// for the sandbox system. Such keys must never be settable through a user-supplied
+// PodTemplate, otherwise a tenant could override security-critical labels (e.g. the
+// headless Service selector label) and hijack another Sandbox's network traffic.
+func isSystemLabel(key string) bool {
 	return strings.HasPrefix(key, "agents.x-k8s.io/") ||
 		strings.HasPrefix(key, "extensions.agents.x-k8s.io/")
-}
-
-// isSystemLabel reports whether a label key is reserved for the sandbox system.
-// Such keys must never be settable through a user-supplied PodTemplate, otherwise a
-// tenant could override security-critical labels (e.g. the headless Service selector
-// label) and hijack another Sandbox's network traffic.
-func isSystemLabel(key string) bool {
-	return hasSystemReservedPrefix(key)
 }
 
 // isSystemAnnotation reports whether an annotation key is reserved for the sandbox
 // system and therefore must not be settable through a user-supplied PodTemplate.
 func isSystemAnnotation(key string) bool {
-	return hasSystemReservedPrefix(key) ||
+	return isSystemLabel(key) ||
 		key == asmetrics.TraceContextAnnotation
 }
 

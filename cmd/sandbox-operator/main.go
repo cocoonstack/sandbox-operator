@@ -72,8 +72,7 @@ func main() {
 	}
 }
 
-// options holds every operator flag. It is one struct so main stays a
-// sequence of named phases rather than a 400-line body.
+// options holds every operator flag.
 type options struct {
 	metricsAddr             string
 	probeAddr               string
@@ -164,10 +163,6 @@ func (o *options) validate() error {
 		return fmt.Errorf("kube-api-burst must be greater than 0")
 	}
 	return nil
-}
-
-func (o *options) totalWorkers() int {
-	return o.sandboxWorkers + o.claimWorkers + o.warmPoolWorkers + o.templateWorkers
 }
 
 func (o *options) run() error {
@@ -262,7 +257,7 @@ func (o *options) logSettings() {
 		"sandboxTemplate", o.templateWorkers,
 		"sandboxWarmPoolMaxBatchSize", o.warmPoolMaxBatchSize,
 	)
-	total := o.totalWorkers()
+	total := o.sandboxWorkers + o.claimWorkers + o.warmPoolWorkers + o.templateWorkers
 	if total > 1000 {
 		setupLog.Info("Warning: total concurrent workers exceeds 1000, which could lead to resource exhaustion", "total", total)
 	}

@@ -66,12 +66,6 @@ type SandboxTimeoutRequest struct {
 	Timeout int32 `json:"timeout"`
 }
 
-// SandboxRefreshRequest is the POST /sandboxes/{sandboxID}/refreshes request
-// body (spec: SandboxRefreshRequest) — the keepalive.
-type SandboxRefreshRequest struct {
-	Duration *int32 `json:"duration,omitempty"`
-}
-
 // SandboxPauseRequest is the POST /sandboxes/{id}/pause body. memory=false
 // takes a filesystem-only snapshot, whose resume cold-boots.
 type SandboxPauseRequest struct {

@@ -161,12 +161,10 @@ func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
 	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, http.StatusNoContent)
 }
 
-// postJSON sends body as JSON via POST and decodes a 2xx reply into out.
 func (c *Client) postJSON(ctx context.Context, path string, body, out any) error {
 	return c.sendJSON(ctx, http.MethodPost, path, body, out)
 }
 
-// putJSON sends body as JSON via PUT and decodes a 2xx reply into out.
 func (c *Client) putJSON(ctx context.Context, path string, body, out any) error {
 	return c.sendJSON(ctx, http.MethodPut, path, body, out)
 }

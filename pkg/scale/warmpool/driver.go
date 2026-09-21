@@ -91,7 +91,7 @@ type nodeView struct {
 
 // desiredPool is a resolved SandboxWarmPool: its key and per-node target.
 type desiredPool struct {
-	nn      types.NamespacedName
+	pool    *extv1beta1.SandboxWarmPool
 	key     scale.PoolKey
 	targets map[string]int
 }
@@ -162,7 +162,6 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 	}
 
 	desired := make([]desiredPool, 0, len(pools.Items))
-	resolved := make(map[types.NamespacedName]scale.PoolKey, len(pools.Items))
 	for i := range pools.Items {
 		p := &pools.Items[i]
 		key, rerr := d.poolKey(ctx, p)
@@ -174,14 +173,12 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 			d.writeStatus(ctx, p, nodes, key) // status still reflects live warm (0 target)
 			continue
 		}
-		nn := types.NamespacedName{Namespace: p.Namespace, Name: p.Name}
-		resolved[nn] = key
 		replicas := int32(1)
 		if p.Spec.Replicas != nil {
 			replicas = *p.Spec.Replicas
 		}
 		desired = append(desired, desiredPool{
-			nn:      nn,
+			pool:    p,
 			key:     key,
 			targets: distribute(replicas, nodes),
 		})
@@ -189,16 +186,10 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 
 	d.applyToNodes(ctx, nodes, desired)
 
-	// Write each pool's status from the warm counts applyToNodes just refreshed
-	// off the PUT responses (post-apply warm may still be refilling; status
-	// reflects what the nodes report now).
-	for i := range pools.Items {
-		p := &pools.Items[i]
-		key, ok := resolved[types.NamespacedName{Namespace: p.Namespace, Name: p.Name}]
-		if !ok {
-			continue
-		}
-		d.writeStatus(ctx, p, nodes, key)
+	// Status comes from the warm counts applyToNodes just refreshed off the PUT
+	// responses; post-apply warm may still be refilling.
+	for _, dp := range desired {
+		d.writeStatus(ctx, dp.pool, nodes, dp.key)
 	}
 	return nil
 }
@@ -338,8 +329,7 @@ func syncRequest(context.Context, client.Object) []reconcile.Request {
 	return []reconcile.Request{{Name: "sync"}}
 }
 
-// distribute spreads total warm targets evenly across nodes (base + remainder to
-// the first nodes), matching the aggregated apiserver's most-warm-first node pick.
+// distribute spreads total warm targets evenly across nodes (base + remainder to the first nodes).
 func distribute(replicas int32, nodes []nodeView) map[string]int {
 	targets := make(map[string]int, len(nodes))
 	if len(nodes) == 0 {

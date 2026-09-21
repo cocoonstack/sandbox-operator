@@ -40,7 +40,6 @@ func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 	ConvertSpecTo(&s.Spec, &dst.Spec)
 	ConvertStatusTo(&s.Status, &dst.Status)
 
-	// Preserve the fields v1beta1 cannot represent for lossless round-tripping
 	if dst.Annotations == nil {
 		dst.Annotations = make(map[string]string)
 	}
@@ -63,14 +62,12 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 	ConvertSpecFrom(&src.Spec, &s.Spec)
 	ConvertStatusFrom(&src.Status, &s.Status)
 
-	// Set best-effort default for Status.Replicas based on OperatingMode.
 	if src.Spec.OperatingMode == v1beta1.SandboxOperatingModeSuspended {
 		s.Status.Replicas = 0
 	} else {
 		s.Status.Replicas = 1
 	}
 
-	// Restore original v1alpha1 state if present to ensure lossless conversion
 	if stateJSON, ok := s.Annotations[v1alpha1SandboxStateAnnotation]; ok {
 		// Strip the state annotation so it doesn't leak to clients and get sent back on updates
 		delete(s.Annotations, v1alpha1SandboxStateAnnotation)
@@ -80,16 +77,10 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 			return fmt.Errorf("unmarshal v1alpha1 sandbox state: %w", err)
 		}
 
-		// Restore replicas field from original if OperatingMode matches original intent
-		switch src.Spec.OperatingMode {
-		case v1beta1.SandboxOperatingModeSuspended:
-			s.Spec.Replicas = new(int32(0))
-		case v1beta1.SandboxOperatingModeRunning:
-			if original.Spec.Replicas == nil || *original.Spec.Replicas != 0 {
-				s.Spec.Replicas = original.Spec.Replicas
-			} else {
-				s.Spec.Replicas = new(int32(1))
-			}
+		// A stashed 0 is the suspended marker, not a replica count: ConvertSpecFrom already derived the count from the mode.
+		if src.Spec.OperatingMode == v1beta1.SandboxOperatingModeRunning &&
+			(original.Spec.Replicas == nil || *original.Spec.Replicas != 0) {
+			s.Spec.Replicas = original.Spec.Replicas
 		}
 	}
 
@@ -170,35 +161,21 @@ func ConvertPodTemplateFrom(src *v1beta1.PodTemplate, dst *PodTemplate) {
 }
 
 func ConvertPodMetadataTo(src *PodMetadata, dst *v1beta1.PodMetadata) {
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
+	*dst = v1beta1.PodMetadata(*src)
 }
 
 func ConvertPodMetadataFrom(src *v1beta1.PodMetadata, dst *PodMetadata) {
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
+	*dst = PodMetadata(*src)
 }
 
 func ConvertPVCClaimTemplateTo(src *PersistentVolumeClaimTemplate, dst *v1beta1.PersistentVolumeClaimTemplate) {
 	dst.Spec = src.Spec
-	ConvertEmbeddedMetadataTo(&src.EmbeddedObjectMetadata, &dst.EmbeddedObjectMetadata)
+	dst.EmbeddedObjectMetadata = v1beta1.EmbeddedObjectMetadata(src.EmbeddedObjectMetadata)
 }
 
 func ConvertPVCClaimTemplateFrom(src *v1beta1.PersistentVolumeClaimTemplate, dst *PersistentVolumeClaimTemplate) {
 	dst.Spec = src.Spec
-	ConvertEmbeddedMetadataFrom(&src.EmbeddedObjectMetadata, &dst.EmbeddedObjectMetadata)
-}
-
-func ConvertEmbeddedMetadataTo(src *EmbeddedObjectMetadata, dst *v1beta1.EmbeddedObjectMetadata) {
-	dst.Name = src.Name
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
-}
-
-func ConvertEmbeddedMetadataFrom(src *v1beta1.EmbeddedObjectMetadata, dst *EmbeddedObjectMetadata) {
-	dst.Name = src.Name
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
+	dst.EmbeddedObjectMetadata = EmbeddedObjectMetadata(src.EmbeddedObjectMetadata)
 }
 
 func ConvertLifecycleTo(src *Lifecycle, dst *v1beta1.Lifecycle) {

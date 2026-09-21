@@ -65,8 +65,6 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 // details, restoring it first when paused. 200 means it was already running,
 // 201 that it was paused and got resumed — the SDK accepts either, and the
 // distinction is what tells an operator whether a restore actually happened.
-// A resume takes cocoon's mmap fast path (~55 ms), unlike the pause that
-// preceded it.
 func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	var req ConnectSandbox
 	if !decodeOptionalBody(w, r, &req) {
@@ -375,7 +373,7 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool
 }
 
 func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg string) {
-	if k8serrors.IsNotFound(err) {
+	if k8serrors.IsNotFound(err) || errors.Is(err, errSandboxNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
 		return
 	}

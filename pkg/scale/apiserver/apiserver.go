@@ -55,8 +55,7 @@ func InstallSandboxAPI(server *genericapiserver.GenericAPIServer, store scale.Sa
 // authorization are left nil (the generic handler chain treats nil as
 // "disabled", i.e. pass-through) so the aggregation acceptance harness can
 // exercise the real client-go → apiserver storage code path without TLS or
-// certificate machinery. The secure production binary (cmd/sandbox-apiserver)
-// wires delegated authn/authz on top of the same InstallSandboxAPI.
+// certificate machinery.
 func NewInProcessServer(name string, store scale.SandboxStore) (*genericapiserver.GenericAPIServer, error) {
 	config := genericapiserver.NewConfig(Codecs)
 	config.ExternalAddress = "localhost:443"

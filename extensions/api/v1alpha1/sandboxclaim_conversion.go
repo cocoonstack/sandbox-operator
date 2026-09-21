@@ -29,11 +29,7 @@ import (
 const (
 	v1alpha1SandboxClaimStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandboxclaim-state"
 
-	// v1beta1SandboxClaimVolumeClaimTemplatesAnnotation preserves the v1beta1-only
-	// spec.volumeClaimTemplates field across the lossy v1alpha1 representation, so a
-	// v1beta1-authored claim keeps its PVCs (and forced cold-start) after a round trip
-	// through any v1alpha1 client. Symmetric to the SandboxTemplate
-	// VolumeClaimTemplatesPolicy annotation.
+	// v1beta1SandboxClaimVolumeClaimTemplatesAnnotation preserves the v1beta1-only volumeClaimTemplates field (and forced cold-start) across a lossy v1alpha1 hop; symmetric to SandboxTemplate's policy annotation.
 	v1beta1SandboxClaimVolumeClaimTemplatesAnnotation = "api.agents.x-k8s.io/v1beta1-sandboxclaim-volume-claim-templates"
 
 	v1beta1SandboxClaimWarmPoolRefAnnotation = "api.agents.x-k8s.io/v1beta1-sandboxclaim-warm-pool-ref"
@@ -47,8 +43,6 @@ func (s *SandboxClaim) ConvertTo(dstRaw conversion.Hub) error {
 	convertClaimSpecTo(&s.Spec, &dst.Spec, s.Name, s.Status.SandboxStatus.Name)
 	convertClaimStatusTo(&s.Status, &dst.Status)
 
-	// Restore the v1beta1-only volumeClaimTemplates from its preservation
-	// annotation, so a v1beta1-authored claim keeps its PVCs after a v1alpha1 hop.
 	if raw, ok := s.Annotations[v1beta1SandboxClaimVolumeClaimTemplatesAnnotation]; ok {
 		var vcts []sandboxv1beta1.PersistentVolumeClaimTemplate
 		if err := json.Unmarshal([]byte(raw), &vcts); err != nil {
@@ -82,9 +76,7 @@ func (s *SandboxClaim) ConvertFrom(srcRaw conversion.Hub) error {
 		return err
 	}
 
-	// Preserve the v1beta1-only volumeClaimTemplates across the v1alpha1 hop.
-	// v1alpha1 SandboxClaim has no such field, so carry it in an annotation that
-	// ConvertTo decodes back into spec.volumeClaimTemplates.
+	// v1alpha1 has no volumeClaimTemplates field; stash it in an annotation that ConvertTo restores.
 	if src.Spec.VolumeClaimTemplates != nil {
 		raw, err := json.Marshal(src.Spec.VolumeClaimTemplates)
 		if err != nil {
@@ -110,9 +102,7 @@ func (s *SandboxClaim) ConvertFrom(srcRaw conversion.Hub) error {
 	return nil
 }
 
-// restoreV1alpha1Spec replays the v1alpha1 spec stashed on the way up, so a
-// round trip through the hub is lossless. The stash annotation is consumed here
-// rather than returned to clients, who would send it back on the next update.
+// restoreV1alpha1Spec replays the v1alpha1 spec stashed on the way up so the hub round trip is lossless; the annotation is consumed here, not returned to clients.
 func restoreV1alpha1Spec(s *SandboxClaim, src *v1beta1.SandboxClaim) error {
 	stateJSON, ok := s.Annotations[v1alpha1SandboxClaimStateAnnotation]
 	if !ok {
@@ -125,8 +115,7 @@ func restoreV1alpha1Spec(s *SandboxClaim, src *v1beta1.SandboxClaim) error {
 		return fmt.Errorf("unmarshal v1alpha1 SandboxClaim state: %w", err)
 	}
 
-	// The template ref is kept either way: when the hub's warm pool changed there
-	// is no way to derive the new one, so the stashed value is the best fallback.
+	// TemplateRef is kept either way: when the hub's warm pool changed there is no way to derive the new one, so the stash is the best fallback.
 	s.Spec.TemplateRef = original.Spec.TemplateRef
 
 	expected := original.Spec.TemplateRef.Name
@@ -142,16 +131,9 @@ func restoreV1alpha1Spec(s *SandboxClaim, src *v1beta1.SandboxClaim) error {
 }
 
 func isWarmPoolRefMatching(actualName, expectedName, sandboxName string) bool {
-	if actualName == expectedName {
-		return true
-	}
-	if actualName == v1beta1.ShadowPoolPrefix+expectedName {
-		return true
-	}
-	if sandboxName != "" && (actualName == sandboxName || actualName == stripRandomSuffix(sandboxName)) {
-		return true
-	}
-	return false
+	return actualName == expectedName ||
+		actualName == v1beta1.ShadowPoolPrefix+expectedName ||
+		(sandboxName != "" && (actualName == sandboxName || actualName == stripRandomSuffix(sandboxName)))
 }
 
 func stripRandomSuffix(name string) string {
@@ -193,11 +175,7 @@ func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, cl
 	if src.Env != nil {
 		dst.Env = make([]v1beta1.EnvVar, len(src.Env))
 		for i := range src.Env {
-			dst.Env[i] = v1beta1.EnvVar{
-				Name:          src.Env[i].Name,
-				Value:         src.Env[i].Value,
-				ContainerName: src.Env[i].ContainerName,
-			}
+			dst.Env[i] = v1beta1.EnvVar(src.Env[i])
 		}
 	} else {
 		dst.Env = nil
@@ -232,11 +210,7 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 	if src.Env != nil {
 		dst.Env = make([]EnvVar, len(src.Env))
 		for i := range src.Env {
-			dst.Env[i] = EnvVar{
-				Name:          src.Env[i].Name,
-				Value:         src.Env[i].Value,
-				ContainerName: src.Env[i].ContainerName,
-			}
+			dst.Env[i] = EnvVar(src.Env[i])
 		}
 	} else {
 		dst.Env = nil
@@ -245,18 +219,12 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 
 func convertClaimStatusTo(src *SandboxClaimStatus, dst *v1beta1.SandboxClaimStatus) {
 	dst.Conditions = src.Conditions
-	dst.SandboxStatus = v1beta1.SandboxStatus{
-		Name:   src.SandboxStatus.Name,
-		PodIPs: src.SandboxStatus.PodIPs,
-	}
+	dst.SandboxStatus = v1beta1.SandboxStatus(src.SandboxStatus)
 }
 
 func convertClaimStatusFrom(src *v1beta1.SandboxClaimStatus, dst *SandboxClaimStatus) {
 	dst.Conditions = src.Conditions
-	dst.SandboxStatus = SandboxStatus{
-		Name:   src.SandboxStatus.Name,
-		PodIPs: src.SandboxStatus.PodIPs,
-	}
+	dst.SandboxStatus = SandboxStatus(src.SandboxStatus)
 }
 
 func stashClaimState(dst *v1beta1.SandboxClaim, sCopy *SandboxClaim) error {

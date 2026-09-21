@@ -21,11 +21,8 @@ const (
 
 	ModeVKCocoon = "vk-cocoon"
 	ModeStandard = "standard"
-	// ModeSandboxd routes a Sandbox Pod to the sandboxd hot-pool data plane —
-	// the vk-sandbox virtual node, which serves the claim from a
-	// node-local sandboxd (github.com/cocoonstack/sandbox) in sub-millisecond
-	// time. This is the successor to ModeVKCocoon for agent-sandbox workloads;
-	// vk-cocoon no longer answers sandbox Pods when this mode is selected.
+	// ModeSandboxd routes a Sandbox Pod to the sandboxd hot-pool data plane (vk-sandbox virtual
+	// node, github.com/cocoonstack/sandbox, sub-ms serve); vk-cocoon no longer answers Sandbox Pods.
 	ModeSandboxd = "sandboxd"
 	// DefaultMode keeps ordinary kubelet scheduling unless a Sandbox explicitly
 	// opts into a virtual-node contract.
@@ -75,35 +72,23 @@ func (m *Mutator) MutatePod(_ context.Context, sandbox *sandboxv1beta1.Sandbox, 
 		return fmt.Errorf("pod is nil")
 	}
 
-	mode, explicit := requestedMode(pod, m.defaultMode)
-	switch mode {
+	switch mode := requestedMode(pod, m.defaultMode); mode {
 	case ModeStandard:
 		return nil
 	case ModeVKCocoon:
-		return m.mutateVKCocoon(sandbox, pod, explicit)
+		return m.mutateVKCocoon(sandbox, pod)
 	case ModeSandboxd:
-		return m.mutateSandboxd(pod, explicit)
+		return m.mutateSandboxd(pod)
 	default:
 		return fmt.Errorf("unsupported %s value %q", RuntimeAnnotation, mode)
 	}
 }
 
 // mutateVKCocoon routes the Pod to a vk-cocoon virtual node (cocoon MicroVM).
-func (m *Mutator) mutateVKCocoon(sandbox *sandboxv1beta1.Sandbox, pod *corev1.Pod, explicit bool) error {
-	if pod.Spec.RuntimeClassName != nil {
-		if explicit {
-			return fmt.Errorf("%s=%s conflicts with spec.runtimeClassName", RuntimeAnnotation, ModeVKCocoon)
-		}
-		return nil
-	}
+func (m *Mutator) mutateVKCocoon(sandbox *sandboxv1beta1.Sandbox, pod *corev1.Pod) error {
 	if err := routeToVirtualNode(pod, ModeVKCocoon, vkNodeLabelKey, vkNodeLabelValue); err != nil {
 		return err
 	}
-
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string)
-	}
-	setDefault(pod.Annotations, RuntimeAnnotation, ModeVKCocoon)
 	setDefault(pod.Annotations, cocoonModeAnnotation, "run")
 	setDefault(pod.Annotations, cocoonManagedAnnotation, "true")
 	setDefault(pod.Annotations, cocoonVMNameAnnotation, stableVMName(sandbox.Namespace, sandbox.Name))
@@ -121,21 +106,10 @@ func (m *Mutator) mutateVKCocoon(sandbox *sandboxv1beta1.Sandbox, pod *corev1.Po
 // mutateSandboxd routes the Pod to a vk-sandbox virtual node (sandboxd
 // hot pool). It sets the sandboxd claim axes the warm-pool driver provisions
 // under, so the node provider claims from the pool that exists.
-func (m *Mutator) mutateSandboxd(pod *corev1.Pod, explicit bool) error {
-	if pod.Spec.RuntimeClassName != nil {
-		if explicit {
-			return fmt.Errorf("%s=%s conflicts with spec.runtimeClassName", RuntimeAnnotation, ModeSandboxd)
-		}
-		return nil
-	}
+func (m *Mutator) mutateSandboxd(pod *corev1.Pod) error {
 	if err := routeToVirtualNode(pod, ModeSandboxd, sandboxdNodeLabelKey, sandboxdNodeLabelValue); err != nil {
 		return err
 	}
-
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string)
-	}
-	setDefault(pod.Annotations, RuntimeAnnotation, ModeSandboxd)
 	key := scale.PoolKeyFor(pod.Spec.Containers, scale.NetForAnnotations(pod.Annotations, nil))
 	setDefault(pod.Annotations, sandboxdTemplateAnnotation, key.Template)
 	setDefault(pod.Annotations, sandboxdNetAnnotation, key.Net)
@@ -144,10 +118,13 @@ func (m *Mutator) mutateSandboxd(pod *corev1.Pod, explicit bool) error {
 }
 
 // routeToVirtualNode pins the Pod to the virtual node identified by
-// labelKey=labelValue and adds the shared vk-provider toleration. A pinned
-// NodeName bypasses the selector entirely and would misroute the sandbox, so it
-// is rejected rather than silently mis-scheduled.
+// labelKey=labelValue, adds the shared vk-provider toleration and stamps mode.
+// A pinned NodeName or a runtimeClassName bypasses the selector and would
+// misroute the sandbox, so either is rejected rather than silently mis-scheduled.
 func routeToVirtualNode(pod *corev1.Pod, mode, labelKey, labelValue string) error {
+	if pod.Spec.RuntimeClassName != nil {
+		return fmt.Errorf("%s=%s conflicts with spec.runtimeClassName", RuntimeAnnotation, mode)
+	}
 	if pod.Spec.NodeName != "" {
 		return fmt.Errorf("%s=%s conflicts with spec.nodeName=%s", RuntimeAnnotation, mode, pod.Spec.NodeName)
 	}
@@ -166,19 +143,23 @@ func routeToVirtualNode(pod *corev1.Pod, mode, labelKey, labelValue string) erro
 			Effect:   corev1.TaintEffectNoSchedule,
 		})
 	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	setDefault(pod.Annotations, RuntimeAnnotation, mode)
 	return nil
 }
 
-func requestedMode(pod *corev1.Pod, defaultMode string) (string, bool) {
+func requestedMode(pod *corev1.Pod, defaultMode string) string {
 	if pod.Annotations != nil {
 		if value := strings.TrimSpace(pod.Annotations[RuntimeAnnotation]); value != "" {
-			return value, true
+			return value
 		}
 	}
 	if pod.Spec.RuntimeClassName != nil {
-		return ModeStandard, false
+		return ModeStandard
 	}
-	return defaultMode, false
+	return defaultMode
 }
 
 func toleratesVKProvider(tolerations []corev1.Toleration) bool {

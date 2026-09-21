@@ -28,7 +28,7 @@ func (s *SandboxWarmPool) ConvertTo(dstRaw conversion.Hub) error {
 
 	s.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	convertWarmPoolSpecTo(&s.Spec, &dst.Spec)
-	convertWarmPoolStatusTo(&s.Status, &dst.Status)
+	dst.Status = v1beta1.SandboxWarmPoolStatus(s.Status)
 
 	delete(dst.Annotations, v1alpha1SandboxWarmPoolStateAnnotation)
 	return nil
@@ -40,7 +40,7 @@ func (s *SandboxWarmPool) ConvertFrom(srcRaw conversion.Hub) error {
 
 	src.ObjectMeta.DeepCopyInto(&s.ObjectMeta)
 	convertWarmPoolSpecFrom(&src.Spec, &s.Spec)
-	convertWarmPoolStatusFrom(&src.Status, &s.Status)
+	s.Status = SandboxWarmPoolStatus(src.Status)
 
 	// Strip the state annotation if present so it doesn't leak to clients and get sent back on updates
 	delete(s.Annotations, v1alpha1SandboxWarmPoolStateAnnotation)
@@ -80,16 +80,4 @@ func convertWarmPoolSpecFrom(src *v1beta1.SandboxWarmPoolSpec, dst *SandboxWarmP
 	} else {
 		dst.UpdateStrategy = nil
 	}
-}
-
-func convertWarmPoolStatusTo(src *SandboxWarmPoolStatus, dst *v1beta1.SandboxWarmPoolStatus) {
-	dst.Replicas = src.Replicas
-	dst.ReadyReplicas = src.ReadyReplicas
-	dst.Selector = src.Selector
-}
-
-func convertWarmPoolStatusFrom(src *v1beta1.SandboxWarmPoolStatus, dst *SandboxWarmPoolStatus) {
-	dst.Replicas = src.Replicas
-	dst.ReadyReplicas = src.ReadyReplicas
-	dst.Selector = src.Selector
 }

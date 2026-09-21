@@ -255,8 +255,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		sandboxesToDelete := min(currentReplicas-desiredReplicas, maxBatchSize)
 		logger.Info("Deleting excess sandboxes", "count", sandboxesToDelete)
 
-		// Prioritize deleting unready sandboxes before ready ones,
-		// then newest first within each group.
+		// Prioritize deleting unready sandboxes before ready ones, then newest first within each group.
 		slices.SortFunc(activeSandboxes, func(a, b *sandboxv1beta1.Sandbox) int {
 			aReady := isSandboxReady(a)
 			bReady := isSandboxReady(b)
@@ -313,7 +312,6 @@ func (r *SandboxWarmPoolReconciler) reconcilePoolStatusOnly(ctx context.Context,
 	return nil
 }
 
-// adoptSandbox sets this warmpool as the owner of an orphaned sandbox.
 func (r *SandboxWarmPoolReconciler) adoptSandbox(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool, sb *sandboxv1beta1.Sandbox) error {
 	if err := controllerutil.SetControllerReference(warmPool, sb, r.Scheme); err != nil {
 		return err
@@ -338,15 +336,10 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		updateStrategyType = warmPool.Spec.UpdateStrategy.Type
 	}
 
-	var updateStrategy extensionsv1beta1.SandboxWarmPoolUpdateStrategyType
-	switch updateStrategyType {
-	case extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType:
-		updateStrategy = extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType
-	case extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType, "":
-		updateStrategy = extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType
-	default:
+	recreate := updateStrategyType == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType
+	if !recreate && updateStrategyType != "" &&
+		updateStrategyType != extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType {
 		logger.Info("Unknown update strategy, defaulting to OnReplenish", "strategy", updateStrategyType)
-		updateStrategy = extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType
 	}
 
 	for i := range sandboxes {
@@ -364,7 +357,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 			continue
 		}
 
-		if tmplErr == nil && (updateStrategy == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType || isOrphan) {
+		if tmplErr == nil && (recreate || isOrphan) {
 			if r.isSandboxStale(ctx, sb, check) {
 				logger.Info("Deleting stale sandbox", "sandbox", sb.Name, "isOrphan", isOrphan)
 				if err := r.Delete(ctx, sb); err != nil {
@@ -403,7 +396,6 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 	return activeSandboxes, allErrors
 }
 
-// fetchTemplateAndHash fetches the sandbox template and computes its hash.
 func (r *SandboxWarmPoolReconciler) fetchTemplateAndHash(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (*extensionsv1beta1.SandboxTemplate, string, error) {
 	logger := log.FromContext(ctx)
 	template, tmplErr := r.getTemplate(ctx, warmPool)
@@ -455,8 +447,7 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(ctx context.Context, warmPool
 	sandbox.Spec.PodTemplate.ObjectMeta.Labels[sandboxTemplateRefHash] = SandboxTemplateRefHash(warmPool.Spec.TemplateRef.Name)
 	sandbox.Spec.PodTemplate.ObjectMeta.Labels[sandboxv1beta1.SandboxTemplateHashLabel] = currentSandboxBlueprintHash
 
-	// Respect the template's custom eviction annotation if explicitly specified.
-	// Only apply the default eviction behavior if the annotation is not defined.
+	// Apply the default eviction behavior only when the annotation is not already set.
 	if _, exists := sandbox.Spec.PodTemplate.ObjectMeta.Annotations[warmPoolEvictionAnnotation]; !exists {
 		if r.EnableWarmPoolEviction {
 			if sandbox.Spec.PodTemplate.ObjectMeta.Annotations == nil {
@@ -475,7 +466,6 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(ctx context.Context, warmPool
 	return sandbox, nil
 }
 
-// createPoolSandbox creates a full Sandbox CR for the warm pool using a pre-built sandboxCR.
 func (r *SandboxWarmPoolReconciler) createPoolSandbox(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool, sandboxCR *sandboxv1beta1.Sandbox) error {
 	logger := log.FromContext(ctx)
 	sandbox := sandboxCR.DeepCopy()
@@ -499,7 +489,6 @@ func (r *SandboxWarmPoolReconciler) deletePoolSandbox(ctx context.Context, sb *s
 	return nil
 }
 
-// updateStatus updates the status of the SandboxWarmPool if it has changed.
 func (r *SandboxWarmPoolReconciler) updateStatus(ctx context.Context, oldStatus *extensionsv1beta1.SandboxWarmPoolStatus, warmPool *extensionsv1beta1.SandboxWarmPool) error {
 	logger := log.FromContext(ctx)
 
@@ -534,9 +523,7 @@ func (r *SandboxWarmPoolReconciler) getTemplate(ctx context.Context, warmPool *e
 	return template, nil
 }
 
-// isSandboxStale checks if the sandbox version matches the current template.
-// It uses a cache (vettedHashes) to avoid repeated expensive DeepEqual calls
-// for sandboxes with the same hash.
+// isSandboxStale reports whether sandbox no longer matches template, memoizing DeepEqual results in check.vetted by hash.
 func (r *SandboxWarmPoolReconciler) isSandboxStale(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, check staleCheck) bool {
 	sandboxHash := sandbox.Labels[sandboxv1beta1.SandboxTemplateHashLabel]
 
@@ -586,11 +573,9 @@ func (r *SandboxWarmPoolReconciler) comparePodSpecs(template *extensionsv1beta1.
 	return equality.Semantic.DeepEqual(expectedSpec, actualSandboxSpec)
 }
 
-// compareVolumeClaimTemplates checks if the volume claim templates in the sandbox are equal to the template.
-// Only each entry's name and spec are compared, as changes in metadata (like labels, annotations) are not tracked for staleness.
-// Note: Comparison is index-based (order-sensitive) to stay consistent with computeSandboxBlueprintHash (+listType=atomic).
-// Making this comparison order-independent without also sorting the templates in computeSandboxBlueprintHash
-// would cause reordered warm sandboxes to fail the hash label check on every reconcile.
+// compareVolumeClaimTemplates compares each entry's name and spec only; metadata like labels/annotations is not tracked for staleness.
+// Comparison is index-based (order-sensitive) to stay consistent with computeSandboxBlueprintHash (+listType=atomic); making it
+// order-independent without also sorting in computeSandboxBlueprintHash would fail the hash label check on every reconcile.
 func (r *SandboxWarmPoolReconciler) compareVolumeClaimTemplates(template *extensionsv1beta1.SandboxTemplate, actualVCTs []sandboxv1beta1.PersistentVolumeClaimTemplate) bool {
 	if len(template.Spec.VolumeClaimTemplates) != len(actualVCTs) {
 		return false
@@ -614,7 +599,6 @@ func (r *SandboxWarmPoolReconciler) compareSandboxBlueprint(template *extensions
 		equality.Semantic.DeepEqual(template.Spec.Service, actualSandboxSpec.Service)
 }
 
-// findWarmPoolsForTemplate returns a list of reconcile.Requests for all SandboxWarmPools that reference the template.
 func (r *SandboxWarmPoolReconciler) findWarmPoolsForTemplate(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	template, ok := obj.(*extensionsv1beta1.SandboxTemplate)
@@ -638,9 +622,7 @@ func (r *SandboxWarmPoolReconciler) findWarmPoolsForTemplate(ctx context.Context
 	return requests
 }
 
-// slowStartBatch is a helper that runs a given function fn multiple times in parallel batches.
-// It starts with initialBatchSize, and doubles the batch size for each successful batch.
-// If any execution of fn returns an error, it stops and returns the first encountered error.
+// slowStartBatch runs fn in batches, doubling the batch size after each success (k8s ReplicaSet slow-start), stopping at the first error.
 func slowStartBatch(ctx context.Context, count int, initialBatchSize int, fn func(int) error) (int, error) {
 	remaining := count
 	successes := 0
@@ -683,7 +665,6 @@ func setWarmLaunchTypeLabel(sb *sandboxv1beta1.Sandbox) {
 	sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] = sandboxv1beta1.SandboxLaunchTypeWarm
 }
 
-// computeSandboxBlueprintHash computes a hash of the sandbox template's Spec.SandboxBlueprint.
 func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (string, error) {
 	specJSON, err := json.Marshal(template.Spec.SandboxBlueprint)
 	if err != nil {
@@ -692,9 +673,8 @@ func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (s
 	return hash.Name(string(specJSON)), nil
 }
 
-// sandboxWarmPoolLabelIndexer extracts the warmPoolSandboxLabel value for the
-// sandboxWarmPoolLabelIndex cache field index. Shared with tests so fake clients
-// register the same index the manager does.
+// sandboxWarmPoolLabelIndexer extracts the warmPoolSandboxLabel value for the field index.
+// Shared with tests so fake clients register the same index the manager does.
 func sandboxWarmPoolLabelIndexer(obj client.Object) []string {
 	if v, ok := obj.GetLabels()[warmPoolSandboxLabel]; ok {
 		return []string{v}
@@ -702,9 +682,8 @@ func sandboxWarmPoolLabelIndexer(obj client.Object) []string {
 	return nil
 }
 
-// sandboxTemplateRefNameIndexer extracts the template reference name for the
-// TemplateRefField cache field index. Shared with tests so fake clients
-// register the same index the manager does.
+// sandboxTemplateRefNameIndexer extracts the template reference name for the TemplateRefField index.
+// Shared with tests so fake clients register the same index the manager does.
 func sandboxTemplateRefNameIndexer(obj client.Object) []string {
 	wp := obj.(*extensionsv1beta1.SandboxWarmPool)
 	if wp.Spec.TemplateRef.Name == "" {

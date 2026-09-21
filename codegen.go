@@ -16,7 +16,6 @@
 
 package sandboxoperator
 
-// Generate CRDs and RBAC rules
 //go:generate go tool -modfile=tools.mod sigs.k8s.io/controller-tools/cmd/controller-gen object crd:maxDescLen=0 paths=./api/... output:crd:dir=k8s/crds
 //go:generate go tool -modfile=tools.mod sigs.k8s.io/controller-tools/cmd/controller-gen object crd:maxDescLen=0 paths=./extensions/... output:crd:dir=k8s/crds
 //go:generate go tool -modfile=tools.mod sigs.k8s.io/controller-tools/cmd/controller-gen paths=./controllers/... output:rbac:dir=k8s rbac:roleName=sandbox-operator,fileName=rbac.generated.yaml

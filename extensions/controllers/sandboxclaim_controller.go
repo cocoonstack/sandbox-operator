@@ -314,8 +314,7 @@ func (r *SandboxClaimReconciler) resultFor(ctx context.Context, claim *extension
 
 	// A dependency that has not been created yet is normal during rollout, not a
 	// failure to back off from.
-	// TODO: This 1-minute requeue creates a latency regression vs an immediate watch
-	// trigger. Consider a lightweight SandboxTemplate -> claims map watch.
+	// TODO: replace the 1-minute requeue with a SandboxTemplate -> claims watch (latency).
 	if errors.Is(reconcileErr, ErrWarmPoolNotFound) || errors.Is(reconcileErr, ErrTemplateNotFound) {
 		logger.V(1).Info("Dependency not found yet, will retry", "warmPool", claim.Spec.WarmPoolRef.Name, "error", reconcileErr)
 		return ctrl.Result{RequeueAfter: soonerRequeue(result.RequeueAfter, time.Minute)}, true
@@ -441,7 +440,6 @@ func (r *SandboxClaimReconciler) syncAdoptedSandboxMetadata(ctx context.Context,
 	return nil
 }
 
-// checkExpiration calculates if the claim is expired and how much time is left.
 func (r *SandboxClaimReconciler) checkExpiration(claim *extensionsv1beta1.SandboxClaim) (bool, time.Duration) {
 	if claim.Spec.Lifecycle == nil {
 		return false, 0
@@ -451,7 +449,6 @@ func (r *SandboxClaimReconciler) checkExpiration(claim *extensionsv1beta1.Sandbo
 	return lifecycle.TimeLeft(time.Now(), claim.Spec.Lifecycle.ShutdownTime, claim.Spec.Lifecycle.TTLSecondsAfterFinished, finishedCondition)
 }
 
-// reconcileActive handles the creation and updates of running sandboxes.
 func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Reconciling active claim", "claim", claim.Name)
@@ -469,7 +466,6 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 		return sandbox, r.syncAdoptedSandboxMetadata(ctx, claim, sandbox)
 	}
 
-	// Need template to create from scratch.
 	logger.V(1).Info("Cold path: no sandbox found, creating from template", "claim", claim.Name)
 	template, templateErr := r.getTemplate(ctx, claim)
 	if templateErr != nil {
@@ -544,7 +540,6 @@ func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.
 	}
 
 	if sandbox == nil {
-		// Only handle genuine missing sandbox here (expired case is handled above)
 		return notReady(claim, failure{reason: "SandboxMissing", message: "Sandbox does not exist"})
 	}
 
@@ -552,11 +547,8 @@ func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.
 		return notReady(claim, failure{reason: v1beta1.SandboxReasonExpired, message: "Underlying Sandbox resource has expired independently of the Claim."})
 	}
 
-	// Forward the condition from Sandbox Status
-	for _, condition := range sandbox.Status.Conditions {
-		if condition.Type == string(v1beta1.SandboxConditionReady) {
-			return condition
-		}
+	if ready := meta.FindStatusCondition(sandbox.Status.Conditions, string(v1beta1.SandboxConditionReady)); ready != nil {
+		return *ready
 	}
 
 	return metav1.Condition{
@@ -876,7 +868,6 @@ func (r *SandboxClaimReconciler) validateAdditionalPodMetadata(claimMeta *v1beta
 		}
 
 		if isLabel {
-			// Strict Allowlist for labels
 			if !domainInList(domain, allowedDomains) {
 				return fmt.Errorf("label domain %q is not in the allowlist", domain)
 			}
@@ -950,14 +941,7 @@ func (r *SandboxClaimReconciler) injectEnvs(logger logr.Logger, container *corev
 	}
 
 	for _, claimEnv := range envsToInject {
-		existingIdx := -1
-		for j, env := range container.Env {
-			if env.Name == claimEnv.Name {
-				existingIdx = j
-				break
-			}
-		}
-
+		existingIdx := slices.IndexFunc(container.Env, func(e corev1.EnvVar) bool { return e.Name == claimEnv.Name })
 		if existingIdx >= 0 {
 			if policy != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
 				err := fmt.Errorf("environment variable override is not allowed by the template policy for variable %q", claimEnv.Name)
@@ -999,7 +983,6 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 	sandbox.Annotations[v1beta1.SandboxTemplateRefAnnotation] = template.Name
 
 	sandbox.Spec.SandboxBlueprint = *template.Spec.SandboxBlueprint.DeepCopy()
-	// Merge volumeClaimTemplates from template and claim according to the template policy
 	if len(claim.Spec.VolumeClaimTemplates) > 0 {
 		resolvedVCTs, err := mergeVolumeClaimTemplates(
 			template.Spec.VolumeClaimTemplates,
@@ -1225,9 +1208,8 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 	return nil, nil
 }
 
-// completePendingAdoption finishes an adoption the claim already recorded. It never
-// returns a Sandbox: the caller must requeue so a later pass observes the adopted
-// Sandbox once the informer cache converges.
+// completePendingAdoption finishes a recorded adoption; it never returns a Sandbox — the caller
+// must requeue so a later pass observes it once the informer cache converges.
 func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox, sbName string) error {
 	logger := log.FromContext(ctx)
 	logger.Info("Sandbox found in claim metadata still in warm pool, trying to complete adoption", "sandbox", sbName, "claim", claim.Name)
@@ -1339,7 +1321,6 @@ func (r *SandboxClaimReconciler) getTemplate(ctx context.Context, claim *extensi
 	return template, nil
 }
 
-// resolveTemplateName safely extracts the SandboxTemplate name from the Sandbox annotations.
 func (r *SandboxClaimReconciler) resolveTemplateName(sandbox *v1beta1.Sandbox) string {
 	if sandbox != nil && sandbox.Annotations != nil && sandbox.Annotations[v1beta1.SandboxTemplateRefAnnotation] != "" {
 		return sandbox.Annotations[v1beta1.SandboxTemplateRefAnnotation]
@@ -1347,8 +1328,7 @@ func (r *SandboxClaimReconciler) resolveTemplateName(sandbox *v1beta1.Sandbox) s
 	return "__unknown__"
 }
 
-// getOrRecordObservedTime stores the first time an object is seen by the controller in an in-memory
-// map observedTimes for latency tracking. It returns the resolved timestamp for the object.
+// getOrRecordObservedTime records and returns the first-seen time for obj, for latency tracking.
 func (r *SandboxClaimReconciler) getOrRecordObservedTime(obj client.Object) time.Time {
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 
@@ -1370,8 +1350,7 @@ func (r *SandboxClaimReconciler) getOrRecordObservedTime(obj client.Object) time
 	return newEntry.timestamp
 }
 
-// getTimingPredicate returns a predicate that stores the first time an object is seen by the
-// controller, and cleans up the in-memory map entry when the object is deleted.
+// getTimingPredicate stores each object's first-seen time and cleans it up on delete.
 func (r *SandboxClaimReconciler) getTimingPredicate() predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
@@ -1506,8 +1485,8 @@ func (r *SandboxClaimReconciler) recordCreationLatencyMetric(ctx context.Context
 	r.recordSandboxCreationLatency(sandbox, launchType, templateName)
 }
 
-// sandboxEventHandler implements handler.EventHandler for the SandboxClaimReconciler.
 type sandboxEventHandler struct {
+	handler.Funcs
 	sandboxQueue *queue.SimpleSandboxQueue
 }
 
@@ -1549,9 +1528,6 @@ func (h *sandboxEventHandler) Update(ctx context.Context, e event.UpdateEvent, _
 	}
 }
 
-func (h *sandboxEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-}
-
 func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	sandbox, ok := e.Object.(*v1beta1.Sandbox)
 	if !ok {
@@ -1575,16 +1551,8 @@ func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _
 }
 
 type warmPoolEventHandler struct {
+	handler.Funcs
 	sandboxQueue *queue.SimpleSandboxQueue
-}
-
-func (h *warmPoolEventHandler) Create(_ context.Context, _ event.CreateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-}
-
-func (h *warmPoolEventHandler) Update(_ context.Context, _ event.UpdateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-}
-
-func (h *warmPoolEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 }
 
 func (h *warmPoolEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
@@ -1600,7 +1568,6 @@ func (h *warmPoolEventHandler) Delete(ctx context.Context, e event.DeleteEvent, 
 	h.sandboxQueue.RemoveQueue(namespacedWarmPoolName)
 }
 
-// syncMap is a typed sync.Map.
 type syncMap[K comparable, V any] struct {
 	inner sync.Map
 }
@@ -1682,12 +1649,7 @@ func getWarmPoolName(obj metav1.Object) string {
 }
 
 func shouldSuppressError(err error) bool {
-	for _, target := range suppressErrors {
-		if errors.Is(err, target) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(suppressErrors, func(target error) bool { return errors.Is(err, target) })
 }
 
 // soonerRequeue returns the earlier of a pending requeue and a proposed delay,
@@ -1736,8 +1698,7 @@ func pickNodeSpread(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
 	return keys[best.first], true
 }
 
-// setOrDeleteLabel forces labels[key] to want, removing the entry when want is
-// empty.
+// setOrDeleteLabel forces labels[key] to want, removing the entry when want is empty.
 func setOrDeleteLabel(labels map[string]string, key, want string) {
 	if want == "" {
 		delete(labels, key)
@@ -1746,7 +1707,6 @@ func setOrDeleteLabel(labels map[string]string, key, want string) {
 	labels[key] = want
 }
 
-// notReady builds the Ready=False condition for f.
 func notReady(claim *extensionsv1beta1.SandboxClaim, f failure) metav1.Condition {
 	return metav1.Condition{
 		Type:               string(v1beta1.SandboxConditionReady),
@@ -1825,14 +1785,8 @@ func sandboxConditionChanged(oldSb, newSb *v1beta1.Sandbox, conditionType string
 	return *oldCond != *newCond
 }
 
-// isSandboxReady checks if a sandbox has Ready=True condition.
 func isSandboxReady(sb *v1beta1.Sandbox) bool {
-	for _, cond := range sb.Status.Conditions {
-		if cond.Type == string(v1beta1.SandboxConditionReady) && cond.Status == metav1.ConditionTrue {
-			return true
-		}
-	}
-	return false
+	return meta.IsStatusConditionTrue(sb.Status.Conditions, string(v1beta1.SandboxConditionReady))
 }
 
 func isRestrictedDomain(domain string) bool {
@@ -1916,7 +1870,6 @@ func validateVolumeClaimTemplates(vcts []v1beta1.PersistentVolumeClaimTemplate) 
 	return nil
 }
 
-// warmPoolRefIndexer indexes SandboxClaims by spec.warmPoolRef.name.
 func warmPoolRefIndexer(rawObj client.Object) []string {
 	claim, ok := rawObj.(*extensionsv1beta1.SandboxClaim)
 	if !ok || claim.Spec.WarmPoolRef.Name == "" {
@@ -1925,7 +1878,6 @@ func warmPoolRefIndexer(rawObj client.Object) []string {
 	return []string{claim.Spec.WarmPoolRef.Name}
 }
 
-// getLaunchType determines the launch type based on the sandbox state.
 func getLaunchType(sandbox *v1beta1.Sandbox) string {
 	if sandbox == nil {
 		return asmetrics.LaunchTypeUnknown

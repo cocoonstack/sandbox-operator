@@ -179,22 +179,6 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 	return cfg, nil
 }
 
-// startSidecars launches the optional in-process components that share the
-// apiserver's inventory cache: the warm-pool driver and the e2b REST surface.
-func (o *options) startSidecars(ctx context.Context, restCfg *restclient.Config, token string, store scale.SandboxStore, invSource scale.InventorySource) error {
-	if o.WarmPoolDriver {
-		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
-			return err
-		}
-	}
-	if o.E2BAPI {
-		if err := startE2BServer(ctx, o, store, invSource); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func run() error {
 	o := newOptions()
 	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
@@ -232,8 +216,16 @@ func run() error {
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),
 	)
 
-	if err = o.startSidecars(ctx, restCfg, token, store, invSource); err != nil {
-		return err
+	// Optional in-process components sharing the apiserver's inventory cache.
+	if o.WarmPoolDriver {
+		if err = startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
+			return err
+		}
+	}
+	if o.E2BAPI {
+		if err = startE2BServer(ctx, o, store, invSource); err != nil {
+			return err
+		}
 	}
 
 	cfg, err := o.serverConfig()
@@ -265,8 +257,6 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 	if err != nil {
 		return nil, fmt.Errorf("build inventory cache: %w", err)
 	}
-	// Register the informer up front: with ReaderFailOnMissingInformer set,
-	// reads never create informers implicitly.
 	if _, err := invCache.GetInformer(ctx, inv); err != nil {
 		return nil, fmt.Errorf("register node inventory informer: %w", err)
 	}
@@ -328,10 +318,8 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	return nil
 }
 
-// startE2BServer starts the e2b-compatible REST surface on its own listener and
-// stops it when ctx is canceled. It shares the aggregated apiserver's store, so
-// there is no second source of truth: a claim made here is the same node-local
-// claim, released the same way, and listed by the same scatter-gather read.
+// startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
+// the same way, and listed by the same scatter-gather read.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) error {
 	keys, err := o.e2bAPIKeys()
 	if err != nil {

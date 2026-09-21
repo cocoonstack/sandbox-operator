@@ -8,11 +8,7 @@ import (
 
 // Name returns the FNV-1a hash of s as an 8-character hexadecimal string.
 func Name(s string) string {
-	return fmt.Sprintf("%08x", numeric(s))
-}
-
-func numeric(s string) uint32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(s))
-	return h.Sum32()
+	return fmt.Sprintf("%08x", h.Sum32())
 }

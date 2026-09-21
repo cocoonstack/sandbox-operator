@@ -236,8 +236,6 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
 		inv, invErr := s.src.NodeInventory(gctx, node)
 		if invErr != nil {
-			// Partitioned / lost inventory: skip this node's sandboxes rather
-			// than failing the list. They reappear on the node's next publish.
 			s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
 				"node", node, "err", invErr.Error())
 			return nil
@@ -358,7 +356,6 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	if err != nil {
 		return err
 	}
-	// The uniform fleet api_token authorizes release by id.
 	if err := cl.Release(ctx, id, s.sandboxdToken); err != nil {
 		return fmt.Errorf("scale: sandboxd release of %q on node %q: %w", id, node, err)
 	}
@@ -373,15 +370,13 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 	if _, _, err := parseSelectors(opts); err != nil {
 		return nil, err
 	}
-	w := newInventoryWatcher()
-	go s.runWatch(ctx, opts, w)
+	ch := make(chan watch.Event, 64)
+	w := watch.NewProxyWatcher(ch)
+	go s.runWatch(ctx, opts, w, ch)
 	return w, nil
 }
 
-// findEntry resolves the first entry matching match, synthesized as a Sandbox.
-// It reads the node the index last saw holding key and only sweeps the whole
-// fleet on a miss, canceling the rest of the sweep on the hit. Nil with a nil
-// error means no entry matched.
+// findEntry resolves the first match via the last-known node (index) or, on a miss, a fleet sweep that cancels on first hit. Nil, nil means no match.
 func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
 		if sb := s.matchOnNode(ctx, node, match); sb != nil {
@@ -452,9 +447,7 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match
 	return nil
 }
 
-// warmCandidates lists every node advertising warm capacity for pool, fanning
-// out per node like List. A node whose inventory is unavailable is skipped, not
-// fatal: the fleet stays claimable while one node is partitioned.
+// warmCandidates fans out per node like List, skipping (not failing) a node whose inventory is unavailable.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
 	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
 		addr, pools, err := s.src.NodeCapacity(gctx, n)
@@ -476,12 +469,19 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 	})
 }
 
-func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *inventoryWatcher) {
-	defer w.terminate()
+func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *watch.ProxyWatcher, ch chan watch.Event) {
+	defer close(ch)
 
 	known := map[string]*sandboxv1beta1.Sandbox{}
 	emit := func(t watch.EventType, sb *sandboxv1beta1.Sandbox) bool {
-		return w.send(ctx, watch.Event{Type: t, Object: sb})
+		select {
+		case ch <- watch.Event{Type: t, Object: sb}:
+			return true
+		case <-w.StopChan():
+			return false
+		case <-ctx.Done():
+			return false
+		}
 	}
 
 	if list, err := s.List(ctx, opts); err != nil {
@@ -507,7 +507,7 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		select {
 		case <-ctx.Done():
 			return
-		case <-w.done:
+		case <-w.StopChan():
 			return
 		case <-ticker.C:
 			list, err := s.List(ctx, opts)
@@ -548,10 +548,10 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, labelSel labels.Selector, fieldSel fields.Selector) []sandboxv1beta1.Sandbox {
 	out := make([]sandboxv1beta1.Sandbox, 0, len(inv.Entries))
 	for i := range inv.Entries {
-		sb := entryToSandbox(inv.Node, inv.Entries[i])
-		if namespace != "" && sb.Namespace != namespace {
+		if ns, _ := splitNamespacedName(inv.Entries[i].Name); namespace != "" && ns != namespace {
 			continue
 		}
+		sb := entryToSandbox(inv.Node, inv.Entries[i])
 		if !labelSel.Matches(labels.Set(sb.Labels)) {
 			continue
 		}
@@ -581,9 +581,6 @@ func AddressIPs(addr string) []string {
 // whichever node looked best in that snapshot; sampling spreads the burst while
 // still biasing toward warm capacity. A stale pick costs one gossip redirect.
 func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
-	if len(candidates) == 1 {
-		return candidates[0], 0
-	}
 	//nolint:gosec // load spreading, not a security decision
 	i := rand.IntN(len(candidates))
 	//nolint:gosec // load spreading, not a security decision
@@ -592,43 +589,6 @@ func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
 		return candidates[j], j
 	}
 	return candidates[i], i
-}
-
-// inventoryWatcher is a watch.Interface fed by the store's poll-diff goroutine.
-type inventoryWatcher struct {
-	result chan watch.Event
-	done   chan struct{}
-	once   sync.Once
-}
-
-func newInventoryWatcher() *inventoryWatcher {
-	return &inventoryWatcher{
-		result: make(chan watch.Event, 64),
-		done:   make(chan struct{}),
-	}
-}
-
-func (w *inventoryWatcher) ResultChan() <-chan watch.Event { return w.result }
-
-// Stop signals the producer to exit; safe to call multiple times.
-func (w *inventoryWatcher) Stop() {
-	w.once.Do(func() { close(w.done) })
-}
-
-// terminate is called once by the producer goroutine as it exits, closing the
-// result channel so consumers observe end-of-stream.
-func (w *inventoryWatcher) terminate() { close(w.result) }
-
-// send delivers ev unless the watch has been stopped or the context is done.
-func (w *inventoryWatcher) send(ctx context.Context, ev watch.Event) bool {
-	select {
-	case w.result <- ev:
-		return true
-	case <-w.done:
-		return false
-	case <-ctx.Done():
-		return false
-	}
 }
 
 // NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
@@ -871,9 +831,7 @@ func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ct
 	return slices.Concat(perNode...), nil
 }
 
-// poolCapacityMatches reports whether a node's advertised pool capacity serves the
-// requested pool key, normalizing the net/size defaults on both sides so an unset
-// axis matches its default-named pool.
+// poolCapacityMatches compares pc against key, defaulting each unset net/size axis.
 func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 	return pc.Template == key.Template &&
 		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&
@@ -917,7 +875,7 @@ func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 			Conditions: []metav1.Condition{{
 				Type:    string(sandboxv1beta1.SandboxConditionReady),
 				Status:  readyStatus(e.Phase),
-				Reason:  readyReason(e.Phase),
+				Reason:  cmp.Or(e.Phase, "Unknown"),
 				Message: fmt.Sprintf("phase %q reported by node %q inventory", e.Phase, node),
 			}},
 		},
@@ -979,10 +937,6 @@ func readyStatus(phase string) metav1.ConditionStatus {
 		return metav1.ConditionTrue
 	}
 	return metav1.ConditionFalse
-}
-
-func readyReason(phase string) string {
-	return cmp.Or(phase, "Unknown")
 }
 
 // resourceVersionFor derives a deterministic, content-sensitive ResourceVersion

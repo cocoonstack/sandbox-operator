@@ -13,16 +13,12 @@ func publicID(claimID string) string {
 	if !needsRewrite(claimID) {
 		return claimID
 	}
-	var b strings.Builder
-	b.Grow(len(claimID))
-	for _, r := range strings.ToLower(claimID) {
+	return strings.Map(func(r rune) rune {
 		if isDNSSafe(r) {
-			b.WriteRune(r)
-			continue
+			return r
 		}
-		b.WriteByte('-')
-	}
-	return b.String()
+		return '-'
+	}, strings.ToLower(claimID))
 }
 
 // matchesID reports whether a live sandbox's claim id is the one a client asked
