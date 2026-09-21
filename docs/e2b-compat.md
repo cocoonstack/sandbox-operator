@@ -83,10 +83,11 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 - **Metrics are schema-complete, not measurement-complete.** `cpuCount`,
   `memUsed`, and `memTotal` come from the owning node when available;
   `cpuUsedPct`, `memCache`, `diskUsed`, and `diskTotal` are reported as zero.
-- **List/detail schema fields are compatibility values.** `startedAt` uses the
-  synthesized Sandbox creation time; `endAt` is the node-granted deadline when
-  the owning node published one, and `startedAt + 15s` otherwise. `cpuCount`,
-  `memoryMB`, and `diskSizeMB` are reported as zero on these responses.
+- **List/detail schema fields are compatibility values.** A synthesized Sandbox
+  carries no creation time, so `startedAt` is the time of the read; `endAt` is
+  the node-granted deadline when the owning node published one, and
+  `startedAt + 15s` otherwise. `cpuCount`, `memoryMB`, and `diskSizeMB` are
+  reported as zero on these responses.
 - **`envdAccessToken` is returned only at claim time.** `POST /sandboxes` and
   `POST /sandboxes/{id}/fork` carry the token the node just issued. The read
   paths (`GET /sandboxes`, `GET /sandboxes/{id}`, `POST /sandboxes/{id}/connect`)
