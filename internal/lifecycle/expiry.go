@@ -42,15 +42,6 @@ func TimeLeft(now time.Time, shutdownTime *metav1.Time, ttlSecondsAfterFinished 
 	return false, expireAt.Sub(now)
 }
 
-// finishedTime returns the finish timestamp encoded in the terminal condition.
-func finishedTime(finishedCondition *metav1.Condition) *time.Time {
-	if finishedCondition == nil || finishedCondition.LastTransitionTime.IsZero() {
-		return nil
-	}
-	finishedAt := finishedCondition.LastTransitionTime.Time
-	return &finishedAt
-}
-
 // expireAtFor returns the earliest configured expiry time.
 func expireAtFor(shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) *time.Time {
 	var expireAt *time.Time
@@ -59,16 +50,11 @@ func expireAtFor(shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, fini
 		expireAt = &shutdownAt
 	}
 
-	if ttlSecondsAfterFinished == nil || finishedCondition == nil {
+	if ttlSecondsAfterFinished == nil || finishedCondition == nil || finishedCondition.LastTransitionTime.IsZero() {
 		return expireAt
 	}
 
-	finishedAt := finishedTime(finishedCondition)
-	if finishedAt == nil {
-		return expireAt
-	}
-
-	ttlExpireAt := finishedAt.Add(time.Duration(*ttlSecondsAfterFinished) * time.Second)
+	ttlExpireAt := finishedCondition.LastTransitionTime.Add(time.Duration(*ttlSecondsAfterFinished) * time.Second)
 	if expireAt == nil || ttlExpireAt.Before(*expireAt) {
 		expireAt = &ttlExpireAt
 	}
