@@ -15,11 +15,18 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,6 +147,54 @@ func TestGenerateWebhookCerts(t *testing.T) {
 	})
 }
 
+func TestGenerateWebhookCertsRenewsAnExpiringSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	for name, notAfter := range map[string]time.Time{
+		"expired":       time.Now().Add(-24 * time.Hour),
+		"expiring soon": time.Now().Add(certRenewBefore / 2),
+	} {
+		t.Run(name, func(t *testing.T) {
+			certDir := t.TempDir()
+			stale := &corev1.Secret{
+				Name: "sandbox-webhook-certs", Namespace: "test-namespace",
+				Data: certPairEndingAt(t, notAfter),
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stale).Build()
+
+			caPEM, err := generateWebhookCerts(t.Context(), fakeClient, certDir, "test-service", "test-namespace", "cluster.local")
+			require.NoError(t, err)
+			assert.NotEqual(t, stale.Data["ca.crt"], caPEM, "an expiring pair must be replaced, not adopted")
+
+			renewed := &corev1.Secret{}
+			require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandbox-webhook-certs", Namespace: "test-namespace"}, renewed))
+			assert.Equal(t, caPEM, renewed.Data["ca.crt"], "the renewed CA must be the one shared through the Secret")
+			served, err := os.ReadFile(filepath.Join(certDir, "tls.crt"))
+			require.NoError(t, err)
+			assert.Equal(t, renewed.Data["tls.crt"], served)
+			assert.True(t, parseCert(t, served).NotAfter.After(time.Now().Add(certRenewBefore)), "the served cert must outlive the renewal window")
+		})
+	}
+}
+
+func TestGenerateWebhookCertsAdoptsAValidSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	certDir := t.TempDir()
+	valid := &corev1.Secret{
+		Name: "sandbox-webhook-certs", Namespace: "test-namespace",
+		Data: certPairEndingAt(t, time.Now().Add(certValidity)),
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(valid).Build()
+
+	caPEM, err := generateWebhookCerts(t.Context(), fakeClient, certDir, "test-service", "test-namespace", "cluster.local")
+	require.NoError(t, err)
+	assert.Equal(t, valid.Data["ca.crt"], caPEM)
+	served, err := os.ReadFile(filepath.Join(certDir, "tls.crt"))
+	require.NoError(t, err)
+	assert.Equal(t, valid.Data["tls.crt"], served)
+}
+
 func TestPatchCRDs(t *testing.T) {
 	scheme := runtime.NewScheme()
 	err := apiextensionsv1.AddToScheme(scheme)
@@ -253,4 +308,71 @@ func TestPatchCRDs(t *testing.T) {
 		assert.Equal(t, []byte("old-ca"), untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)
 		assert.Equal(t, "old-service", untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 	})
+}
+
+func TestPatchCRDsKeepsAnUnexpiredAuthorityBesideTheNewOne(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, apiextensionsv1.AddToScheme(scheme))
+	now := time.Now()
+	previous := certPairEndingAt(t, now.Add(200*24*time.Hour))["ca.crt"]
+	expired := certPairEndingAt(t, now.Add(-time.Hour))["ca.crt"]
+	renewed := certPairEndingAt(t, now.Add(certValidity))["ca.crt"]
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		Name: "sandboxes.agents.x-k8s.io",
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Conversion: &apiextensionsv1.CustomResourceConversion{
+				Strategy: apiextensionsv1.WebhookConverter,
+				Webhook: &apiextensionsv1.WebhookConversion{ClientConfig: &apiextensionsv1.WebhookClientConfig{
+					CABundle: append(append([]byte{}, expired...), previous...),
+				}},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crd).Build()
+
+	for range 2 {
+		require.NoError(t, patchCRDs(t.Context(), c, renewed, "svc", "ns", false))
+	}
+	got := &apiextensionsv1.CustomResourceDefinition{}
+	require.NoError(t, c.Get(t.Context(), types.NamespacedName{Name: crd.Name}, got))
+	bundle := got.Spec.Conversion.Webhook.ClientConfig.CABundle
+	assert.True(t, bytes.Contains(bundle, previous), "a replica still serving the previous authority must keep verifying")
+	assert.True(t, bytes.Contains(bundle, renewed), "the renewed authority must be in the bundle")
+	assert.False(t, bytes.Contains(bundle, expired), "an expired authority must be dropped")
+	assert.Equal(t, 2, bytes.Count(bundle, []byte("-----BEGIN CERTIFICATE-----")), "a second patch with the same authority must not duplicate it")
+}
+
+func certPairEndingAt(t *testing.T, notAfter time.Time) map[string][]byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-service.test-namespace.svc"},
+		NotBefore:             notAfter.Add(-certValidity),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	return map[string][]byte{
+		"ca.crt":  certPEM,
+		"tls.crt": certPEM,
+		"tls.key": pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+	}
+}
+
+func parseCert(t *testing.T, certPEM []byte) *x509.Certificate {
+	t.Helper()
+	block, _ := pem.Decode(certPEM)
+	require.NotNil(t, block)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+	return cert
 }

@@ -10,8 +10,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/rest"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -49,6 +51,48 @@ func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	assert.False(t, ok)
 	assert.True(t, apierrors.IsInternalError(err), "expected an internal error, got %v", err)
 	assert.False(t, store.released, "must not release when the sandboxd claim id is unknown")
+}
+
+func TestCreate_RejectsDryRunWithoutClaiming(t *testing.T) {
+	store := &fakeStore{}
+	r := NewSandboxREST(store).(*sandboxREST)
+	obj, err := r.Create(nsCtx(t, "ns"), submittedSandbox("s1", nil), nil, &metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+	require.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+	assert.Nil(t, obj)
+	assert.Zero(t, store.claimCalls)
+}
+
+func TestDelete_RejectsDryRunWithoutReleasing(t *testing.T) {
+	store := &fakeStore{getSandbox: &sandboxv1beta1.Sandbox{
+		Name:        "s1",
+		Namespace:   "ns",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_1"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}}
+	r := NewSandboxREST(store).(*sandboxREST)
+	obj, deleted, err := r.Delete(nsCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}})
+	require.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+	assert.Nil(t, obj)
+	assert.False(t, deleted)
+	assert.Zero(t, store.getCalls)
+	assert.False(t, store.released)
+}
+
+func TestLifecycleVerbs_RejectDryRunBeforeStoreAccess(t *testing.T) {
+	store := &fakeStore{}
+	for name, storage := range map[string]rest.Storage{
+		"pause":    NewSandboxPauseREST(store),
+		"resume":   NewSandboxResumeREST(store),
+		"fork":     NewSandboxForkREST(store),
+		"snapshot": NewSandboxSnapshotREST(store),
+	} {
+		t.Run(name, func(t *testing.T) {
+			obj, err := storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", storage.New(), nil, &metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+			require.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+			assert.Nil(t, obj)
+			assert.Zero(t, store.getCalls)
+		})
+	}
 }
 
 func TestTTLSecondsForSandbox(t *testing.T) {
@@ -120,9 +164,35 @@ func TestCreate_ReportsGrantedDeadline(t *testing.T) {
 	assert.Nil(t, out.Spec.ShutdownTime, "the submitted spec is echoed, not rewritten")
 }
 
+func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
+	sb := &sandboxv1beta1.Sandbox{
+		Namespace:   "ns",
+		Name:        "s1",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}
+	gone := apierrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc123")
+	store := &fakeStore{getSandbox: sb, verbErr: gone}
+	for name, tc := range map[string]struct {
+		storage rest.Storage
+		body    runtime.Object
+	}{
+		"pause":    {NewSandboxPauseREST(store), &sandboxv1beta1.SandboxPauseOptions{}},
+		"resume":   {NewSandboxResumeREST(store), &sandboxv1beta1.SandboxResumeOptions{}},
+		"fork":     {NewSandboxForkREST(store), &sandboxv1beta1.SandboxForkOptions{}},
+		"snapshot": {NewSandboxSnapshotREST(store), &sandboxv1beta1.SandboxSnapshotOptions{}},
+	} {
+		_, err := tc.storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", tc.body, nil, &metav1.CreateOptions{})
+		require.Error(t, err, name)
+		assert.True(t, apierrors.IsNotFound(err), "%s: the node's 404 must stay a NotFound, got %v", name, err)
+	}
+}
+
 type fakeStore struct {
 	getSandbox *sandboxv1beta1.Sandbox
 	getErr     error
+	getCalls   int
+	verbErr    error
 
 	claimCalls  int
 	claimTTL    int
@@ -139,6 +209,7 @@ func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.Sa
 }
 
 func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
+	f.getCalls++
 	return f.getSandbox, f.getErr
 }
 
@@ -157,29 +228,21 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
-func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
+func (f *fakeStore) Pause(context.Context, string, string) error { return f.verbErr }
 
-func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+func (f *fakeStore) Resume(context.Context, string, string) error { return f.verbErr }
 
 func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
-	return nil, nil
+	return nil, f.verbErr
 }
 
 func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
-	return scale.Snapshot{}, nil
+	return scale.Snapshot{}, f.verbErr
 }
 
 func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
-
-func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
-	return scale.Assignment{}, nil
-}
-
-func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
-	return scale.PoolKey{}, nil
-}
 
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil

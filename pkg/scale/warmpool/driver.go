@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -51,6 +52,8 @@ const (
 	// wedges the global reconcile forever.
 	setPoolsTimeout = 10 * time.Second
 )
+
+var errNoTemplateRef = errors.New("spec.sandboxTemplateRef.name is required")
 
 // PoolSetter is the sandboxd surface the driver needs: replace a node's whole
 // warm-target set. The concrete *sandboxd.Client satisfies it; tests inject a fake.
@@ -135,16 +138,14 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	// Any NodeInventory change (a node joined, restarted, changed address) must
 	// re-spread every pool, so map it to a single global reconcile trigger.
-	enqueueAll := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
-		return []reconcile.Request{{Name: "sync"}}
-	})
+	enqueueAll := handler.EnqueueRequestsFromMapFunc(syncRequest)
 	// Generation-filtered so the loop's own writeStatus cannot re-trigger it
 	// into a continuous back-to-back loop under claim churn; create/delete,
 	// spec edits, NodeInventory events, and the RequeueAfter tick keep coverage.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&extv1beta1.SandboxWarmPool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&extv1beta1.NodeInventory{}, enqueueAll).
 		Named("sandboxwarmpool").
+		Watches(&extv1beta1.SandboxWarmPool{}, enqueueAll, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&extv1beta1.NodeInventory{}, enqueueAll).
 		Complete(d)
 }
 
@@ -166,6 +167,9 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 		p := &pools.Items[i]
 		key, rerr := d.poolKey(ctx, p)
 		if rerr != nil {
+			if !k8serrors.IsNotFound(rerr) && !errors.Is(rerr, errNoTemplateRef) {
+				return fmt.Errorf("resolve warm pool %s/%s template: %w", p.Namespace, p.Name, rerr)
+			}
 			d.log.Error(rerr, "resolve warm pool template", "pool", p.Namespace+"/"+p.Name)
 			d.writeStatus(ctx, p, nodes, key) // status still reflects live warm (0 target)
 			continue
@@ -231,13 +235,13 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (scale.PoolKey, error) {
 	name := p.Spec.TemplateRef.Name
 	if name == "" {
-		return scale.PoolKey{}, errors.New("spec.sandboxTemplateRef.name is required")
+		return scale.PoolKey{}, errNoTemplateRef
 	}
 	var tmpl extv1beta1.SandboxTemplate
 	if err := d.kube.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: name}, &tmpl); err != nil {
 		return scale.PoolKey{}, fmt.Errorf("get SandboxTemplate %s/%s: %w", p.Namespace, name, err)
 	}
-	net := scale.NetForAnnotations(tmpl.Annotations, tmpl.Spec.PodTemplate.ObjectMeta.Annotations)
+	net := scale.NetForAnnotations(tmpl.Spec.PodTemplate.ObjectMeta.Annotations, nil)
 	return scale.PoolKeyFor(tmpl.Spec.PodTemplate.Spec.Containers, net), nil
 }
 
@@ -328,6 +332,10 @@ func warmByFrom(info *sandboxd.NodeInfo) map[scale.PoolKey]int {
 		warmBy[scale.PoolKey{Template: p.Key.Template, Net: p.Key.Net, Size: p.Key.Size}] = p.Warm
 	}
 	return warmBy
+}
+
+func syncRequest(context.Context, client.Object) []reconcile.Request {
+	return []reconcile.Request{{Name: "sync"}}
 }
 
 // distribute spreads total warm targets evenly across nodes (base + remainder to

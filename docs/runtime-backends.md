@@ -60,6 +60,8 @@ For a sandboxd Pod, the operator supplies these defaults:
 | toleration `virtual-kubelet.io/provider` | `Exists`, `NoSchedule` (shared with vk-cocoon) |
 | `sandbox.cocoonstack.io/runtime` annotation | `sandboxd` |
 | `sandbox.cocoonstack.io/template` | first container image, if unset |
+| `sandbox.cocoonstack.io/net` | the pod template's annotation, default `none`, if unset |
+| `sandbox.cocoonstack.io/size` | `small`/`medium`/`large` from the first container's requests, if unset |
 
 This routes the Pod to the vk-sandbox virtual node, which serves the claim
 from a node-local sandboxd (`github.com/cocoonstack/sandbox`) in

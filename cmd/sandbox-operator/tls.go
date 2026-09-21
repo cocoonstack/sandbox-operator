@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/ecdsa"
@@ -39,6 +40,7 @@ import (
 const (
 	webhookSecretName = "sandbox-webhook-certs"
 	certValidity      = 365 * 24 * time.Hour
+	certRenewBefore   = 30 * 24 * time.Hour
 
 	caCertKey     = "ca.crt"
 	tlsCertKey    = "tls.crt"
@@ -53,6 +55,10 @@ func generateWebhookCerts(ctx context.Context, c client.Client, certDir string, 
 	secret := &corev1.Secret{}
 	getErr := c.Get(ctx, types.NamespacedName{Name: webhookSecretName, Namespace: namespace}, secret)
 	if getErr == nil {
+		if certExpiresWithin(secret.Data[tlsCertKey], certRenewBefore) {
+			setupLog.Info("Shared webhook certificate is expired or expiring; renewing", "secret", webhookSecretName)
+			return renewSharedSecret(ctx, c, secret, certDir, serviceName, clusterDomain)
+		}
 		setupLog.Info("Found existing shared webhook certificates in Secret", "secret", webhookSecretName)
 		return adoptSecretCerts(secret, certDir)
 	}
@@ -164,6 +170,45 @@ func publishSharedSecret(ctx context.Context, c client.Client, namespace, certDi
 	return adoptSecretCerts(winner, certDir)
 }
 
+func renewSharedSecret(ctx context.Context, c client.Client, secret *corev1.Secret, certDir, serviceName, clusterDomain string) ([]byte, error) {
+	caPEM, serverPEM, serverKeyPEM, err := issueSelfSignedPair(serviceName, secret.Namespace, clusterDomain)
+	if err != nil {
+		return nil, err
+	}
+	secret.Data = map[string][]byte{
+		caCertKey:     caPEM,
+		tlsCertKey:    serverPEM,
+		tlsPrivateKey: serverKeyPEM,
+	}
+	if err := c.Update(ctx, secret); err != nil {
+		if !errors.IsConflict(err) {
+			return nil, fmt.Errorf("renew shared Secret: %w", err)
+		}
+		setupLog.Info("Shared Secret was renewed concurrently by another replica; loading it", "secret", webhookSecretName)
+		winner := &corev1.Secret{}
+		if err := c.Get(ctx, types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace}, winner); err != nil {
+			return nil, fmt.Errorf("get concurrently renewed Secret: %w", err)
+		}
+		return adoptSecretCerts(winner, certDir)
+	}
+	if err := writeCertFiles(certDir, serverPEM, serverKeyPEM); err != nil {
+		return nil, fmt.Errorf("write certificate files locally: %w", err)
+	}
+	return caPEM, nil
+}
+
+func certExpiresWithin(certPEM []byte, window time.Duration) bool {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false
+	}
+	return time.Now().Add(window).After(cert.NotAfter)
+}
+
 // validatePEMBytes verifies that the provided certificate slices contain valid PEM blocks.
 func validatePEMBytes(caPEM, serverPEM, serverKeyPEM []byte) error {
 	if len(caPEM) == 0 || len(serverPEM) == 0 || len(serverKeyPEM) == 0 {
@@ -250,7 +295,7 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 		webhook.ClientConfig.Service.Namespace = namespace
 		path := "/convert"
 		webhook.ClientConfig.Service.Path = &path
-		webhook.ClientConfig.CABundle = caPEM
+		webhook.ClientConfig.CABundle = mergeCABundle(webhook.ClientConfig.CABundle, caPEM)
 
 		crd.Spec.Conversion.Webhook = webhook
 
@@ -263,4 +308,19 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 	}
 
 	return nil
+}
+
+func mergeCABundle(bundle, caPEM []byte) []byte {
+	var merged, fresh []byte
+	if block, _ := pem.Decode(caPEM); block != nil {
+		fresh = block.Bytes
+	}
+	for block, rest := pem.Decode(bundle); block != nil; block, rest = pem.Decode(rest) {
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil || time.Now().After(cert.NotAfter) || bytes.Equal(block.Bytes, fresh) {
+			continue
+		}
+		merged = append(merged, pem.EncodeToMemory(block)...)
+	}
+	return append(merged, caPEM...)
 }

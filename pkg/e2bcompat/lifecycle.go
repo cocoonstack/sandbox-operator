@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -36,7 +37,12 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, err, id, "pause")
 		return
 	}
-	if s.isPaused(r.Context(), sb) {
+	paused, err := s.isPaused(r.Context(), sb)
+	if err != nil {
+		s.writeLookupError(w, err, id, "pause")
+		return
+	}
+	if paused {
 		writeError(w, http.StatusConflict, fmt.Sprintf("sandbox %q is already paused", id))
 		return
 	}
@@ -49,8 +55,7 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.Pause(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
-		s.opts.Log.Error(err, "e2b pause failed", "sandboxID", id)
-		writeError(w, http.StatusInternalServerError, "failed to pause the sandbox")
+		s.writeVerbError(w, err, id, "pause", "failed to pause the sandbox")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -73,11 +78,15 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, err, id, "connect")
 		return
 	}
+	paused, err := s.isPaused(r.Context(), sb)
+	if err != nil {
+		s.writeLookupError(w, err, id, "connect")
+		return
+	}
 	status := http.StatusOK
-	if s.isPaused(r.Context(), sb) {
+	if paused {
 		if err := s.store.Resume(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
-			s.opts.Log.Error(err, "e2b connect: resume failed", "sandboxID", id)
-			writeError(w, http.StatusInternalServerError, "failed to resume the sandbox")
+			s.writeVerbError(w, err, id, "connect: resume", "failed to resume the sandbox")
 			return
 		}
 		status = http.StatusCreated
@@ -122,15 +131,19 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, err, id, "fork")
 		return
 	}
-	if s.isPaused(r.Context(), sb) {
+	paused, err := s.isPaused(r.Context(), sb)
+	if err != nil {
+		s.writeLookupError(w, err, id, "fork")
+		return
+	}
+	if paused {
 		writeError(w, http.StatusConflict,
 			fmt.Sprintf("sandbox %q is paused and cannot be forked; resume it first", id))
 		return
 	}
 	children, err := s.store.Fork(r.Context(), sb.Status.NodeName, claimIDOf(sb), int(count), timeoutSeconds(req.Timeout))
 	if err != nil {
-		s.opts.Log.Error(err, "e2b fork failed", "sandboxID", id, "count", count)
-		writeError(w, http.StatusInternalServerError, "failed to fork the sandbox")
+		s.writeVerbError(w, err, id, "fork", "failed to fork the sandbox")
 		return
 	}
 	template := templateOf(sb)
@@ -163,8 +176,7 @@ func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	snap, err := s.store.Snapshot(r.Context(), sb.Status.NodeName, claimIDOf(sb), req.Name)
 	if err != nil {
-		s.opts.Log.Error(err, "e2b snapshot failed", "sandboxID", id)
-		writeError(w, http.StatusInternalServerError, "failed to snapshot the sandbox")
+		s.writeVerbError(w, err, id, "snapshot", "failed to snapshot the sandbox")
 		return
 	}
 	writeJSON(w, http.StatusCreated, snapshotInfo(snap))
@@ -253,8 +265,7 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.store.Stats(r.Context(), sb.Status.NodeName, claimIDOf(sb))
 	if err != nil {
-		s.opts.Log.Error(err, "e2b metrics failed", "sandboxID", id)
-		writeError(w, http.StatusInternalServerError, "failed to read sandbox metrics")
+		s.writeVerbError(w, err, id, "metrics", "failed to read sandbox metrics")
 		return
 	}
 	at := st.MeasuredAt
@@ -350,13 +361,26 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 //
 // A node that cannot be reached falls back to the cached label: degrading to the
 // eventually-consistent answer is better than failing the request outright.
-func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) bool {
+func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool, error) {
 	if node, id := sb.Status.NodeName, claimIDOf(sb); node != "" && id != "" {
-		if st, err := s.store.Stats(ctx, node, id); err == nil {
-			return st.Paused
+		st, err := s.store.Stats(ctx, node, id)
+		switch {
+		case err == nil:
+			return st.Paused, nil
+		case k8serrors.IsNotFound(err):
+			return false, errSandboxNotFound
 		}
 	}
-	return sb.Labels[scale.PhaseLabel] == phaseHibernated
+	return sb.Labels[scale.PhaseLabel] == phaseHibernated, nil
+}
+
+func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg string) {
+	if k8serrors.IsNotFound(err) {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
+		return
+	}
+	s.opts.Log.Error(err, "e2b "+op+" failed", "sandboxID", id)
+	writeError(w, http.StatusInternalServerError, msg)
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, out any) bool {

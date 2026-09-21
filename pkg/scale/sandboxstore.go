@@ -22,7 +22,7 @@ type ListOptions struct {
 // PoolKey identifies a warm pool by the claim axes the aggregated Create path
 // derives from a Sandbox: the template (blueprint image), the network mode, and
 // the size class. A node advertises matching warm capacity as a NodeInventory
-// PoolCapacity, and Create picks the node with the most warm capacity for the key.
+// PoolCapacity; Create samples two such nodes and claims from the warmer.
 type PoolKey struct {
 	Template string
 	Net      string
@@ -43,8 +43,8 @@ type PoolCapacity = extv1beta1.PoolCapacity
 type SandboxStore interface {
 	// List assembles a SandboxList by fanning out to node inventories.
 	List(ctx context.Context, opts ListOptions) (*sandboxv1beta1.SandboxList, error)
-	// Get routes to the owning node for an authoritative (read-after-write)
-	// answer rather than the eventually-consistent summary.
+	// Get resolves one sandbox from the cache-fed node inventories, so a
+	// just-claimed sandbox is absent until its node republishes.
 	Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error)
 	// Watch merges per-node inventory streams into a single sandbox watch.
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)

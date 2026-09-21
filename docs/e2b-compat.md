@@ -57,7 +57,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL (15s when omitted); `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the compat namespace. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
-| `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`. |
+| `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |
 | `POST /sandboxes/{id}/timeout` | existence check | TTL is fixed by the node at claim time; the call is verified and acknowledged, not silently faked. |
 | `POST /sandboxes/{id}/refreshes` | existence check | Verifies that the sandbox is still live; it does not extend or refresh the node-owned deadline. |
 | `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
@@ -83,10 +83,11 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 - **Metrics are schema-complete, not measurement-complete.** `cpuCount`,
   `memUsed`, and `memTotal` come from the owning node when available;
   `cpuUsedPct`, `memCache`, `diskUsed`, and `diskTotal` are reported as zero.
-- **List/detail schema fields are compatibility values.** `startedAt` uses the
-  synthesized Sandbox creation time; `endAt` is the node-granted deadline when
-  the owning node published one, and `startedAt + 15s` otherwise. `cpuCount`,
-  `memoryMB`, and `diskSizeMB` are reported as zero on these responses.
+- **List/detail schema fields are compatibility values.** A synthesized Sandbox
+  carries no creation time, so `startedAt` is the time of the read; `endAt` is
+  the node-granted deadline when the owning node published one, and
+  `startedAt + 15s` otherwise. `cpuCount`, `memoryMB`, and `diskSizeMB` are
+  reported as zero on these responses.
 - **`envdAccessToken` is returned only at claim time.** `POST /sandboxes` and
   `POST /sandboxes/{id}/fork` carry the token the node just issued. The read
   paths (`GET /sandboxes`, `GET /sandboxes/{id}`, `POST /sandboxes/{id}/connect`)

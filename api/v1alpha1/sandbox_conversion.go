@@ -30,9 +30,6 @@ type v1alpha1State struct {
 	Spec struct {
 		Replicas *int32 `json:"replicas,omitempty"`
 	} `json:"spec"`
-	Status struct {
-		Replicas int32 `json:"replicas,omitempty"`
-	} `json:"status"`
 }
 
 // ConvertTo converts this Sandbox to the Hub version (v1beta1).
@@ -49,7 +46,6 @@ func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 	}
 	var state v1alpha1State
 	state.Spec.Replicas = s.Spec.Replicas
-	state.Status.Replicas = s.Status.Replicas
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("marshal v1alpha1 sandbox state: %w", err)
@@ -68,7 +64,6 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 	ConvertStatusFrom(&src.Status, &s.Status)
 
 	// Set best-effort default for Status.Replicas based on OperatingMode.
-	// This will be overridden by the restoration logic if the annotation exists.
 	if src.Spec.OperatingMode == v1beta1.SandboxOperatingModeSuspended {
 		s.Status.Replicas = 0
 	} else {
@@ -96,8 +91,6 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 				s.Spec.Replicas = new(int32(1))
 			}
 		}
-
-		s.Status.Replicas = original.Status.Replicas
 	}
 
 	return nil

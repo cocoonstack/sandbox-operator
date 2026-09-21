@@ -1,13 +1,9 @@
 # sandbox-operator
 
-A Kubernetes operator and aggregated apiserver for **fast, warm-poolable agent
-sandboxes backed by real microVMs**. It implements the
-[kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
-API in full — `Sandbox`, `SandboxTemplate`, `SandboxWarmPool`, `SandboxClaim`,
-v1alpha1 and v1beta1 with conversion webhooks — and is driven entirely through
-the standard Kubernetes API, with no proprietary SDK. A pre-warmed sandbox is
-acquired in **~33 ms at p50**, and each sandbox is a genuine
-Cloud-Hypervisor/KVM microVM rather than a shared-kernel container.
+A Kubernetes operator and aggregated apiserver implementing the agent-sandbox
+APIs over ordinary Pods or Cocoon microVMs. CRD warm claims measured **~33 ms
+at p50** on the microVM backend; see
+[performance methodology](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md).
 
 ```
 any Kubernetes client (kubectl / client-go / controller-runtime)
@@ -34,10 +30,12 @@ warm pool: N pre-booted microVMs
 A cold `Sandbox` creates a Pod on demand; with the microVM backend that Pod
 boots a VM, which costs tens of seconds. The warm path keeps that off the
 request path: a `SandboxWarmPool` pre-provisions N Ready microVMs, and a
-`SandboxClaim` **adopts** one — the VM is already booted, so the claim is an
-`Update` on the claim plus a merge `Patch` on the Sandbox, with no scheduler,
-no kubelet bind and no image pull on the claim path. The pool
-replenishes in the background.
+`SandboxClaim` **adopts** one. The VM is already booted; the handover uses an
+`Update` on the claim plus a merge `Patch` on the Sandbox,
+followed by a separate claim status write. It needs no scheduler, kubelet bind
+or image pull. The pool replenishes in the background. Warm adoption requires
+an explicit pool; the default policy cold-starts from the template, as does a
+claim whose named CRD pool has no adoptable Sandbox.
 
 That is the same ownership-transfer shape Kubernetes already ships for
 `PersistentVolumeClaim → PersistentVolume` binding, which is why the whole model
@@ -74,7 +72,7 @@ node, behind CRDs, RBAC and watch. Four layers:
 | layer | what it does | status |
 |---|---|---|
 | **L0** — API hygiene | cache-fed reads, diff-before-write, no control-loop `LIST` against etcd; the qualifier that stops APF seat exhaustion at scale | shipped |
-| **L1** — ownership transfer | claim = queue pop + `Update` + `Patch`; pool status from the informer cache; one leader-elected operator, no per-pool sharding | implemented here |
+| **L1** — ownership transfer | handover = queue pop + `Update` + `Patch`, followed by a claim status write; pool status from the informer cache; one leader-elected operator, no per-pool sharding | implemented here |
 | **L2** — node-local claim gateway | the concrete gateway fronts `sandboxd`, delivers a running microVM in 0.2–0.7 ms, records `Bound` asynchronously; authorization stays central | core implemented and benchmarked; supported DaemonSet packaging/hardening remains roadmap work |
 | **L3** — aggregated apiserver | `sandboxes` served by scatter-gathering per-node `NodeInventory`; etcd stores intent only, so object count drops from `O(sandboxes)` to `O(pools + nodes)` | implemented by `sandbox-apiserver`, its deployment/APIService manifests, and the cache-fed store |
 
@@ -91,6 +89,7 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
 
 ## Guides
 
+- [Kubernetes client usage](usage.md) — SDK and YAML examples, pool selection and cold fallback
 - [API reference](api.md) — the generated reference for every type in
   `agents.x-k8s.io` (v1alpha1, v1beta1) and `extensions.agents.x-k8s.io`
   (v1alpha1, v1beta1)
@@ -110,11 +109,17 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
   per-node control plane owns.
 
 - [Snapshot placement](snapshot-placement.md) — where a checkpoint lives, how a
-  branch reaches it from another node (local hit, gossip + redirect, peer heal),
-  why shared filesystems are ruled out, and the durability this does *not* give
+  branch reaches it from another node (local hit, probe + redirect, peer heal),
+  why this design keeps checkpoints node-local, and the durability this does *not* give
 
 ## Repository
 
 Source and issue tracker:
 [github.com/cocoonstack/sandbox-operator](https://github.com/cocoonstack/sandbox-operator).
 Part of the [cocoonstack](https://cocoonstack.github.io/) MicroVM platform.
+
+- [Contributing](https://github.com/cocoonstack/sandbox-operator/blob/master/CONTRIBUTING.md)
+- [Governance](https://github.com/cocoonstack/sandbox-operator/blob/master/GOVERNANCE.md) and [maintainers](https://github.com/cocoonstack/sandbox-operator/blob/master/MAINTAINERS.md)
+- [Security reports](https://github.com/cocoonstack/sandbox-operator/blob/master/SECURITY.md)
+- [Roadmap](https://github.com/cocoonstack/sandbox-operator/blob/master/ROADMAP.md)
+- [Code of conduct](https://github.com/cocoonstack/sandbox-operator/blob/master/CODE_OF_CONDUCT.md)

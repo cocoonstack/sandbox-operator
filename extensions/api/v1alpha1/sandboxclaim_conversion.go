@@ -35,6 +35,8 @@ const (
 	// through any v1alpha1 client. Symmetric to the SandboxTemplate
 	// VolumeClaimTemplatesPolicy annotation.
 	v1beta1SandboxClaimVolumeClaimTemplatesAnnotation = "api.agents.x-k8s.io/v1beta1-sandboxclaim-volume-claim-templates"
+
+	v1beta1SandboxClaimWarmPoolRefAnnotation = "api.agents.x-k8s.io/v1beta1-sandboxclaim-warm-pool-ref"
 )
 
 // ConvertTo converts this SandboxClaim to the Hub version (v1beta1).
@@ -56,6 +58,13 @@ func (s *SandboxClaim) ConvertTo(dstRaw conversion.Hub) error {
 		if dst.Annotations != nil {
 			delete(dst.Annotations, v1beta1SandboxClaimVolumeClaimTemplatesAnnotation)
 		}
+	}
+
+	if hubPool, ok := s.Annotations[v1beta1SandboxClaimWarmPoolRefAnnotation]; ok {
+		if s.Spec.WarmPool != nil && string(*s.Spec.WarmPool) == hubPool {
+			dst.Spec.WarmPoolRef.Name = hubPool
+		}
+		delete(dst.Annotations, v1beta1SandboxClaimWarmPoolRefAnnotation)
 	}
 
 	return stashClaimState(dst, s.DeepCopy())
@@ -87,6 +96,15 @@ func (s *SandboxClaim) ConvertFrom(srcRaw conversion.Hub) error {
 		s.Annotations[v1beta1SandboxClaimVolumeClaimTemplatesAnnotation] = string(raw)
 	} else if s.Annotations != nil {
 		delete(s.Annotations, v1beta1SandboxClaimVolumeClaimTemplatesAnnotation)
+	}
+
+	if pool := src.Spec.WarmPoolRef.Name; pool != "" && !WarmPoolPolicy(pool).IsSpecificPool() {
+		if s.Annotations == nil {
+			s.Annotations = make(map[string]string)
+		}
+		s.Annotations[v1beta1SandboxClaimWarmPoolRefAnnotation] = pool
+	} else if s.Annotations != nil {
+		delete(s.Annotations, v1beta1SandboxClaimWarmPoolRefAnnotation)
 	}
 
 	return nil
@@ -127,7 +145,7 @@ func isWarmPoolRefMatching(actualName, expectedName, sandboxName string) bool {
 	if actualName == expectedName {
 		return true
 	}
-	if actualName == fmt.Sprintf("shadow-pool-%s", expectedName) {
+	if actualName == v1beta1.ShadowPoolPrefix+expectedName {
 		return true
 	}
 	if sandboxName != "" && (actualName == sandboxName || actualName == stripRandomSuffix(sandboxName)) {
@@ -165,7 +183,7 @@ func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, cl
 			}
 		} else {
 			dst.WarmPoolRef = v1beta1.SandboxWarmPoolRef{
-				Name: fmt.Sprintf("shadow-pool-%s", src.TemplateRef.Name),
+				Name: v1beta1.ShadowPoolPrefix + src.TemplateRef.Name,
 			}
 		}
 	}
@@ -197,7 +215,7 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 		dst.Lifecycle = nil
 	}
 
-	if templateName, ok := strings.CutPrefix(src.WarmPoolRef.Name, "shadow-pool-"); ok {
+	if templateName, ok := strings.CutPrefix(src.WarmPoolRef.Name, v1beta1.ShadowPoolPrefix); ok {
 		dst.TemplateRef = SandboxTemplateRef{
 			Name: templateName,
 		}

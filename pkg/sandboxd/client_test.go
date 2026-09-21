@@ -2,6 +2,7 @@ package sandboxd
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -116,4 +117,46 @@ func TestInfo(t *testing.T) {
 	assert.Equal(t, 4, info.Pools[0].Target)
 	assert.Equal(t, 2, info.Claimed)
 	assert.Equal(t, 1, info.Hibernated)
+}
+
+func TestSetPoolsReplacesTheNodeTargetsAndDecodesTheEcho(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/v1/pools", r.URL.Path)
+		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "pools is a root-token operator surface")
+		var body struct {
+			Pools []PoolSpec `json:"pools"`
+		}
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []PoolSpec{{Template: "base:24.04", Net: "none", Size: "small", Warm: 4}}, body.Pools)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":1,"refilling":3,"target":4}],"claimed":0}`))
+	}))
+	defer srv.Close()
+
+	info, err := New(srv.URL, "root-token").SetPools(t.Context(), []PoolSpec{{Template: "base:24.04", Net: "none", Size: "small", Warm: 4}})
+	require.NoError(t, err)
+	require.Len(t, info.Pools, 1)
+	assert.Equal(t, 1, info.Pools[0].Warm)
+	assert.Equal(t, 3, info.Pools[0].Refilling)
+	assert.Equal(t, 4, info.Pools[0].Target)
+}
+
+func TestSetPoolsSendsAnEmptyListNotNull(t *testing.T) {
+	var raw string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		raw = string(b)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "duplicate pool"})
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "root-token").SetPools(t.Context(), nil)
+	require.Error(t, err)
+	var he *HTTPError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, http.StatusBadRequest, he.StatusCode)
+	assert.Equal(t, "duplicate pool", he.Message)
+	assert.JSONEq(t, `{"pools":[]}`, raw, "a nil set must drain as [] rather than null")
 }

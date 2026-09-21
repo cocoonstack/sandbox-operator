@@ -4,6 +4,30 @@ The operator is intentionally usable with its defaults: leader election and
 all agent-sandbox extension controllers are enabled, and generated Pods use
 standard kubelet scheduling.
 
+## Installation
+
+Releases publish multi-arch (amd64/arm64) images to GHCR:
+`ghcr.io/cocoonstack/sandbox-operator` and
+`ghcr.io/cocoonstack/sandbox-apiserver`. Use the manifests from the same release
+as the image. From a checkout of that release tag:
+
+```bash
+VERSION="$(git describe --tags --exact-match)"
+helm upgrade --install sandbox-operator ./helm \
+  --namespace sandbox-system --create-namespace \
+  --set-string image.tag="$VERSION"
+```
+
+For Kustomize, replace the `ko://` image reference:
+
+```bash
+kustomize build k8s | sed "s#ko://.*/sandbox-operator#ghcr.io/cocoonstack/sandbox-operator:$VERSION#" | kubectl apply -f -
+```
+
+These install the CRD operator. The aggregated apiserver has separate manifests
+in [config/apiserver](https://github.com/cocoonstack/sandbox-operator/tree/master/config/apiserver)
+and [config/apiservice](https://github.com/cocoonstack/sandbox-operator/tree/master/config/apiservice).
+
 ## Runtime and API surface
 
 - `--default-runtime` (`standard`): default backend for newly created Sandbox
@@ -58,8 +82,11 @@ was measured with, so an out-of-box install reproduces the published numbers.
 - `--manage-webhook-certs` (`true`)
 
 When `--manage-webhook-certs=true`, the operator creates serving certificates
-and patches conversion-webhook CA bundles. Disable it only when the cluster
-manages both externally.
+and patches conversion-webhook CA bundles. A shared certificate within 30 days
+of expiry is reissued at startup and the Secret updated; a replica that loses
+that update adopts the winner's pair, and the CRD bundle keeps every unexpired
+authority already in it, so replicas that have not restarted keep verifying.
+Disable it only when the cluster manages both externally.
 
 ## Observability
 

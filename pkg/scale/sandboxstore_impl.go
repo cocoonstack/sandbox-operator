@@ -259,15 +259,11 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	return list, nil
 }
 
-// Get routes to the owning node's authoritative inventory. It resolves which
-// node holds namespace/name and returns that entry synthesized as a Sandbox.
-// The per-node sweep fans out like List and cancels on the first hit — a
-// sandbox lives on exactly one node, so first-found is the answer.
-//
-// In production this would RPC the owning node's live sandboxd for a
-// read-after-write answer; in this substrate the node's published NodeInventory
-// is the authoritative view available, so Get returns from it directly rather
-// than from an eventually-consistent cluster-wide summary.
+// Get resolves which node's published inventory holds namespace/name and
+// returns that entry synthesized as a Sandbox: the hinted node first, then a
+// fleet sweep that cancels on the first hit. Either way the answer lags a
+// claim by up to one publish interval; authoritative node routing is roadmap
+// work.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
 	found, err := s.findEntry(ctx, "get", nameKey(namespace, name), func(inv *NodeInventory, i int) bool {
 		ens, ename := splitNamespacedName(inv.Entries[i].Name)
@@ -304,8 +300,8 @@ func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id str
 	return found, nil
 }
 
-// Claim picks the node with the most warm capacity for pool and hands over one of
-// its already-running microVMs via that node's sandboxd, returning the assignment.
+// Claim samples two nodes advertising warm capacity for pool, takes the warmer,
+// and hands over one of its running microVMs via that node's sandboxd.
 // No per-sandbox object is written to etcd. It fails closed if claim routing is
 // not configured, and returns ErrNoWarmCapacity when no warm node is available.
 func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error) {
@@ -315,6 +311,9 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	candidates, err := s.warmCandidates(ctx, pool)
 	if err != nil {
 		return Assignment{}, err
+	}
+	if len(candidates) == 0 {
+		return Assignment{}, fmt.Errorf("scale: claim %s/%s: no node advertises warm capacity for template %q net %q size %q: %w", namespace, name, pool.Template, pool.Net, pool.Size, ErrNoWarmCapacity)
 	}
 
 	// Inventory is 5-30s stale, so a node can advertise warm capacity it no
@@ -388,7 +387,6 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, matc
 		if sb := s.matchOnNode(ctx, node, match); sb != nil {
 			return sb, nil
 		}
-		s.index.forget(key)
 	}
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
@@ -887,11 +885,17 @@ func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {
 	labelSel, err := labels.Parse(opts.LabelSelector)
 	if err != nil {
-		return nil, nil, fmt.Errorf("scale: parse label selector %q: %w", opts.LabelSelector, err)
+		return nil, nil, k8serrors.NewBadRequest(fmt.Sprintf("parse label selector %q: %v", opts.LabelSelector, err))
 	}
 	fieldSel, err := fields.ParseSelector(opts.FieldSelector)
 	if err != nil {
-		return nil, nil, fmt.Errorf("scale: parse field selector %q: %w", opts.FieldSelector, err)
+		return nil, nil, k8serrors.NewBadRequest(fmt.Sprintf("parse field selector %q: %v", opts.FieldSelector, err))
+	}
+	known := sandboxFields(&sandboxv1beta1.Sandbox{})
+	for _, req := range fieldSel.Requirements() {
+		if _, ok := known[req.Field]; !ok {
+			return nil, nil, k8serrors.NewBadRequest(fmt.Sprintf("field selector %q is not supported on sandboxes", req.Field))
+		}
 	}
 	return labelSel, fieldSel, nil
 }

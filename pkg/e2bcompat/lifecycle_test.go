@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"testing"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
@@ -223,6 +225,33 @@ func TestConnectTrustsTheNodeNotTheStaleView(t *testing.T) {
 	}
 }
 
+func TestLifecycleVerbsOnAReapedSandboxAre404(t *testing.T) {
+	gone := k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc")
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/sandboxes/sb-abc/pause", ``},
+		{http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`},
+		{http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":1}`},
+		{http.MethodPost, "/sandboxes/sb-abc/snapshots", `{}`},
+		{http.MethodGet, "/sandboxes/sb-abc/metrics", ``},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			store := &lifecycleStore{err: gone, statsErr: gone}
+			sb := liveSandbox("s1", "sb_abc", "node-a", "img")
+			sb.Labels[scale.PhaseLabel] = "Running"
+			store.items = []sandboxv1beta1.Sandbox{sb}
+			h := newTestServer(t, store)
+
+			w := do(t, h, tc.method, tc.path, tc.body, testKey)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: the node no longer holds the sandbox, the stale read view must not answer for it: %s", w.Code, w.Body.String())
+			}
+			if store.resumedID != "" {
+				t.Errorf("connect resumed %q on a node that reported the sandbox gone", store.resumedID)
+			}
+		})
+	}
+}
+
 type lifecycleStore struct {
 	fakeStore
 
@@ -234,12 +263,13 @@ type lifecycleStore struct {
 	snapshotName           string
 	snapshot               scale.Snapshot
 	err                    error
+	statsErr               error
 
 	nodePaused bool
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{Paused: f.nodePaused, CPUCount: 1, MemTotalBytes: 512 << 20}, nil
+	return scale.SandboxStats{Paused: f.nodePaused, CPUCount: 1, MemTotalBytes: 512 << 20}, f.statsErr
 }
 
 func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {

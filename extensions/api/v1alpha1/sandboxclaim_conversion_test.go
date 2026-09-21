@@ -267,6 +267,50 @@ func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSandboxClaimPoolNamedLikeAPolicyWordRoundTrips(t *testing.T) {
+	for _, pool := range []string{"default", "none"} {
+		t.Run(pool, func(t *testing.T) {
+			src := &v1beta1.SandboxClaim{
+				Name: "claim", Namespace: "ns",
+				Spec: v1beta1.SandboxClaimSpec{WarmPoolRef: v1beta1.SandboxWarmPoolRef{Name: pool}},
+			}
+			alpha := &SandboxClaim{}
+			if err := alpha.ConvertFrom(src); err != nil {
+				t.Fatalf("ConvertFrom: %v", err)
+			}
+			dst := &v1beta1.SandboxClaim{}
+			if err := alpha.ConvertTo(dst); err != nil {
+				t.Fatalf("ConvertTo: %v", err)
+			}
+			if dst.Spec.WarmPoolRef.Name != pool {
+				t.Fatalf("warmPoolRef.name = %q after a v1alpha1 hop, want the pool %q the hub named", dst.Spec.WarmPoolRef.Name, pool)
+			}
+			if _, ok := dst.Annotations[v1beta1SandboxClaimWarmPoolRefAnnotation]; ok {
+				t.Fatalf("preservation annotation leaked to v1beta1 object")
+			}
+		})
+	}
+}
+
+func TestSandboxClaimPoolChangedByAV1alpha1ClientWins(t *testing.T) {
+	src := &v1beta1.SandboxClaim{
+		Name: "claim", Namespace: "ns",
+		Spec: v1beta1.SandboxClaimSpec{WarmPoolRef: v1beta1.SandboxWarmPoolRef{Name: "default"}},
+	}
+	alpha := &SandboxClaim{}
+	if err := alpha.ConvertFrom(src); err != nil {
+		t.Fatalf("ConvertFrom: %v", err)
+	}
+	alpha.Spec.WarmPool = new(WarmPoolPolicy("fast-pool"))
+	dst := &v1beta1.SandboxClaim{}
+	if err := alpha.ConvertTo(dst); err != nil {
+		t.Fatalf("ConvertTo: %v", err)
+	}
+	if dst.Spec.WarmPoolRef.Name != "fast-pool" {
+		t.Fatalf("warmPoolRef.name = %q, want the pool the client chose", dst.Spec.WarmPoolRef.Name)
+	}
+}
+
 func TestSandboxClaimNoVolumeClaimTemplatesNoAnnotation(t *testing.T) {
 	src := &v1beta1.SandboxClaim{
 		Name: "claim", Namespace: "ns",

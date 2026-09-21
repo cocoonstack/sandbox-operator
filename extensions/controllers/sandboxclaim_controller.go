@@ -350,9 +350,9 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 	if claim.Annotations == nil {
 		claim.Annotations = make(map[string]string)
 	}
-	// Only the keys staged here, so a replay says exactly what it means. Replaying
-	// the whole map happens to be safe — every other key is also in `before`, so
-	// the merge patch for it is empty — but it reads like it could undo a clear.
+	// Only the staged keys are replayed onto the object; the flush itself is a
+	// merge patch against `before`, so it also carries any other change this
+	// pass made in memory.
 	staged := map[string]string{}
 	if needObservability {
 		staged[asmetrics.ObservabilityAnnotation] = r.getOrRecordObservedTime(claim).Format(time.RFC3339Nano)
@@ -484,11 +484,7 @@ func (r *SandboxClaimReconciler) reconcileExpired(ctx context.Context, claim *ex
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Reconciling Expired claim", "claim", claim.Name)
 
-	// Fall back to claim.Name when status is unset.
-	statusName := claim.Name
-	if claim.Status.SandboxStatus.Name != "" {
-		statusName = claim.Status.SandboxStatus.Name
-	}
+	statusName := cmp.Or(claim.Status.SandboxStatus.Name, claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation], claim.Name)
 
 	sandbox := &v1beta1.Sandbox{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: statusName}, sandbox); err != nil {
@@ -677,17 +673,25 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 	logger := log.FromContext(ctx)
 	namespacedWarmPoolNameForQueue := queue.GetNamespacedWarmPoolName(claim.Namespace, claim.Spec.WarmPoolRef.Name)
 
+	var pending error
 	for range 3 {
 		adopted, adoptedKey, err := r.getCandidate(ctx, claim)
 		if err != nil {
 			return nil, err
 		}
 		if adopted == nil {
+			if pending != nil {
+				return nil, pending
+			}
 			logger.Info("Failed to adopt any sandbox after checking all candidates", "claim", claim.Name)
 			return nil, nil // Warm pool is truly empty, fall completely to cold start
 		}
 
 		success, err := r.tryAdopt(ctx, claim, adopted, adoptedKey, namespacedWarmPoolNameForQueue)
+		if errors.Is(err, errAdoptionTriggeredRetry) {
+			pending = err
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -695,16 +699,21 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 		if success {
 			return adopted, nil
 		}
+		pending = nil
 	}
 
+	if pending != nil {
+		return nil, pending
+	}
 	logger.Info("Failed to adopt sandbox after max retries", "claim", claim.Name)
 	return nil, nil
 }
 
-// tryAdopt records the assignment on the claim and hands the Sandbox over. It
-// reports false when the candidate was lost to a competing claim or vanished,
-// which the caller answers by trying the next candidate. The claim Update is a
-// full-object CAS on purpose: it is what keeps one claim from adopting twice.
+// tryAdopt records the assignment on the claim and hands the Sandbox over. A
+// vanished candidate reports false and the caller tries the next one; a
+// conflicted hand-over reports errAdoptionTriggeredRetry and the caller picks
+// another attempt or ends the pass on the recorded assignment. A conflict on the
+// claim Update ends the pass: that full-object CAS keeps one claim from adopting twice.
 func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, adopted *v1beta1.Sandbox, adoptedKey queue.SandboxKey, queueName string) (bool, error) {
 	logger := log.FromContext(ctx)
 	poolName := "none"
@@ -731,7 +740,7 @@ func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensions
 		}
 		r.WarmSandboxQueue.Add(queueName, adoptedKey)
 		if k8errors.IsConflict(adoptErr) {
-			return false, nil
+			return false, fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, adopted.Name)
 		}
 		logger.Error(adoptErr, "Failed to complete adoption for candidate sandbox", "sandbox candidate", adopted.Name, "claim", claim.Name)
 		return false, adoptErr
@@ -826,7 +835,7 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 		return err
 	}
 
-	if err := r.Patch(ctx, adopted, client.MergeFrom(originalAdopted)); err != nil {
+	if err := r.Patch(ctx, adopted, client.MergeFromWithOptions(originalAdopted, client.MergeFromWithOptimisticLock{})); err != nil {
 		return err
 	}
 
@@ -1209,7 +1218,10 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 	if ref := metav1.GetControllerOf(sandbox); ref != nil && ref.Kind == warmPoolKind {
 		return nil, r.completePendingAdoption(ctx, claim, sandbox, sbName)
 	}
-	logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, falling through", "sandbox", sbName, "claim", claim.Name)
+	logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, removing stale reference", "sandbox", sbName, "claim", claim.Name)
+	if err := r.clearAssignedSandboxName(ctx, claim); err != nil {
+		return nil, fmt.Errorf("failed to remove a sandbox reference another claim owns: %w", err)
+	}
 	return nil, nil
 }
 
@@ -1235,10 +1247,13 @@ func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, cl
 	}
 
 	if err := r.completeAdoption(ctx, claim, sandbox); err != nil {
-		if !k8errors.IsNotFound(err) && !k8errors.IsConflict(err) {
+		if k8errors.IsConflict(err) {
+			return fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
+		}
+		if !k8errors.IsNotFound(err) {
 			return fmt.Errorf("failed to complete adoption of %q: %w", sbName, err)
 		}
-		logger.V(4).Info("Failed to complete adoption (conflict/notfound), falling through", "sandbox", sbName, "claim", claim.Name)
+		logger.V(4).Info("Failed to complete adoption (notfound), falling through", "sandbox", sbName, "claim", claim.Name)
 		return nil
 	}
 
@@ -1299,23 +1314,26 @@ func (r *SandboxClaimReconciler) initializeSandboxLaunchTypeLabel(ctx context.Co
 }
 
 func (r *SandboxClaimReconciler) getTemplate(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*extensionsv1beta1.SandboxTemplate, error) {
+	templateName, shadow := strings.CutPrefix(claim.Spec.WarmPoolRef.Name, extensionsv1beta1.ShadowPoolPrefix)
 	warmPool := &extensionsv1beta1.SandboxWarmPool{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); err != nil {
-		if k8errors.IsNotFound(err) {
-			return nil, ErrWarmPoolNotFound
-		}
+	switch err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: claim.Spec.WarmPoolRef.Name}, warmPool); {
+	case err == nil:
+		templateName = warmPool.Spec.TemplateRef.Name
+	case !k8errors.IsNotFound(err):
 		return nil, fmt.Errorf("failed to get sandbox warm pool %q: %w", claim.Spec.WarmPoolRef.Name, err)
+	case !shadow:
+		return nil, ErrWarmPoolNotFound
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		Namespace: claim.Namespace,
-		Name:      warmPool.Spec.TemplateRef.Name,
+		Name:      templateName,
 	}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(template), template); err != nil {
 		if k8errors.IsNotFound(err) {
-			return nil, fmt.Errorf(`SandboxTemplate %q not found: %w`, warmPool.Spec.TemplateRef.Name, ErrTemplateNotFound)
+			return nil, fmt.Errorf(`SandboxTemplate %q not found: %w`, templateName, ErrTemplateNotFound)
 		}
-		return nil, fmt.Errorf("failed to get sandbox template %q: %w", warmPool.Spec.TemplateRef.Name, err)
+		return nil, fmt.Errorf("failed to get sandbox template %q: %w", templateName, err)
 	}
 
 	return template, nil
@@ -1652,8 +1670,8 @@ func isAdoptable(candidate *v1beta1.Sandbox) error {
 }
 
 func getWarmPoolName(obj metav1.Object) string {
-	if ctrl := metav1.GetControllerOf(obj); ctrl != nil && ctrl.Kind == warmPoolKind {
-		return ctrl.Name
+	if ref := metav1.GetControllerOf(obj); ref != nil && ref.Kind == warmPoolKind {
+		return ref.Name
 	}
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Kind == warmPoolKind {

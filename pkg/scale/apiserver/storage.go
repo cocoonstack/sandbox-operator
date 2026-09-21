@@ -45,6 +45,8 @@ const (
 	// TTLSecondsAnnotation bounds the claim lease in whole seconds on Create for
 	// clients that cannot set spec.shutdownTime (0 = the owning node's default).
 	TTLSecondsAnnotation = "sandbox.cocoonstack.io/ttl-seconds"
+
+	dryRunUnsupported = "dry-run is not supported for sandbox mutations"
 )
 
 // The verb set an aggregated, scatter-gather resource implements: the read triad
@@ -101,7 +103,10 @@ func (r *sandboxREST) Watch(ctx context.Context, options *metainternalversion.Li
 	return r.store.Watch(ctx, toScaleListOptions(ctx, options))
 }
 
-func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, _ *metav1.CreateOptions) (runtime.Object, error) {
+func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
+	if options != nil && len(options.DryRun) > 0 {
+		return nil, apierrors.NewBadRequest(dryRunUnsupported)
+	}
 	sb, ok := obj.(*sandboxv1beta1.Sandbox)
 	if !ok {
 		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected a Sandbox object, got %T", obj))
@@ -143,7 +148,10 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	return synthesizeClaimedSandbox(namespace, name, sb, assignment), nil
 }
 
-func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, _ *metav1.DeleteOptions) (runtime.Object, bool, error) {
+func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
+	if options != nil && len(options.DryRun) > 0 {
+		return nil, false, apierrors.NewBadRequest(dryRunUnsupported)
+	}
 	// owner-authorized teardown of the Sandbox resource only; pod state never reaches here
 	namespace := genericapirequest.NamespaceValue(ctx)
 	sb, err := r.store.Get(ctx, namespace, name)
@@ -202,9 +210,9 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 
 // poolKeyForSandbox derives the warm-pool key from a Sandbox: the template is the
 // first container's image, the size is a t-shirt class mapped from that container's
-// resources, and the net comes from the NetAnnotation on the object or its pod
-// template (default "none"). It defers to scale.PoolKeyFor and
-// scale.NetForAnnotations so the SandboxWarmPool driver derives an identical key.
+// resources, and the net comes from the NetAnnotation on the Sandbox object or its
+// pod template (default "none"). The warm-pool driver provisions from a template's
+// pod-template annotation, so a lane has to appear there for a pool to exist.
 func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
 	net := scale.NetForAnnotations(sb.Annotations, sb.Spec.PodTemplate.ObjectMeta.Annotations)
 	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, net)
