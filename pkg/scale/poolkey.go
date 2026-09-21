@@ -44,9 +44,9 @@ func PoolKeyFor(containers []corev1.Container, net string) PoolKey {
 }
 
 // NetForAnnotations resolves the pool network axis from the first annotation
-// map that carries it, then the second. The pod path and the warm-pool driver
-// read the pod template, the source the Pod carries; only the aggregated Create
-// also honors the Sandbox object's own annotation.
+// map that carries it, then the second. The pod path reads the Pod and the
+// warm-pool driver a template's pod template, the one source the Pod ends up
+// carrying; only the aggregated Create also honors the Sandbox object's own annotation.
 func NetForAnnotations(object, podTemplate map[string]string) string {
 	return cmp.Or(object[NetAnnotation], podTemplate[NetAnnotation])
 }

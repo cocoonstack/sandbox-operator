@@ -70,8 +70,8 @@ the claim path needs the scheduler, kubelet bind, or image pull.
    `warm ∧ unclaimed` Sandbox from the in-memory queue (node-spread pick); the
    claim records the adoption with an `Update` on the SandboxClaim and binds
    the Sandbox with a merge `Patch` under a `resourceVersion` precondition. A
-   loser that raced the same Sandbox moves to the next candidate; only a pass
-   whose every hand-over conflicted requeues, and the next pass completes the
+   loser that raced the same Sandbox moves to the next candidate; a pass that
+   ends on a conflict requeues instead, and the next pass completes the
    adoption its claim already records. The CRD path is two apiserver
    writes per claim; the sub-millisecond figures below come from the node-local
    gateway (L2), not from this path.

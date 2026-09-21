@@ -57,7 +57,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL (15s when omitted); `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the compat namespace. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
-| `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`. |
+| `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`; `404` when no live sandbox carries the id or the owning node already reaped it. |
 | `POST /sandboxes/{id}/timeout` | existence check | TTL is fixed by the node at claim time; the call is verified and acknowledged, not silently faked. |
 | `POST /sandboxes/{id}/refreshes` | existence check | Verifies that the sandbox is still live; it does not extend or refresh the node-owned deadline. |
 | `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
