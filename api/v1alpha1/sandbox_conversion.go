@@ -64,7 +64,6 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 	ConvertStatusFrom(&src.Status, &s.Status)
 
 	// Set best-effort default for Status.Replicas based on OperatingMode.
-	// This will be overridden by the restoration logic if the annotation exists.
 	if src.Spec.OperatingMode == v1beta1.SandboxOperatingModeSuspended {
 		s.Status.Replicas = 0
 	} else {

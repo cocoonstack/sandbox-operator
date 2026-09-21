@@ -72,9 +72,10 @@ the claim path needs the scheduler, kubelet bind, or image pull.
    the Sandbox with a merge `Patch` under a `resourceVersion` precondition. A
    loser that raced the same Sandbox moves to the next candidate; a pass that
    leaves a conflicted hand-over unsettled requeues instead, and the next pass
-   completes the adoption its claim already records or clears the reference. The CRD path is two apiserver
-   writes per claim; the sub-millisecond figures below come from the node-local
-   gateway (L2), not from this path.
+   completes the adoption its claim already records or clears the reference.
+   These are two handover writes, followed by a separate claim status write;
+   they are not the total writes for the claim lifecycle. The sub-millisecond
+   figures below come from the node-local gateway (L2), not this CRD path.
 2. **Pool status from the informer cache, not etcd.** `readyReplicas` is
    recomputed each reconcile from the pool's Sandboxes read through the indexed
    cache without deep copies — an in-memory scan, never a `LIST` against the
@@ -98,7 +99,7 @@ the claim path needs the scheduler, kubelet bind, or image pull.
 | Scenario | Behavior | Breaks k8s semantics? |
 |---|---|---|
 | Two claims race one warm Sandbox | `resourceVersion` PATCH conflict; loser adopts the next candidate | No — standard optimistic concurrency |
-| Warm pool exhausted | Claim stays `Pending` until replenish (unchanged) | No |
+| Warm pool exhausted | No adoptable Sandbox: cold-start from the template; an unsettled handover conflict requeues | No |
 | The leader operator dies mid-claim | Lease expiry → another replica resumes; claim is idempotent | No |
 | Stale informer picks an already-claimed Sandbox | PATCH precondition fails → next candidate | No |
 

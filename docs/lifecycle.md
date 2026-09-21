@@ -4,9 +4,13 @@ title: Lifecycle verbs
 
 # Lifecycle verbs
 
-Beyond create/delete, a delivered sandbox supports four action verbs, served as
-**subresources** so the standard `agents.x-k8s.io` schema stays untouched — an
-unmodified upstream client keeps working.
+The L3 aggregated apiserver serves four action verbs beyond create/delete as
+**subresources** of `sandboxes.agents.x-k8s.io`. The CRD operator uses
+`spec.operatingMode` for suspend/resume instead.
+
+L3 create, delete and these action subresources reject server-side dry-run
+(`dryRun=All`) with `400 BadRequest` before accessing the store or issuing a
+node-local RPC. The node APIs do not provide a dry-run transaction.
 
 | subresource | body | effect |
 |---|---|---|

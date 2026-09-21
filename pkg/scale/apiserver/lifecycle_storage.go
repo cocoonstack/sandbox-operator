@@ -51,13 +51,10 @@ func (r *lifecycleREST) GroupVersionKind(schema.GroupVersion) schema.GroupVersio
 	return gvks[0]
 }
 
-func (r *lifecycleREST) Create(
-	ctx context.Context,
-	name string,
-	obj runtime.Object,
-	createValidation rest.ValidateObjectFunc,
-	_ *metav1.CreateOptions,
-) (runtime.Object, error) {
+func (r *lifecycleREST) Create(ctx context.Context, name string, obj runtime.Object, createValidation rest.ValidateObjectFunc, options *metav1.CreateOptions) (runtime.Object, error) {
+	if options != nil && len(options.DryRun) > 0 {
+		return nil, apierrors.NewBadRequest(dryRunUnsupported)
+	}
 	if createValidation != nil {
 		if err := createValidation(ctx, obj); err != nil {
 			return nil, err

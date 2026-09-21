@@ -53,6 +53,48 @@ func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	assert.False(t, store.released, "must not release when the sandboxd claim id is unknown")
 }
 
+func TestCreate_RejectsDryRunWithoutClaiming(t *testing.T) {
+	store := &fakeStore{}
+	r := NewSandboxREST(store).(*sandboxREST)
+	obj, err := r.Create(nsCtx(t, "ns"), submittedSandbox("s1", nil), nil, &metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+	require.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+	assert.Nil(t, obj)
+	assert.Zero(t, store.claimCalls)
+}
+
+func TestDelete_RejectsDryRunWithoutReleasing(t *testing.T) {
+	store := &fakeStore{getSandbox: &sandboxv1beta1.Sandbox{
+		Name:        "s1",
+		Namespace:   "ns",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_1"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}}
+	r := NewSandboxREST(store).(*sandboxREST)
+	obj, deleted, err := r.Delete(nsCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}})
+	require.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+	assert.Nil(t, obj)
+	assert.False(t, deleted)
+	assert.Zero(t, store.getCalls)
+	assert.False(t, store.released)
+}
+
+func TestLifecycleVerbs_RejectDryRunBeforeStoreAccess(t *testing.T) {
+	store := &fakeStore{}
+	for name, storage := range map[string]rest.Storage{
+		"pause":    NewSandboxPauseREST(store),
+		"resume":   NewSandboxResumeREST(store),
+		"fork":     NewSandboxForkREST(store),
+		"snapshot": NewSandboxSnapshotREST(store),
+	} {
+		t.Run(name, func(t *testing.T) {
+			obj, err := storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", storage.New(), nil, &metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}})
+			require.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+			assert.Nil(t, obj)
+			assert.Zero(t, store.getCalls)
+		})
+	}
+}
+
 func TestTTLSecondsForSandbox(t *testing.T) {
 	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
 	for name, tc := range map[string]struct {
@@ -149,6 +191,7 @@ func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
 type fakeStore struct {
 	getSandbox *sandboxv1beta1.Sandbox
 	getErr     error
+	getCalls   int
 	verbErr    error
 
 	claimCalls  int
@@ -166,6 +209,7 @@ func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.Sa
 }
 
 func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
+	f.getCalls++
 	return f.getSandbox, f.getErr
 }
 

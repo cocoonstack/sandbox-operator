@@ -1031,7 +1031,7 @@ _Underlying type:_ _string_
 WarmPoolPolicy describes the policy for using warm pools.
 It can be one of the following:
   - "none": Do not use any warm pool, always create fresh sandboxes
-  - "default": Select from all available warm pools that match the template (default)
+  - "default": Cold-start from the template; warm adoption requires a named pool (default)
   - A warm pool name: Select only from the specified warm pool (e.g., "fast-pool", "secure-pool")
 
 

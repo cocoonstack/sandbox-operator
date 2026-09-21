@@ -233,9 +233,10 @@ func (r *SandboxReconciler) reconcileChildResources(ctx context.Context, sandbox
 		}
 	}
 
-	if !hasFinished {
-		meta.RemoveStatusCondition(&sandbox.Status.Conditions, string(sandboxv1beta1.SandboxConditionFinished))
-	}
+	sandbox.Status.Conditions = slices.DeleteFunc(sandbox.Status.Conditions, func(condition metav1.Condition) bool {
+		return condition.Type == string(sandboxv1beta1.SandboxConditionFinished) && !hasFinished ||
+			condition.Type == string(sandboxv1beta1.SandboxConditionSuspended) && sandbox.Spec.OperatingMode != sandboxv1beta1.SandboxOperatingModeSuspended
+	})
 
 	return allErrors
 }

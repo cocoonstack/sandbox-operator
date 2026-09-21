@@ -4,6 +4,30 @@ The operator is intentionally usable with its defaults: leader election and
 all agent-sandbox extension controllers are enabled, and generated Pods use
 standard kubelet scheduling.
 
+## Installation
+
+Releases publish multi-arch (amd64/arm64) images to GHCR:
+`ghcr.io/cocoonstack/sandbox-operator` and
+`ghcr.io/cocoonstack/sandbox-apiserver`. Use the manifests from the same release
+as the image. From a checkout of that release tag:
+
+```bash
+VERSION="$(git describe --tags --exact-match)"
+helm upgrade --install sandbox-operator ./helm \
+  --namespace sandbox-system --create-namespace \
+  --set-string image.tag="$VERSION"
+```
+
+For Kustomize, replace the `ko://` image reference:
+
+```bash
+kustomize build k8s | sed "s#ko://.*/sandbox-operator#ghcr.io/cocoonstack/sandbox-operator:$VERSION#" | kubectl apply -f -
+```
+
+These install the CRD operator. The aggregated apiserver has separate manifests
+in [config/apiserver](https://github.com/cocoonstack/sandbox-operator/tree/master/config/apiserver)
+and [config/apiservice](https://github.com/cocoonstack/sandbox-operator/tree/master/config/apiservice).
+
 ## Runtime and API surface
 
 - `--default-runtime` (`standard`): default backend for newly created Sandbox
