@@ -1498,6 +1498,7 @@ func (r *SandboxClaimReconciler) recordCreationLatencyMetric(ctx context.Context
 
 // sandboxEventHandler implements handler.EventHandler for the SandboxClaimReconciler.
 type sandboxEventHandler struct {
+	handler.Funcs
 	sandboxQueue *queue.SimpleSandboxQueue
 }
 
@@ -1539,9 +1540,6 @@ func (h *sandboxEventHandler) Update(ctx context.Context, e event.UpdateEvent, _
 	}
 }
 
-func (h *sandboxEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-}
-
 func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	sandbox, ok := e.Object.(*v1beta1.Sandbox)
 	if !ok {
@@ -1565,16 +1563,8 @@ func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _
 }
 
 type warmPoolEventHandler struct {
+	handler.Funcs
 	sandboxQueue *queue.SimpleSandboxQueue
-}
-
-func (h *warmPoolEventHandler) Create(_ context.Context, _ event.CreateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-}
-
-func (h *warmPoolEventHandler) Update(_ context.Context, _ event.UpdateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-}
-
-func (h *warmPoolEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 }
 
 func (h *warmPoolEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
