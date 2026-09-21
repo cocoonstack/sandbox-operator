@@ -233,9 +233,11 @@ func TestLifecycleVerbsOnAReapedSandboxAre404(t *testing.T) {
 		{http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":1}`},
 		{http.MethodPost, "/sandboxes/sb-abc/snapshots", `{}`},
 		{http.MethodGet, "/sandboxes/sb-abc/metrics", ``},
+		{http.MethodDelete, "/sandboxes/sb-abc", ``},
 	} {
-		t.Run(tc.path, func(t *testing.T) {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			store := &lifecycleStore{err: gone, statsErr: gone}
+			store.releaseErr = gone
 			sb := liveSandbox("s1", "sb_abc", "node-a", "img")
 			sb.Labels[scale.PhaseLabel] = "Running"
 			store.items = []sandboxv1beta1.Sandbox{sb}

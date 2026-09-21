@@ -360,7 +360,7 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	}
 	// The uniform fleet api_token authorizes release by id.
 	if err := cl.Release(ctx, id, s.sandboxdToken); err != nil {
-		return fmt.Errorf("scale: sandboxd release of %q on node %q: %w", id, node, err)
+		return nodeVerbError(err, "release", id, node)
 	}
 	return nil
 }

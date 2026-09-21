@@ -16,7 +16,8 @@ import (
 func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))
-	f := &recordingFactory{verbErr: &sandboxd.HTTPError{StatusCode: http.StatusNotFound, Message: "unknown sandbox"}}
+	gone := &sandboxd.HTTPError{StatusCode: http.StatusNotFound, Message: "unknown sandbox"}
+	f := &recordingFactory{verbErr: gone, releaseErr: gone}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 	ctx := t.Context()
 
@@ -26,6 +27,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
 		"resume":   store.Resume(ctx, "n1", "sb_gone"),
+		"release":  store.Release(ctx, "n1", "sb_gone"),
 		"stats":    statsErr,
 		"fork":     forkErr,
 		"snapshot": snapErr,

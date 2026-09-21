@@ -175,6 +175,9 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 			namespace, name, node, ClaimIDAnnotation))
 	}
 	if err := r.store.Release(ctx, node, claimID); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, false, err
+		}
 		return nil, false, apierrors.NewInternalError(
 			fmt.Errorf("release sandbox %s/%s (node %q id %q): %w", namespace, name, node, claimID, err))
 	}
