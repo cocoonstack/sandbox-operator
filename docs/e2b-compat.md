@@ -83,11 +83,14 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   wildcard DNS/TLS and a proxy that routes the derived host or the
   `E2b-Sandbox-Id` / `E2b-Sandbox-Port` headers the SDK sends. `envd-proxy` is
   that proxy; see [envd-proxy](envd-proxy.md). Control plane without it means
-  `Sandbox.create()` works and `files`/`commands`/`pty` do not.
+  `Sandbox.create()` works and `files`/`commands`/`pty` do not. The pool must
+  also run an image that carries `envd` — the sandbox repo's `e2b-rt` flavor —
+  or there is nothing on the other end of the proxy.
 - **`envdVersion`** is reported as `0.4.0` unless `--e2b-envd-version` says
   otherwise. The SDK version-compares it and *kills the sandbox* if it cannot
   parse it, so it is always sent. Set it to the version actually installed in
-  the pool's image; the default is a floor, not a measurement.
+  the pool's image (`e2b-rt` records its own in `/etc/envd-version`); the
+  default is a floor, not a measurement.
 - **Metrics are schema-complete, not measurement-complete.** `cpuCount`,
   `memUsed`, and `memTotal` come from the owning node when available;
   `cpuUsedPct`, `memCache`, `diskUsed`, and `diskTotal` are reported as zero.
