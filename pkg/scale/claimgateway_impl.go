@@ -57,6 +57,7 @@ type SandboxdClient interface {
 	// client already carries, so the control plane needs no per-sandbox secret.
 	Hibernate(ctx context.Context, id string) error
 	Wake(ctx context.Context, id string) error
+	Renew(ctx context.Context, id string, spec sandboxd.RenewSpec) (time.Time, error)
 	Fork(ctx context.Context, id string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error)
 	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)

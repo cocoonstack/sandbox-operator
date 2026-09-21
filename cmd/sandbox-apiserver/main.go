@@ -79,6 +79,8 @@ type options struct {
 	E2BAddr           string
 	E2BNamespace      string
 	E2BDomain         string
+	E2BEnvdVersion    string
+	E2BTimeoutSeconds int
 	E2BAPIKeyFile     string
 	E2BAllowAnonymous bool
 }
@@ -120,7 +122,11 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.E2BNamespace, "e2b-namespace", o.E2BNamespace,
 		"Namespace e2b claims are made in; e2b has no namespace concept, so every compat claim lands here.")
 	fs.StringVar(&o.E2BDomain, "e2b-domain", o.E2BDomain,
-		"Base domain reported to the SDK, from which it derives the in-sandbox envd host. Empty leaves the SDK's own E2B_DOMAIN/E2B_SANDBOX_URL in charge.")
+		"Base domain the SDK derives the in-sandbox envd host from, as {port}-{sandboxID}.{domain}. Required with --enable-e2b-api: without it a created sandbox has no reachable data plane.")
+	fs.StringVar(&o.E2BEnvdVersion, "e2b-envd-version", o.E2BEnvdVersion,
+		"envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one.")
+	fs.IntVar(&o.E2BTimeoutSeconds, "e2b-default-timeout", o.E2BTimeoutSeconds,
+		"Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for.")
 	fs.StringVar(&o.E2BAPIKeyFile, "e2b-api-key-file", o.E2BAPIKeyFile,
 		"Path to a file (Secret mount) of accepted e2b API keys, one per line, presented by the SDK as X-API-KEY.")
 	fs.BoolVar(&o.E2BAllowAnonymous, "e2b-allow-anonymous", o.E2BAllowAnonymous,
@@ -326,12 +332,14 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 		return err
 	}
 	srv, err := e2bcompat.NewServer(store, e2bcompat.Options{
-		Namespace:      o.E2BNamespace,
-		Domain:         o.E2BDomain,
-		Inventory:      inv,
-		APIKeys:        keys,
-		AllowAnonymous: o.E2BAllowAnonymous,
-		Log:            ctrl.Log.WithName("e2b"),
+		Namespace:             o.E2BNamespace,
+		Domain:                o.E2BDomain,
+		EnvdVersion:           o.E2BEnvdVersion,
+		DefaultTimeoutSeconds: o.E2BTimeoutSeconds,
+		Inventory:             inv,
+		APIKeys:               keys,
+		AllowAnonymous:        o.E2BAllowAnonymous,
+		Log:                   ctrl.Log.WithName("e2b"),
 	})
 	if err != nil {
 		return err

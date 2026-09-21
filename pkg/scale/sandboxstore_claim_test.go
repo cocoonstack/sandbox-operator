@@ -286,6 +286,10 @@ func (c *recordingClient) Hibernate(context.Context, string) error { return c.f.
 
 func (c *recordingClient) Wake(context.Context, string) error { return c.f.verbErr }
 
+func (c *recordingClient) Renew(context.Context, string, sandboxd.RenewSpec) (time.Time, error) {
+	return time.Time{}, c.f.verbErr
+}
+
 func (c *recordingClient) Fork(context.Context, string, sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
 	return sandboxd.ForkResult{}, c.f.verbErr
 }

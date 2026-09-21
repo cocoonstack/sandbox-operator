@@ -41,10 +41,16 @@ const (
 	// The SDK version-compares this before choosing the envd auth style, so it
 	// must be a real semver at or above the modern-auth cutoff (0.4.0).
 	DefaultEnvdVersion = "0.4.0"
-	// DefaultTimeoutSeconds matches the e2b SDK's own default TTL.
-	DefaultTimeoutSeconds = 15
+	// DefaultTimeoutSeconds matches the node's own default lease. The e2b SDK
+	// defaults to 15s, which reaps a sandbox before a first exec on a cold
+	// client, so an omitted timeout takes the node's default instead.
+	DefaultTimeoutSeconds = 300
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
+	// accessTokenHeader is the per-sandbox data-plane credential the SDK sends
+	// to envd. It is minted once at claim time and never re-derivable here, so
+	// a client that presents it on connect gets it echoed back.
+	accessTokenHeader = "X-Access-Token" //nolint:gosec // a header name, not a credential
 	// phaseHibernated is the phase label value a node publishes for a paused
 	// sandbox (vk-sandbox inventory publisher).
 	phaseHibernated = "Hibernated"
@@ -61,15 +67,20 @@ type Options struct {
 	// namespace concept, so every compat claim lands in this one.
 	Namespace string
 	// Domain is echoed as the sandbox `domain`, from which the SDK derives the
-	// envd host as "{port}-{sandboxID}.{domain}". Empty leaves it unset, which
-	// makes the SDK fall back to its configured E2B_DOMAIN/E2B_SANDBOX_URL.
+	// envd host as "{port}-{sandboxID}.{domain}". It is required: a sandbox
+	// handed out without one has no address its client can reach.
 	//
 	// The sandbox ids published here are DNS-label safe (see sandboxid.go), so
 	// that host form is valid; wildcard DNS and a proxy must still route the host
 	// or the E2b-Sandbox-Id / E2b-Sandbox-Port headers the SDK sends.
 	Domain string
-	// EnvdVersion overrides DefaultEnvdVersion.
+	// EnvdVersion overrides DefaultEnvdVersion. It must name the envd actually
+	// installed in the pool's image: the SDK version-compares it and kills the
+	// sandbox when it cannot parse one.
 	EnvdVersion string
+	// DefaultTimeoutSeconds overrides DefaultTimeoutSeconds for a create that
+	// names no timeout, and is the lease a refresh grants.
+	DefaultTimeoutSeconds int
 	// APIKeys, when non-empty, is the set of accepted X-API-KEY values. Empty
 	// disables authentication and is refused unless AllowAnonymous is set, so a
 	// misconfigured deployment cannot silently serve an open claim endpoint.
@@ -110,6 +121,7 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	}
 	opts.Namespace = cmp.Or(opts.Namespace, "default")
 	opts.EnvdVersion = cmp.Or(opts.EnvdVersion, DefaultEnvdVersion)
+	opts.DefaultTimeoutSeconds = cmp.Or(opts.DefaultTimeoutSeconds, DefaultTimeoutSeconds)
 	opts.SizeClass = cmp.Or(opts.SizeClass, scale.SizeClassSmall)
 	keys := make(map[string]struct{}, len(opts.APIKeys))
 	for _, k := range opts.APIKeys {
@@ -119,6 +131,11 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	}
 	if len(keys) == 0 && !opts.AllowAnonymous {
 		return nil, errors.New("e2bcompat: no API key configured; set one or enable anonymous access explicitly")
+	}
+	// The SDK derives the envd host from the domain, so an empty one hands out
+	// sandboxes whose data plane the client cannot address at all.
+	if strings.TrimSpace(opts.Domain) == "" {
+		return nil, errors.New("e2bcompat: no domain configured; the SDK cannot reach a sandbox without one")
 	}
 	return &Server{store: store, resolver: resolver, opts: opts, keys: keys}, nil
 }
@@ -195,6 +212,10 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "timeout must be >= 0")
 		return
 	}
+	if msg, ok := unsupportedCreateOption(req); ok {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	name := names.SimpleNameGenerator.GenerateName(namePrefix)
 	pool := scale.PoolKey{
@@ -202,7 +223,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		Net:      netFor(req.AllowInternetAccess),
 		Size:     s.opts.SizeClass,
 	}
-	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool, timeoutSeconds(req.Timeout))
+	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool, s.timeoutSeconds(req.Timeout))
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf(
@@ -276,9 +297,9 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setTimeout accepts the SDK's TTL update. The node fixes a claim's TTL when it
-// hands the microVM over, so this verifies the sandbox exists and acknowledges;
-// it does not silently claim to have extended a deadline it cannot move.
+// setTimeout moves the sandbox's deadline to timeout seconds from now. The
+// node's grant is authoritative — it defaults a zero and clamps an oversized
+// request — so the call reports success only once the owning node has renewed.
 func (s *Server) setTimeout(w http.ResponseWriter, r *http.Request) {
 	var req SandboxTimeoutRequest
 	if !decodeBody(w, r, &req) {
@@ -288,20 +309,34 @@ func (s *Server) setTimeout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "timeout must be >= 0")
 		return
 	}
-	id := r.PathValue("sandboxID")
-	if _, err := s.lookup(r, id); err != nil {
-		s.writeLookupError(w, err, id, "timeout")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.renew(w, r, "timeout", int(req.Timeout))
 }
 
-// refresh is the SDK keepalive. Liveness is node-owned, so this confirms the
-// sandbox is still live and acknowledges.
+// refresh is the SDK keepalive: it renews the lease for the configured default
+// rather than only confirming the sandbox is alive, so a client that keeps
+// calling it keeps its sandbox.
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
+	var req SandboxRefreshRequest
+	if !decodeOptionalBody(w, r, &req) {
+		return
+	}
+	ttl := s.opts.DefaultTimeoutSeconds
+	if req.Duration != nil && *req.Duration > 0 {
+		ttl = int(*req.Duration)
+	}
+	s.renew(w, r, "refresh", ttl)
+}
+
+// renew resolves the sandbox and extends its node-owned lease.
+func (s *Server) renew(w http.ResponseWriter, r *http.Request, op string, ttlSeconds int) {
 	id := r.PathValue("sandboxID")
-	if _, err := s.lookup(r, id); err != nil {
-		s.writeLookupError(w, err, id, "refresh")
+	sb, err := s.lookup(r, id)
+	if err != nil {
+		s.writeLookupError(w, err, id, op)
+		return
+	}
+	if _, err := s.store.Renew(r.Context(), sb.Status.NodeName, claimIDOf(sb), ttlSeconds); err != nil {
+		s.writeVerbError(w, err, id, op, "failed to extend the sandbox lease")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -341,7 +376,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	if sb.Labels[scale.PhaseLabel] == phaseHibernated {
 		state = StatePaused
 	}
-	endAt := started.Add(DefaultTimeoutSeconds * time.Second)
+	endAt := started.Add(time.Duration(s.opts.DefaultTimeoutSeconds) * time.Second)
 	if deadline, err := time.Parse(time.RFC3339, sb.Annotations[scale.DeadlineAnnotation]); err == nil {
 		endAt = deadline
 	}
@@ -370,4 +405,19 @@ func netFor(allowInternet *bool) string {
 		return scale.NetEgress
 	}
 	return scale.NetDefault
+}
+
+// unsupportedCreateOption names the first requested option this backend cannot
+// honor. Honoring it silently would hand back a different sandbox than asked
+// for, which is how an SDK ends up trusting a guarantee that does not hold.
+func unsupportedCreateOption(req NewSandbox) (string, bool) {
+	switch {
+	case req.Secure != nil && !*req.Secure:
+		return "secure=false is not supported; every sandbox this backend hands out is reachable only with its own access token", true
+	case len(req.EnvVars) > 0:
+		return "envVars is not supported; set the environment inside the sandbox after it starts", true
+	case req.AutoPause != nil && *req.AutoPause:
+		return "autoPause is not supported; pause explicitly, or let the lease expire", true
+	}
+	return "", false
 }

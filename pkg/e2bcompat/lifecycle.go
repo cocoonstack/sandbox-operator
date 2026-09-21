@@ -89,14 +89,16 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 		status = http.StatusCreated
 	}
-	// envdAccessToken is left empty: the token is handed out once at claim time
-	// and node inventory carries no per-sandbox secret to re-derive it from.
+	// The token is minted once at claim time and node inventory carries no
+	// per-sandbox secret to re-derive it from, so this echoes back the one the
+	// client kept and leaves the field empty when it kept none.
 	writeJSON(w, status, Sandbox{
-		TemplateID:  templateOf(sb),
-		SandboxID:   publicID(claimIDOf(sb)),
-		ClientID:    sb.Status.NodeName,
-		EnvdVersion: s.opts.EnvdVersion,
-		Domain:      s.opts.Domain,
+		TemplateID:      templateOf(sb),
+		SandboxID:       publicID(claimIDOf(sb)),
+		ClientID:        sb.Status.NodeName,
+		EnvdVersion:     s.opts.EnvdVersion,
+		EnvdAccessToken: r.Header.Get(accessTokenHeader),
+		Domain:          s.opts.Domain,
 	})
 }
 
@@ -139,7 +141,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("sandbox %q is paused and cannot be forked; resume it first", id))
 		return
 	}
-	children, err := s.store.Fork(r.Context(), sb.Status.NodeName, claimIDOf(sb), int(count), timeoutSeconds(req.Timeout))
+	children, err := s.store.Fork(r.Context(), sb.Status.NodeName, claimIDOf(sb), int(count), s.timeoutSeconds(req.Timeout))
 	if err != nil {
 		s.writeVerbError(w, err, id, "fork", "failed to fork the sandbox")
 		return
@@ -381,6 +383,14 @@ func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg st
 	writeError(w, http.StatusInternalServerError, msg)
 }
 
+// timeoutSeconds resolves an optional TTL to the configured default.
+func (s *Server) timeoutSeconds(v *int32) int {
+	if v == nil {
+		return s.opts.DefaultTimeoutSeconds
+	}
+	return int(*v)
+}
+
 func decodeBody(w http.ResponseWriter, r *http.Request, out any) bool {
 	return reportBadBody(w, json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out))
 }
@@ -404,14 +414,6 @@ func reportBadBody(w http.ResponseWriter, err error) bool {
 // claimIDOf reports the node-local claim id the store's verbs address.
 func claimIDOf(sb *sandboxv1beta1.Sandbox) string {
 	return sb.Annotations[scale.ClaimIDAnnotation]
-}
-
-// timeoutSeconds resolves an optional TTL to the e2b default.
-func timeoutSeconds(v *int32) int {
-	if v == nil {
-		return DefaultTimeoutSeconds
-	}
-	return int(*v)
 }
 
 // snapshotInfo renders a checkpoint in e2b's snapshot shape.

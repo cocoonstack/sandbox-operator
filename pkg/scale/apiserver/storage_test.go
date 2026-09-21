@@ -232,6 +232,10 @@ func (f *fakeStore) Pause(context.Context, string, string) error { return f.verb
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return f.verbErr }
 
+func (f *fakeStore) Renew(context.Context, string, string, int) (time.Time, error) {
+	return time.Time{}, f.verbErr
+}
+
 func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
 	return nil, f.verbErr
 }

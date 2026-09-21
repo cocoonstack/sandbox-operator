@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -21,6 +22,18 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 		return nodeVerbError(err, "pause", id, node)
 	}
 	return nil
+}
+
+func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int) (time.Time, error) {
+	cl, err := s.nodeClient(ctx, node, "renew", id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	deadline, err := cl.Renew(ctx, id, sandboxd.RenewSpec{TTLSeconds: ttlSeconds})
+	if err != nil {
+		return time.Time{}, nodeVerbError(err, "renew", id, node)
+	}
+	return deadline, nil
 }
 
 func (s *scatterGatherStore) Resume(ctx context.Context, node, id string) error {
