@@ -485,11 +485,7 @@ func (r *SandboxClaimReconciler) reconcileExpired(ctx context.Context, claim *ex
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Reconciling Expired claim", "claim", claim.Name)
 
-	// Fall back to claim.Name when status is unset.
-	statusName := claim.Name
-	if claim.Status.SandboxStatus.Name != "" {
-		statusName = claim.Status.SandboxStatus.Name
-	}
+	statusName := cmp.Or(claim.Status.SandboxStatus.Name, claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation], claim.Name)
 
 	sandbox := &v1beta1.Sandbox{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: statusName}, sandbox); err != nil {
