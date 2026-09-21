@@ -172,6 +172,48 @@ func TestAConflictedAssignmentIsSettledLaterEvenWhenTheQueueRunsDry(t *testing.T
 	}
 }
 
+func TestAPendingAdoptionThatConflictsIsRetriedNotAbandoned(t *testing.T) {
+	scheme := newScheme(t)
+	claim := doubleAdoptionClaim("claim-a")
+	claim.Annotations = map[string]string{extensionsv1beta1.AssignedSandboxNameAnnotation: "pool-abcde"}
+	base := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(doubleAdoptionTemplate(), doubleAdoptionPool(), claim, doubleAdoptionWarmSandbox()).
+		WithStatusSubresource(claim, &sandboxv1beta1.Sandbox{}).Build()
+
+	var lagging atomic.Bool
+	lagging.Store(true)
+	c := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := cl.Get(ctx, key, obj, opts...); err != nil {
+				return err
+			}
+			if sb, ok := obj.(*sandboxv1beta1.Sandbox); ok && sb.Name == "pool-abcde" && lagging.Load() {
+				sb.ResourceVersion = "1"
+			}
+			return nil
+		},
+	})
+	r := &SandboxClaimReconciler{Client: c, Scheme: scheme, WarmSandboxQueue: queue.NewSimpleSandboxQueue(), Tracer: asmetrics.NewNoOp()}
+	req := ctrl.Request{Namespace: "default", Name: "claim-a"}
+
+	if _, err := r.Reconcile(t.Context(), req); err != nil {
+		t.Fatalf("reconcile against a lagging cache: %v", err)
+	}
+	if err := base.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "claim-a"}, &sandboxv1beta1.Sandbox{}); !k8errors.IsNotFound(err) {
+		t.Fatalf("the claim cold-started while its recorded warm sandbox was still adoptable: get sandbox claim-a = %v", err)
+	}
+
+	lagging.Store(false)
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), req); err != nil {
+			t.Fatalf("reconcile after the cache converged: %v", err)
+		}
+	}
+	if got := boundSandbox(t, base, "claim-a"); got != "pool-abcde" {
+		t.Fatalf("claim bound to %q, want the warm sandbox its annotation recorded", got)
+	}
+}
+
 func TestAReferenceToAnotherClaimsSandboxIsCleared(t *testing.T) {
 	scheme := newScheme(t)
 	claim := doubleAdoptionClaim("claim-a")

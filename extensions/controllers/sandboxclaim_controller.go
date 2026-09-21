@@ -1247,10 +1247,13 @@ func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, cl
 	}
 
 	if err := r.completeAdoption(ctx, claim, sandbox); err != nil {
-		if !k8errors.IsNotFound(err) && !k8errors.IsConflict(err) {
+		if k8errors.IsConflict(err) {
+			return fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
+		}
+		if !k8errors.IsNotFound(err) {
 			return fmt.Errorf("failed to complete adoption of %q: %w", sbName, err)
 		}
-		logger.V(4).Info("Failed to complete adoption (conflict/notfound), falling through", "sandbox", sbName, "claim", claim.Name)
+		logger.V(4).Info("Failed to complete adoption (notfound), falling through", "sandbox", sbName, "claim", claim.Name)
 		return nil
 	}
 
