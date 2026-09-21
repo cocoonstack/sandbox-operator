@@ -170,35 +170,21 @@ func ConvertPodTemplateFrom(src *v1beta1.PodTemplate, dst *PodTemplate) {
 }
 
 func ConvertPodMetadataTo(src *PodMetadata, dst *v1beta1.PodMetadata) {
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
+	*dst = v1beta1.PodMetadata(*src)
 }
 
 func ConvertPodMetadataFrom(src *v1beta1.PodMetadata, dst *PodMetadata) {
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
+	*dst = PodMetadata(*src)
 }
 
 func ConvertPVCClaimTemplateTo(src *PersistentVolumeClaimTemplate, dst *v1beta1.PersistentVolumeClaimTemplate) {
 	dst.Spec = src.Spec
-	ConvertEmbeddedMetadataTo(&src.EmbeddedObjectMetadata, &dst.EmbeddedObjectMetadata)
+	dst.EmbeddedObjectMetadata = v1beta1.EmbeddedObjectMetadata(src.EmbeddedObjectMetadata)
 }
 
 func ConvertPVCClaimTemplateFrom(src *v1beta1.PersistentVolumeClaimTemplate, dst *PersistentVolumeClaimTemplate) {
 	dst.Spec = src.Spec
-	ConvertEmbeddedMetadataFrom(&src.EmbeddedObjectMetadata, &dst.EmbeddedObjectMetadata)
-}
-
-func ConvertEmbeddedMetadataTo(src *EmbeddedObjectMetadata, dst *v1beta1.EmbeddedObjectMetadata) {
-	dst.Name = src.Name
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
-}
-
-func ConvertEmbeddedMetadataFrom(src *v1beta1.EmbeddedObjectMetadata, dst *EmbeddedObjectMetadata) {
-	dst.Name = src.Name
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
+	dst.EmbeddedObjectMetadata = EmbeddedObjectMetadata(src.EmbeddedObjectMetadata)
 }
 
 func ConvertLifecycleTo(src *Lifecycle, dst *v1beta1.Lifecycle) {

@@ -193,11 +193,7 @@ func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, cl
 	if src.Env != nil {
 		dst.Env = make([]v1beta1.EnvVar, len(src.Env))
 		for i := range src.Env {
-			dst.Env[i] = v1beta1.EnvVar{
-				Name:          src.Env[i].Name,
-				Value:         src.Env[i].Value,
-				ContainerName: src.Env[i].ContainerName,
-			}
+			dst.Env[i] = v1beta1.EnvVar(src.Env[i])
 		}
 	} else {
 		dst.Env = nil
@@ -232,11 +228,7 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 	if src.Env != nil {
 		dst.Env = make([]EnvVar, len(src.Env))
 		for i := range src.Env {
-			dst.Env[i] = EnvVar{
-				Name:          src.Env[i].Name,
-				Value:         src.Env[i].Value,
-				ContainerName: src.Env[i].ContainerName,
-			}
+			dst.Env[i] = EnvVar(src.Env[i])
 		}
 	} else {
 		dst.Env = nil
@@ -245,18 +237,12 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 
 func convertClaimStatusTo(src *SandboxClaimStatus, dst *v1beta1.SandboxClaimStatus) {
 	dst.Conditions = src.Conditions
-	dst.SandboxStatus = v1beta1.SandboxStatus{
-		Name:   src.SandboxStatus.Name,
-		PodIPs: src.SandboxStatus.PodIPs,
-	}
+	dst.SandboxStatus = v1beta1.SandboxStatus(src.SandboxStatus)
 }
 
 func convertClaimStatusFrom(src *v1beta1.SandboxClaimStatus, dst *SandboxClaimStatus) {
 	dst.Conditions = src.Conditions
-	dst.SandboxStatus = SandboxStatus{
-		Name:   src.SandboxStatus.Name,
-		PodIPs: src.SandboxStatus.PodIPs,
-	}
+	dst.SandboxStatus = SandboxStatus(src.SandboxStatus)
 }
 
 func stashClaimState(dst *v1beta1.SandboxClaim, sCopy *SandboxClaim) error {
