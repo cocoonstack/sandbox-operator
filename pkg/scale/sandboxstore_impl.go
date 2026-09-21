@@ -589,9 +589,6 @@ func AddressIPs(addr string) []string {
 // whichever node looked best in that snapshot; sampling spreads the burst while
 // still biasing toward warm capacity. A stale pick costs one gossip redirect.
 func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
-	if len(candidates) == 1 {
-		return candidates[0], 0
-	}
 	//nolint:gosec // load spreading, not a security decision
 	i := rand.IntN(len(candidates))
 	//nolint:gosec // load spreading, not a security decision
