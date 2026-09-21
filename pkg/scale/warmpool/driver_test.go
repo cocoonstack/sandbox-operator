@@ -68,6 +68,22 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 	}
 }
 
+func TestThePoolKeyReadsTheNetLaneWhereThePodDoes(t *testing.T) {
+	tmpl := template()
+	tmpl.Annotations = map[string]string{scale.NetAnnotation: "egress"}
+	d, setter, inv, _ := newTestDriver(t, warmPool("p", 1), tmpl)
+	putNodes(inv, 1)
+
+	if err := d.reconcileOnce(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	for _, specs := range setter.byAddr {
+		if specs[0].Net != scale.NetDefault {
+			t.Fatalf("pool net = %q, want %q: the pod carries only its template's pod annotations, so a lane set on the template object alone provisions a pool no pod claims", specs[0].Net, scale.NetDefault)
+		}
+	}
+}
+
 func TestReconcileWritesWarmStatus(t *testing.T) {
 	d, setter, inv, kube := newTestDriver(t, warmPool("p", 8), template())
 	key := scale.PoolKeyFor([]corev1.Container{{Image: testImage}}, "")

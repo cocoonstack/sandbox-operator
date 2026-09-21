@@ -241,7 +241,7 @@ func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (sc
 	if err := d.kube.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: name}, &tmpl); err != nil {
 		return scale.PoolKey{}, fmt.Errorf("get SandboxTemplate %s/%s: %w", p.Namespace, name, err)
 	}
-	net := scale.NetForAnnotations(tmpl.Annotations, tmpl.Spec.PodTemplate.ObjectMeta.Annotations)
+	net := scale.NetForAnnotations(tmpl.Spec.PodTemplate.ObjectMeta.Annotations, nil)
 	return scale.PoolKeyFor(tmpl.Spec.PodTemplate.Spec.Containers, net), nil
 }
 
