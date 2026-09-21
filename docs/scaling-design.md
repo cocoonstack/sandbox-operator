@@ -69,8 +69,10 @@ the claim path needs the scheduler, kubelet bind, or image pull.
 1. **Claim fast-path — pop, adopt, record.** `getCandidate` pops one
    `warm ∧ unclaimed` Sandbox from the in-memory queue (node-spread pick); the
    claim records the adoption with an `Update` on the SandboxClaim and binds
-   the Sandbox with a merge `Patch`. A loser that raced the same Sandbox moves
-   to the next candidate rather than requeueing. The CRD path is two apiserver
+   the Sandbox with a merge `Patch` under a `resourceVersion` precondition. A
+   loser that raced the same Sandbox moves to the next candidate; only a pass
+   whose every hand-over conflicted requeues, and the next pass completes the
+   adoption its claim already records. The CRD path is two apiserver
    writes per claim; the sub-millisecond figures below come from the node-local
    gateway (L2), not from this path.
 2. **Pool status from the informer cache, not etcd.** `readyReplicas` is

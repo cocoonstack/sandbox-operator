@@ -43,9 +43,10 @@ func PoolKeyFor(containers []corev1.Container, net string) PoolKey {
 	return PoolKey{Template: template, Net: net, Size: SizeClassForContainers(containers)}
 }
 
-// NetForAnnotations resolves the pool network axis from an object's own
-// annotations, falling back to its pod template's. Create and the warm-pool
-// driver resolve it through this one function so both derive the same key.
+// NetForAnnotations resolves the pool network axis from the first annotation
+// map that carries it, then the second. The pod path and the warm-pool driver
+// read the pod template, the source the Pod carries; only the aggregated Create
+// also honors the Sandbox object's own annotation.
 func NetForAnnotations(object, podTemplate map[string]string) string {
 	return cmp.Or(object[NetAnnotation], podTemplate[NetAnnotation])
 }

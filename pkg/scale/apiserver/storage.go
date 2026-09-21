@@ -205,9 +205,9 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 
 // poolKeyForSandbox derives the warm-pool key from a Sandbox: the template is the
 // first container's image, the size is a t-shirt class mapped from that container's
-// resources, and the net comes from the NetAnnotation on the object or its pod
-// template (default "none"). It defers to scale.PoolKeyFor and
-// scale.NetForAnnotations so the SandboxWarmPool driver derives an identical key.
+// resources, and the net comes from the NetAnnotation on the Sandbox object or its
+// pod template (default "none"). The warm-pool driver provisions from a template's
+// pod-template annotation, so a lane has to appear there for a pool to exist.
 func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
 	net := scale.NetForAnnotations(sb.Annotations, sb.Spec.PodTemplate.ObjectMeta.Annotations)
 	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, net)
