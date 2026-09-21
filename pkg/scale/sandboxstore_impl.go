@@ -388,7 +388,6 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, matc
 		if sb := s.matchOnNode(ctx, node, match); sb != nil {
 			return sb, nil
 		}
-		s.index.forget(key)
 	}
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {

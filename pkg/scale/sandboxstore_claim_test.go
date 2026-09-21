@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
@@ -99,6 +100,33 @@ func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 	assert.False(t, IsNoWarmCapacity(err), "unconfigured routing is a config error, not no-capacity")
 
 	require.Error(t, store.Release(t.Context(), "n1", "sb-1"))
+}
+
+func TestGetKeepsTheClaimTimeHintThroughThePublishLag(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
+	src.Put(poolInv("n2", "n2:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
+	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_1", Token: "tok", OwnerAddr: "10.0.0.1:7777"}}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	require.NoError(t, err)
+
+	_, err = store.Get(t.Context(), "ns", "s1")
+	require.True(t, k8serrors.IsNotFound(err), "before the node republishes the sandbox is not readable: %v", err)
+
+	node, hinted := store.index.lookup(nameKey("ns", "s1"))
+	require.True(t, hinted, "the claim-time hint must survive a Get during the publish lag")
+	assert.Equal(t, a.Node, node)
+
+	src.Put(&NodeInventory{
+		Name: a.Node, Node: a.Node, Address: a.Node + ":7777",
+		Entries: []InventoryEntry{{Name: "ns/s1", ID: "sb_1", Phase: "Running"}},
+	})
+	src.Partition(otherNode(a.Node))
+	got, err := store.Get(t.Context(), "ns", "s1")
+	require.NoError(t, err)
+	assert.Equal(t, a.Node, got.Status.NodeName)
 }
 
 func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
@@ -195,6 +223,13 @@ func (c *raceClient) Claim(context.Context, sandboxd.ClaimSpec) (sandboxd.ClaimR
 		return sandboxd.ClaimResult{}, sandboxd.ErrNodeAtCapacity
 	}
 	return c.f.result, nil
+}
+
+func otherNode(node string) string {
+	if node == "n1" {
+		return "n2"
+	}
+	return "n1"
 }
 
 func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {

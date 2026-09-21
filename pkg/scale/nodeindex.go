@@ -40,13 +40,6 @@ func (x *nodeIndex) remember(key, node string) {
 	x.storeLocked(key, node)
 }
 
-func (x *nodeIndex) forget(key string) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	delete(x.cur, key)
-	delete(x.prev, key)
-}
-
 // storeLocked retires the whole generation once it fills, which bounds the
 // index at 2*max keys without per-entry recency bookkeeping.
 func (x *nodeIndex) storeLocked(key, node string) {
