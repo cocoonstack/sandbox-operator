@@ -51,15 +51,17 @@ Do not delete the CRDs while sandbox custom resources still exist.
 | `replicaCount` | Operator replicas | `1` |
 | `namespace.create` | Create the operator namespace | `true` |
 | `namespace.name` | Operator namespace | `sandbox-system` |
+| `podAnnotations` | Extra controller Pod annotations | `{}` |
+| `podLabels` | Extra controller Pod labels | `{}` |
 | `controller.leaderElect` | Enable leader election | `true` |
 | `controller.extensions` | Enable Template, WarmPool, and Claim | `true` |
 | `controller.defaultRuntime` | Default Pod backend | `standard` |
 | `controller.clusterDomain` | Kubernetes cluster domain | unset (`cluster.local` flag default) |
 | `controller.kubeApiQps` | API client QPS, `-1` means unlimited | unset |
 | `controller.kubeApiBurst` | API client burst | unset |
-| `controller.sandboxConcurrentWorkers` | Sandbox workers | unset (`1` flag default) |
+| `controller.sandboxConcurrentWorkers` | Sandbox workers | unset (`16` flag default) |
 | `controller.sandboxClaimConcurrentWorkers` | Claim workers | unset (`50` flag default) |
-| `controller.sandboxWarmPoolConcurrentWorkers` | WarmPool workers | unset (`1` flag default) |
+| `controller.sandboxWarmPoolConcurrentWorkers` | WarmPool workers | unset (`8` flag default) |
 | `controller.sandboxTemplateConcurrentWorkers` | Template workers | unset (`1` flag default) |
 | `controller.sandboxWarmPoolMaxBatchSize` | WarmPool batch size | unset (`300` flag default) |
 | `controller.enableWarmPoolEviction` | Mark warm Pods safe to evict | unset (`true` flag default) |

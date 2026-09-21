@@ -32,7 +32,7 @@ flowchart LR
         L0a["cache-fed reads<br/>diff-before-write<br/>LIST off etcd"]
     end
     subgraph L1["L1 — ownership transfer (this repo)"]
-        L1a["claim = single PATCH<br/>O(nodes) pool status<br/>per-pool sharded operator"]
+        L1a["claim = Update + merge Patch<br/>O(nodes) pool status<br/>one leader-elected operator"]
     end
     subgraph L2["L2 — node-local claim gateway core"]
         L2a["gateway → sandboxd<br/>sub-ms delivery<br/>async Bound record"]
@@ -86,7 +86,7 @@ the claim path needs the scheduler, kubelet bind, or image pull.
 
 | Modal mechanism | L1 in pure Kubernetes |
 |---|---|
-| stateless scheduler fleet | per-pool sharded operator + Lease |
+| stateless scheduler fleet | single leader-elected operator + Lease |
 | worker accepts/rejects placement | optimistic PATCH with `resourceVersion` precondition |
 | no datastore on create path | claim = ownership PATCH of a pre-warmed object (like PVC→PV `Bound`) |
 | async result write | Sandbox status/conditions written after the fast-path returns |
@@ -280,7 +280,7 @@ intact. The one-line framing:
 
 | | Modal | sandbox-operator |
 |---|---|---|
-| Scheduling | stateless fleet, in-memory worker state | per-pool sharded operator + Lease (L1) |
+| Scheduling | stateless fleet, in-memory worker state | single leader-elected operator + Lease (L1) |
 | Create critical path | direct scheduler→worker RPC, no datastore | ownership PATCH (L1) → node-local gateway (L2) |
 | State of record | Redis stream (async) | Kubernetes objects; node inventory in etcd is `O(nodes)` (L3) |
 | Sandbox storage | proprietary | aggregated apiserver, etcd stores intent only (L3) |
@@ -308,5 +308,5 @@ Two honest caveats. The sub-millisecond L1/L2 figures measure algorithmic cost a
 gateway overhead on fake substrates; real end-to-end latency additionally pays the
 apiserver round-trip, sandboxd delivery (0.2–0.7 ms), and informer convergence. And
 the real-microVM claim p95 (926 ms, ~7× the p50) is single-node
-optimistic-concurrency contention under 100 simultaneous claims — exactly the tail L1's per-pool operator
-sharding is designed to spread across shards and nodes.
+optimistic-concurrency contention under 100 simultaneous claims — exactly the tail the
+node-local claim gateway (L2) takes off the apiserver path.

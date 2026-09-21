@@ -43,13 +43,13 @@ Nothing in this tier is new; it is what a single-node deployment already does.
 It is listed because it is the case that must stay fast, and the two tiers below
 exist only to avoid degrading it.
 
-### L2 — gossip + redirect (the cross-node case)
+### L2 — probe + redirect (the cross-node case)
 
-Nodes gossip the checkpoint ids they hold, alongside the warm-pool counts and
-promoted-template hashes they already gossip. A node asked to branch a
-checkpoint it does not hold answers with a **redirect** to a node that does —
-the same `200` + `redirect: [addrs]` contract a warm-miss claim already uses,
-and the client retries there with `no_redirect: true`.
+A node asked to branch a checkpoint it does not hold `HEAD`-probes its mesh
+peers in parallel (HMAC-signed when the mesh carries a `cluster_key`) and
+answers with a **redirect** to the first owners that respond, capped at three
+addresses — the same `200` + `redirect: [addrs]` contract a warm-miss claim
+already uses, and the client retries there with `no_redirect: true`.
 
 The record does not move. The clone still happens on a node whose disk already
 holds the data, on its local fast path. Cross-node correctness is bought with
@@ -105,10 +105,12 @@ Two independent reasons, either of which is sufficient:
    already-implemented `s3` store backend is strictly simpler than adding a
    POSIX layer on top of it.
 
-The same reasoning rules out NFS and Lustre mounts for the checkpoint directory.
-If a shared backend is ever required, use the `s3` backend (which keeps a local
-cache generation and therefore preserves the local-clone step) rather than a
-network POSIX mount.
+sandboxd does accept a shared mount for `checkpoint_dir` (JuiceFS, NFS; see the
+sandbox deploy docs): every node sharing the mount resolves every checkpoint
+directly and none of the tiers above applies. This design keeps checkpoints
+node-local anyway, for reason 1. If a shared backend is ever required, prefer
+the `s3` backend (which keeps a local cache generation and therefore preserves
+the local-clone step) over a network POSIX mount.
 
 ## Durability: what this design does *not* give you
 
@@ -132,7 +134,8 @@ of the fleet.
 |---|---|---|
 | `checkpoint_dir` | `<data_dir>/checkpoints` | where records live. Keep it on the same local reflink filesystem as the VM run directory. |
 | `checkpoint_store.kind` | `dir` | `s3` switches to object storage with a local cache generation. |
-| `checkpoint_peer_heal` | `false` | enables L3. Requires a mesh; ignored without one. |
+| `checkpoint_ttl_hours` | `0` (keep forever) | ages out checkpoints older than this; the sweep runs hourly and at startup. Must be nonzero and fleet-wide consistent when `checkpoint_peer_heal` is on. |
+| `checkpoint_peer_heal` | `false` | enables L3. Requires a nonempty `api_token`, `mesh.cluster_key` and a nonzero `checkpoint_ttl_hours`, all enforced at config load: a partial setup fails to start rather than silently disabling heal. A shared `checkpoint_store` (kind `s3`) ignores it: every node already resolves every checkpoint. |
 
-L1 and L2 need no configuration: gossip and redirect are active whenever a mesh
+L1 and L2 need no configuration: probe and redirect are active whenever a mesh
 is configured.

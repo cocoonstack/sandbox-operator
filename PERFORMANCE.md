@@ -196,5 +196,5 @@ go run -tags poolbench ./test/poolbench \
   -pool 200 -claims 40 -claim-conc 1
 
 # core + extensions E2E (12 scenarios) against a real cluster
-KUBECONFIG=<vke> go test -tags e2e ./test/e2e/ -run TestE2E -v
+KUBECONFIG=<vke> go run -tags e2e ./test/e2e -ns <ns> -out /tmp/e2e-results.json
 ```
