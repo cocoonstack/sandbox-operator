@@ -228,6 +228,18 @@ func TestADeletedTemplateStillDrainsItsPool(t *testing.T) {
 	}
 }
 
+func TestEveryTriggerCollapsesOntoTheSyncKey(t *testing.T) {
+	for name, obj := range map[string]client.Object{
+		"pool":      warmPool("p", 1),
+		"inventory": &extv1beta1.NodeInventory{Name: "n1", Node: "n1"},
+	} {
+		got := syncRequest(t.Context(), obj)
+		if len(got) != 1 || got[0].Name != "sync" || got[0].Namespace != "" {
+			t.Fatalf("%s event enqueued %v, want the single fleet key {Name: sync}: every key runs the whole fleet loop and re-arms its own timer", name, got)
+		}
+	}
+}
+
 func TestApplyBoundsEachNodeCall(t *testing.T) {
 	d, setter, inv, _ := newTestDriver(t, warmPool("p", 3), template())
 	putNodes(inv, 2)

@@ -138,16 +138,14 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	// Any NodeInventory change (a node joined, restarted, changed address) must
 	// re-spread every pool, so map it to a single global reconcile trigger.
-	enqueueAll := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
-		return []reconcile.Request{{Name: "sync"}}
-	})
+	enqueueAll := handler.EnqueueRequestsFromMapFunc(syncRequest)
 	// Generation-filtered so the loop's own writeStatus cannot re-trigger it
 	// into a continuous back-to-back loop under claim churn; create/delete,
 	// spec edits, NodeInventory events, and the RequeueAfter tick keep coverage.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&extv1beta1.SandboxWarmPool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&extv1beta1.NodeInventory{}, enqueueAll).
 		Named("sandboxwarmpool").
+		Watches(&extv1beta1.SandboxWarmPool{}, enqueueAll, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&extv1beta1.NodeInventory{}, enqueueAll).
 		Complete(d)
 }
 
@@ -334,6 +332,10 @@ func warmByFrom(info *sandboxd.NodeInfo) map[scale.PoolKey]int {
 		warmBy[scale.PoolKey{Template: p.Key.Template, Net: p.Key.Net, Size: p.Key.Size}] = p.Warm
 	}
 	return warmBy
+}
+
+func syncRequest(context.Context, client.Object) []reconcile.Request {
+	return []reconcile.Request{{Name: "sync"}}
 }
 
 // distribute spreads total warm targets evenly across nodes (base + remainder to
