@@ -58,8 +58,10 @@ was measured with, so an out-of-box install reproduces the published numbers.
 - `--manage-webhook-certs` (`true`)
 
 When `--manage-webhook-certs=true`, the operator creates serving certificates
-and patches conversion-webhook CA bundles. Disable it only when the cluster
-manages both externally.
+and patches conversion-webhook CA bundles. A shared certificate within 30 days
+of expiry is reissued at startup and the Secret updated; a replica that loses
+that update adopts the winner's pair. Disable it only when the cluster manages
+both externally.
 
 ## Observability
 

@@ -34,9 +34,8 @@ const (
 	// A fresh sandbox will always be created.
 	WarmPoolPolicyNone WarmPoolPolicy = "none"
 
-	// WarmPoolPolicyDefault indicates the default behavior: select from all
-	// available warm pools that match the template. This is the default behavior
-	// if warmpool is not specified.
+	// WarmPoolPolicyDefault is the default when warmpool is unset: the claim
+	// cold-starts from its template; warm adoption needs a named pool.
 	WarmPoolPolicyDefault WarmPoolPolicy = "default"
 
 	// ShutdownPolicyDelete deletes the SandboxClaim (and cascadingly the Sandbox) when expired.
@@ -130,7 +129,7 @@ type SandboxClaimSpec struct {
 
 	// warmpool specifies the warm pool policy for sandbox adoption.
 	// - "none": Do not use any warm pool, always create fresh sandboxes
-	// - "default": Use default behavior, select from all matching warm pools (default)
+	// - "default": Cold-start from the template; warm adoption needs a named pool (default)
 	// - A warm pool name: Select only from the specified warm pool (e.g., "fast-pool", "secure-pool")
 	// +optional
 	// +kubebuilder:default=default

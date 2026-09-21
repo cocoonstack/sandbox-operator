@@ -111,7 +111,7 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
 
 - [Snapshot placement](snapshot-placement.md) — where a checkpoint lives, how a
   branch reaches it from another node (local hit, probe + redirect, peer heal),
-  why shared filesystems are ruled out, and the durability this does *not* give
+  why this design keeps checkpoints node-local, and the durability this does *not* give
 
 ## Repository
 
