@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -51,6 +52,8 @@ const (
 	// wedges the global reconcile forever.
 	setPoolsTimeout = 10 * time.Second
 )
+
+var errNoTemplateRef = errors.New("spec.sandboxTemplateRef.name is required")
 
 // PoolSetter is the sandboxd surface the driver needs: replace a node's whole
 // warm-target set. The concrete *sandboxd.Client satisfies it; tests inject a fake.
@@ -166,6 +169,9 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 		p := &pools.Items[i]
 		key, rerr := d.poolKey(ctx, p)
 		if rerr != nil {
+			if !k8serrors.IsNotFound(rerr) && !errors.Is(rerr, errNoTemplateRef) {
+				return fmt.Errorf("resolve warm pool %s/%s template: %w", p.Namespace, p.Name, rerr)
+			}
 			d.log.Error(rerr, "resolve warm pool template", "pool", p.Namespace+"/"+p.Name)
 			d.writeStatus(ctx, p, nodes, key) // status still reflects live warm (0 target)
 			continue
@@ -231,7 +237,7 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (scale.PoolKey, error) {
 	name := p.Spec.TemplateRef.Name
 	if name == "" {
-		return scale.PoolKey{}, errors.New("spec.sandboxTemplateRef.name is required")
+		return scale.PoolKey{}, errNoTemplateRef
 	}
 	var tmpl extv1beta1.SandboxTemplate
 	if err := d.kube.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: name}, &tmpl); err != nil {

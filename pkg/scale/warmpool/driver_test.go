@@ -8,9 +8,11 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -176,6 +178,52 @@ func TestDrainOnZeroReplicas(t *testing.T) {
 	for addr, specs := range setter.byAddr {
 		if len(specs) != 1 || specs[0].Warm != 0 {
 			t.Fatalf("node %s target != 0 on drain: %+v", addr, specs)
+		}
+	}
+}
+
+func TestATransientTemplateReadFailureLeavesNodeTargetsUntouched(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := extv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("scheme: %v", err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&extv1beta1.SandboxWarmPool{}).
+		WithObjects(warmPool("p", 100), template()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*extv1beta1.SandboxTemplate); ok {
+					return k8serrors.NewInternalError(errors.New("apiserver unavailable"))
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+	inv := scale.NewStaticInventorySource()
+	putNodes(inv, 3)
+	setter := &fakeSetter{byAddr: map[string][]sandboxd.PoolSpec{}}
+	d := New(kube, inv, "tok", setter.factory(), Options{Interval: 0})
+
+	err := d.reconcileOnce(t.Context())
+	if err == nil {
+		t.Fatal("reconcile returned nil on a transient template read failure; the tick must fail so the workqueue backs off")
+	}
+	if len(setter.byAddr) != 0 {
+		t.Fatalf("PUT reached %d nodes on a failed tick; an omitted pool drains every node's warm target: %+v", len(setter.byAddr), setter.byAddr)
+	}
+}
+
+func TestADeletedTemplateStillDrainsItsPool(t *testing.T) {
+	d, setter, inv, _ := newTestDriver(t, warmPool("p", 4))
+	putNodes(inv, 2)
+	if err := d.reconcileOnce(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(setter.byAddr) != 2 {
+		t.Fatalf("PUT reached %d nodes, want 2: a pool whose template is gone is drained", len(setter.byAddr))
+	}
+	for addr, specs := range setter.byAddr {
+		if len(specs) != 0 {
+			t.Fatalf("node %s still carries %d pool specs for a template-less pool", addr, len(specs))
 		}
 	}
 }
