@@ -229,8 +229,9 @@ func run() error {
 			return err
 		}
 	}
+	stopE2B := func() {}
 	if o.E2BAPI {
-		if err = startE2BServer(ctx, o, store, invSource); err != nil {
+		if stopE2B, err = startE2BServer(ctx, o, store, invSource); err != nil {
 			return err
 		}
 	}
@@ -243,10 +244,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build generic apiserver: %w", err)
 	}
-	if err := sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
+	if err = sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
 		return err
 	}
-	return server.PrepareRun().RunWithContext(ctx)
+	err = server.PrepareRun().RunWithContext(ctx)
+	stopE2B()
+	return err
 }
 
 // startInventoryCache builds, starts, and syncs a controller-runtime cache
@@ -330,10 +333,10 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 
 // startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
 // the same way, and listed by the same scatter-gather read.
-func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) error {
+func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) (func(), error) {
 	keys, err := o.e2bAPIKeys()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	srv, err := e2bcompat.NewServer(store, e2bcompat.Options{
 		Namespace:             o.E2BNamespace,
@@ -346,7 +349,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 		Log:                   ctrl.Log.WithName("e2b"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	httpSrv := &http.Server{
 		Addr:              o.E2BAddr,
@@ -355,7 +358,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 	}
 	ln, err := net.Listen("tcp", o.E2BAddr)
 	if err != nil {
-		return fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
+		return nil, fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
 	}
 	klog.InfoS("serving e2b-compatible API", "address", o.E2BAddr, "namespace", o.E2BNamespace,
 		"authenticated", len(keys) > 0)
@@ -364,15 +367,18 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 			klog.ErrorS(err, "e2b-compatible API server exited")
 		}
 	}()
+	e2bCtx, stop := context.WithCancel(ctx)
+	drained := make(chan struct{})
 	go func() {
-		<-ctx.Done()
+		defer close(drained)
+		<-e2bCtx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e2bShutdownTimeout)
 		defer cancel()
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 			klog.ErrorS(err, "e2b-compatible API server shutdown")
 		}
 	}()
-	return nil
+	return func() { stop(); <-drained }, nil
 }
 
 // currentNamespace returns the pod's namespace (for the leader-election lease),

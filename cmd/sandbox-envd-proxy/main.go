@@ -117,17 +117,23 @@ func run(ctx context.Context, o *options) error {
 }
 
 func serve(ctx context.Context, o *options, h http.Handler) error {
+	ln, err := net.Listen("tcp", o.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %q: %w", o.Addr, err)
+	}
+	return serveOn(ctx, o, ln, h)
+}
+
+func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) error {
 	httpSrv := &http.Server{
 		Addr:              o.Addr,
 		Handler:           h,
 		Protocols:         envdproxy.Protocols(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
-	ln, err := net.Listen("tcp", o.Addr)
-	if err != nil {
-		return fmt.Errorf("listen on %q: %w", o.Addr, err)
-	}
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
@@ -136,6 +142,7 @@ func serve(ctx context.Context, o *options, h http.Handler) error {
 		}
 	}()
 	klog.InfoS("serving envd-proxy", "address", o.Addr, "domain", o.Domain, "tls", o.CertFile != "")
+	var err error
 	if o.CertFile != "" {
 		httpSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 		err = httpSrv.ServeTLS(ln, o.CertFile, o.KeyFile)
@@ -143,6 +150,7 @@ func serve(ctx context.Context, o *options, h http.Handler) error {
 		err = httpSrv.Serve(ln)
 	}
 	if errors.Is(err, http.ErrServerClosed) {
+		<-drained
 		return nil
 	}
 	return err
