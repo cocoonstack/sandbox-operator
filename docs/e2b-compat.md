@@ -87,6 +87,15 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   `Sandbox.create()` works and `files`/`commands`/`pty` do not. The pool must
   also run an image that carries `envd` — the sandbox repo's `e2b-rt` flavor —
   or there is nothing on the other end of the proxy.
+- **A new sandbox becomes routable on its node's next inventory publish.**
+  `POST /sandboxes` returns once the node hands over the microVM, but the read
+  paths and `sandbox-envd-proxy` resolve a sandbox from `NodeInventory`, which
+  the owning node republishes on a cadence (30 s by default). Until then
+  `GET /sandboxes/{id}` and the lifecycle verbs answer `404` and the proxy
+  answers `502`, so the first `files`/`commands` call right after
+  `Sandbox.create()` fails. Poll `GET /sandboxes/{id}` until it answers before
+  using the sandbox; the authoritative node lookup that closes the window is
+  the ROADMAP read-after-write item.
 - **`envdVersion`** is reported as `0.4.0` unless `--e2b-envd-version` says
   otherwise. The SDK version-compares it and *kills the sandbox* if it cannot
   parse it, so it is always sent. Set it to the version actually installed in
