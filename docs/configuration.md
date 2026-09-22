@@ -194,7 +194,7 @@ mapping are in [envd-proxy](envd-proxy.md).
 | `envdProxy.image.pullPolicy` | `IfNotPresent` | |
 | `envdProxy.replicaCount` | `2` | Proxy replicas |
 | `envdProxy.domain` | `""` | `--domain`; falls back to `apiserver.e2b.domain` |
-| `envdProxy.namespace` | `default` | `--namespace` |
+| `envdProxy.namespace` | `""` (falls back to `apiserver.e2b.namespace`) | `--namespace` |
 | `envdProxy.port` | `8443` | `--bind-address` |
 | `envdProxy.tlsSecretName` | `""` | Wildcard certificate for `*.{domain}`; empty serves cleartext h2c |
 | `envdProxy.resources` | 100m / 128Mi requests, 512Mi limit | Proxy resources |

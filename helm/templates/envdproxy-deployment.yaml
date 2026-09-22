@@ -34,7 +34,7 @@ spec:
         imagePullPolicy: {{ .Values.envdProxy.image.pullPolicy }}
         args:
         - --bind-address=:{{ .Values.envdProxy.port }}
-        - --namespace={{ .Values.envdProxy.namespace }}
+        - --namespace={{ include "sandbox-operator.envdProxy.namespace" . }}
         {{- with include "sandbox-operator.envdProxy.domain" . }}
         - --domain={{ . }}
         {{- end }}

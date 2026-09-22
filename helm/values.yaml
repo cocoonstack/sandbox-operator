@@ -43,10 +43,10 @@ envdProxy:
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
-  # domain defaults to apiserver.e2b.domain; the proxy exits at startup when
-  # neither is set.
+  # domain and namespace default to the apiserver.e2b values: the proxy
+  # resolves the sandboxes that surface claims, under the same host scheme.
   domain: ""
-  namespace: default
+  namespace: ""
   port: 8443
   # tlsSecretName holds a wildcard certificate for *.{domain}. Empty serves
   # cleartext h2c behind an edge that already terminated TLS.
