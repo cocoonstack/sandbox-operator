@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -182,6 +183,38 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 
 	if sum != 8 {
 		t.Fatalf("fleet warm total = %d, want 8 (3+5 summed)", sum)
+	}
+}
+
+func TestTwoPoolsSameKeyReportTheirOwnShareOfWarm(t *testing.T) {
+	d, setter, inv, kube := newTestDriver(t, warmPool("p1", 3), warmPool("p2", 5), template())
+	putNodes(inv, 2)
+	for _, tt := range []struct {
+		warmPerNode int
+		p1, p2      int32
+	}{
+		{4, 3, 5},
+		{2, 2, 2},
+		{0, 0, 0},
+	} {
+		setter.reportWarm("10.0.0.a:7777", tt.warmPerNode)
+		setter.reportWarm("10.0.0.b:7777", tt.warmPerNode)
+		if err := d.reconcileOnce(t.Context()); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		for _, want := range []struct {
+			name string
+			warm int32
+		}{{"p1", tt.p1}, {"p2", tt.p2}} {
+			var p extv1beta1.SandboxWarmPool
+			if err := kube.Get(t.Context(), types.NamespacedName{Namespace: "ns", Name: want.name}, &p); err != nil {
+				t.Fatalf("get %s: %v", want.name, err)
+			}
+			if p.Status.Replicas != want.warm || p.Status.ReadyReplicas != want.warm {
+				t.Errorf("fleet warm %d: %s status = %d/%d, want %d/%d (the key's warm is shared, not repeated)",
+					2*tt.warmPerNode, want.name, p.Status.Replicas, p.Status.ReadyReplicas, want.warm, want.warm)
+			}
+		}
 	}
 }
 

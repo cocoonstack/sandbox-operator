@@ -170,7 +170,7 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 				return fmt.Errorf("resolve warm pool %s/%s template: %w", p.Namespace, p.Name, rerr)
 			}
 			d.log.Error(rerr, "resolve warm pool template", "pool", p.Namespace+"/"+p.Name)
-			d.writeStatus(ctx, p, nodes, key) // status still reflects live warm (0 target)
+			d.writeStatus(ctx, p, 0)
 			continue
 		}
 		replicas := int32(1)
@@ -188,8 +188,8 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 
 	// Status comes from the warm counts applyToNodes just refreshed off the PUT
 	// responses; post-apply warm may still be refilling.
-	for _, dp := range desired {
-		d.writeStatus(ctx, dp.pool, nodes, dp.key)
+	for i, warm := range apportionWarm(desired, nodes) {
+		d.writeStatus(ctx, desired[i].pool, warm)
 	}
 	return nil
 }
@@ -291,23 +291,19 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 	_ = g.Wait()
 }
 
-// writeStatus updates a SandboxWarmPool's status.replicas/readyReplicas from the
-// live warm counts across all nodes for the pool's key — this tick's PUT
-// responses for every node that answered, inventory for any that did not. Warm
-// VMs are claim-ready, so readyReplicas == replicas. Best-effort; a conflict is
-// retried next tick.
-func (d *Driver) writeStatus(ctx context.Context, p *extv1beta1.SandboxWarmPool, nodes []nodeView, key scale.PoolKey) {
-	total := 0
-	for i := range nodes {
-		total += nodes[i].warmBy[key]
-	}
+// writeStatus updates a SandboxWarmPool's status.replicas/readyReplicas to the
+// pool's share of the live warm across all nodes — this tick's PUT responses
+// for every node that answered, inventory for any that did not. Warm VMs are
+// claim-ready, so readyReplicas == replicas. Best-effort; a conflict is retried
+// next tick.
+func (d *Driver) writeStatus(ctx context.Context, p *extv1beta1.SandboxWarmPool, warm int) {
 	selector := "agents.x-k8s.io/warm-pool=" + p.Name
-	if p.Status.Replicas == int32(total) && p.Status.ReadyReplicas == int32(total) && p.Status.Selector == selector {
+	if p.Status.Replicas == int32(warm) && p.Status.ReadyReplicas == int32(warm) && p.Status.Selector == selector {
 		return
 	}
 	fresh := p.DeepCopy()
-	fresh.Status.Replicas = int32(total)
-	fresh.Status.ReadyReplicas = int32(total)
+	fresh.Status.Replicas = int32(warm)
+	fresh.Status.ReadyReplicas = int32(warm)
 	fresh.Status.Selector = selector
 	if err := d.kube.Status().Update(ctx, fresh); err != nil {
 		d.log.V(1).Info("warm-pool status update deferred", "pool", p.Namespace+"/"+p.Name, "err", err.Error())
@@ -346,4 +342,47 @@ func distribute(replicas int32, nodes []nodeView) map[string]int {
 		targets[nodes[i].name] = t
 	}
 	return targets
+}
+
+// apportionWarm splits each key's fleet warm across the pools that resolve to
+// it in proportion to their targets; the integer remainder goes one each to the
+// earlier pools. Two pools on one key sum their targets on the node side, so
+// reporting the key's whole warm to both would double-count it.
+func apportionWarm(desired []desiredPool, nodes []nodeView) []int {
+	fleet := make(map[scale.PoolKey]int, len(desired))
+	sumTarget := make(map[scale.PoolKey]int, len(desired))
+	for _, dp := range desired {
+		if _, seen := fleet[dp.key]; !seen {
+			for i := range nodes {
+				fleet[dp.key] += nodes[i].warmBy[dp.key]
+			}
+		}
+		sumTarget[dp.key] += poolTarget(dp)
+	}
+	out := make([]int, len(desired))
+	given := make(map[scale.PoolKey]int, len(fleet))
+	for i, dp := range desired {
+		if sumTarget[dp.key] > 0 {
+			out[i] = fleet[dp.key] * poolTarget(dp) / sumTarget[dp.key]
+			given[dp.key] += out[i]
+		}
+	}
+	for i, dp := range desired {
+		for given[dp.key] < fleet[dp.key] {
+			out[i]++
+			given[dp.key]++
+			if sumTarget[dp.key] > 0 {
+				break
+			}
+		}
+	}
+	return out
+}
+
+func poolTarget(dp desiredPool) int {
+	total := 0
+	for _, t := range dp.targets {
+		total += t
+	}
+	return total
 }
