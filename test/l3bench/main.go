@@ -39,11 +39,14 @@ import (
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
@@ -90,13 +93,16 @@ func main() {
 
 	// One WarmPool per pool expresses desired replicas as pure intent; these are
 	// the O(pools) durable objects (a single spec can mean a million sandboxes).
-	warmPools := make([]*extv1beta1.SandboxWarmPool, 0, pools)
+	warmPools := make([]client.Object, 0, pools)
 	for p := range pools {
 		warmPools = append(warmPools, &extv1beta1.SandboxWarmPool{
 			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", p), Namespace: namespaceName(p % numNS)},
 			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: ptr.To(int32(perNode))},
 		})
 	}
+	scheme := runtime.NewScheme()
+	benchutil.Must(extv1beta1.AddToScheme(scheme))
+	intent := fake.NewClientBuilder().WithScheme(scheme).WithObjects(warmPools...).Build()
 
 	// Publish one NodeInventory per node from that node's own live state.
 	var sampleNS, sampleName string
@@ -130,7 +136,9 @@ func main() {
 	}
 
 	// etcd object accounting: NodeInventory (O(nodes)) + WarmPool (O(pools)).
-	etcdObjectCount := source.ObjectCount() + len(warmPools)
+	var stored extv1beta1.SandboxWarmPoolList
+	benchutil.Must(intent.List(ctx, &stored))
+	etcdObjectCount := source.ObjectCount() + len(stored.Items)
 	if source.ObjectCount() != nodes {
 		fail("expected %d NodeInventory objects, got %d", nodes, source.ObjectCount())
 	}
