@@ -1,0 +1,27 @@
+# An APIService takes precedence over a CRD for the same group-version, so once
+# this is applied the aggregated server owns agents.x-k8s.io/v1beta1 `sandboxes`
+# and the upstream Sandbox CRD for that group-version must NOT be installed —
+# exactly as metrics.k8s.io replaces any CRD for its group. The server serves
+# only `sandboxes`: anything else registered under this group-version 404s.
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.agents.x-k8s.io
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+  {{- if .Values.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/sandbox-apiserver-serving
+  {{- end }}
+spec:
+  group: agents.x-k8s.io
+  version: v1beta1
+  {{- if not .Values.certManager.enabled }}
+  caBundle: {{ required "certManager.caBundle is required when certManager.enabled is false" .Values.certManager.caBundle }}
+  {{- end }}
+  service:
+    name: sandbox-apiserver
+    namespace: {{ .Release.Namespace }}
+    port: 443
+  groupPriorityMinimum: 1000
+  versionPriority: 15

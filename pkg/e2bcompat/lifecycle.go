@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -31,6 +31,14 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
+	// memory=false asks for a filesystem-only snapshot whose resume cold-boots.
+	// The node's hibernate always captures memory, so honoring it would mean
+	// silently giving back a different sandbox than asked for.
+	if req.Memory != nil && !*req.Memory {
+		writeError(w, http.StatusBadRequest,
+			"filesystem-only pause (memory=false) is not supported; this backend always snapshots memory")
+		return
+	}
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
@@ -44,14 +52,6 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	if paused {
 		writeError(w, http.StatusConflict, fmt.Sprintf("sandbox %q is already paused", id))
-		return
-	}
-	// memory=false asks for a filesystem-only snapshot whose resume cold-boots.
-	// The node's hibernate always captures memory, so honoring it would mean
-	// silently giving back a different sandbox than asked for.
-	if req.Memory != nil && !*req.Memory {
-		writeError(w, http.StatusBadRequest,
-			"filesystem-only pause (memory=false) is not supported; this backend always snapshots memory")
 		return
 	}
 	if err := s.store.Pause(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
@@ -89,14 +89,16 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 		status = http.StatusCreated
 	}
-	// envdAccessToken is left empty: the token is handed out once at claim time
-	// and node inventory carries no per-sandbox secret to re-derive it from.
+	// The token is minted once at claim time and node inventory carries no
+	// per-sandbox secret to re-derive it from, so this echoes back the one the
+	// client kept and leaves the field empty when it kept none.
 	writeJSON(w, status, Sandbox{
-		TemplateID:  templateOf(sb),
-		SandboxID:   publicID(claimIDOf(sb)),
-		ClientID:    sb.Status.NodeName,
-		EnvdVersion: s.opts.EnvdVersion,
-		Domain:      s.opts.Domain,
+		TemplateID:      templateOf(sb),
+		SandboxID:       PublicID(claimIDOf(sb)),
+		ClientID:        sb.Status.NodeName,
+		EnvdVersion:     s.opts.EnvdVersion,
+		EnvdAccessToken: r.Header.Get(accessTokenHeader),
+		Domain:          s.opts.Domain,
 	})
 }
 
@@ -139,7 +141,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("sandbox %q is paused and cannot be forked; resume it first", id))
 		return
 	}
-	children, err := s.store.Fork(r.Context(), sb.Status.NodeName, claimIDOf(sb), int(count), timeoutSeconds(req.Timeout))
+	children, err := s.store.Fork(r.Context(), sb.Status.NodeName, claimIDOf(sb), int(count), s.timeoutSeconds(req.Timeout))
 	if err != nil {
 		s.writeVerbError(w, err, id, "fork", "failed to fork the sandbox")
 		return
@@ -149,7 +151,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	for _, child := range children {
 		out = append(out, SandboxForkResult{Sandbox: &Sandbox{
 			TemplateID:      template,
-			SandboxID:       publicID(child.SandboxName),
+			SandboxID:       PublicID(child.SandboxName),
 			ClientID:        child.Node,
 			EnvdVersion:     s.opts.EnvdVersion,
 			EnvdAccessToken: child.Token,
@@ -377,8 +379,20 @@ func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg st
 		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
 		return
 	}
+	if se, ok := errors.AsType[*k8serrors.StatusError](err); ok && se.ErrStatus.Code >= http.StatusBadRequest && se.ErrStatus.Code < http.StatusInternalServerError {
+		writeError(w, int(se.ErrStatus.Code), se.ErrStatus.Message)
+		return
+	}
 	s.opts.Log.Error(err, "e2b "+op+" failed", "sandboxID", id)
 	writeError(w, http.StatusInternalServerError, msg)
+}
+
+// timeoutSeconds resolves an optional TTL to the configured default.
+func (s *Server) timeoutSeconds(v *int32) int {
+	if v == nil {
+		return s.opts.DefaultTimeoutSeconds
+	}
+	return int(*v)
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, out any) bool {
@@ -404,14 +418,6 @@ func reportBadBody(w http.ResponseWriter, err error) bool {
 // claimIDOf reports the node-local claim id the store's verbs address.
 func claimIDOf(sb *sandboxv1beta1.Sandbox) string {
 	return sb.Annotations[scale.ClaimIDAnnotation]
-}
-
-// timeoutSeconds resolves an optional TTL to the e2b default.
-func timeoutSeconds(v *int32) int {
-	if v == nil {
-		return DefaultTimeoutSeconds
-	}
-	return int(*v)
 }
 
 // snapshotInfo renders a checkpoint in e2b's snapshot shape.

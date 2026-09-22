@@ -9,8 +9,8 @@ import (
 	restclient "k8s.io/client-go/rest"
 	basecompatibility "k8s.io/component-base/compatibility"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 

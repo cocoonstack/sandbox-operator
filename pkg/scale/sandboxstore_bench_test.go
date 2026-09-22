@@ -3,8 +3,6 @@ package scale
 import (
 	"fmt"
 	"testing"
-
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 var benchFleets = []struct {
@@ -73,7 +71,7 @@ func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey)
 			Node:    name,
 			Address: "10.0.0.1:7777",
 			Entries: entries,
-			Pools:   []extv1beta1.PoolCapacity{{Template: pool.Template, Net: pool.Net, Size: pool.Size, Warm: 5, Target: 5}},
+			Pools:   []PoolCapacity{{Template: pool.Template, Net: pool.Net, Size: pool.Size, Warm: 5, Target: 5}},
 		})
 	}
 	return NewScatterGatherStore(src), pool

@@ -33,7 +33,7 @@ func BenchmarkLookupByID(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewServer: %v", err)
 	}
-	id := publicID(fmt.Sprintf("sb_node-%03d_%d", nodes-1, perNode-1))
+	id := PublicID(fmt.Sprintf("sb_node-%03d_%d", nodes-1, perNode-1))
 	req := httptest.NewRequest("GET", "/sandboxes/"+id, nil)
 	b.ReportAllocs()
 	for b.Loop() {

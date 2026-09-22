@@ -1,124 +1,13 @@
 # Performance
 
-All numbers below are **measured on a live cluster through the Kubernetes API**
-(no mocks, no direct data-plane calls) using the reproducible drivers in
-[`test/`](test/). Sandboxes are **real Cloud-Hypervisor/KVM microVMs** provisioned
-through the `vk-cocoon` runtime.
+Two kinds of numbers live here. The **current** sections measure what this
+repository ships today: the L3 aggregated apiserver, its warm-pool driver, and
+the sandboxd tier they drive. The **retired** section at the end was measured
+against the forked agent-sandbox controllers this repository carried until
+commit `0719d33`; those controllers are gone, replaced by upstream's own, so
+their numbers describe code that is no longer here.
 
-## Test environment
-
-| | |
-|---|---|
-| Cluster | 27 virtual-kubelet (`vk-cocoon`) nodes, 384 cores / 1.5 TiB each; managed Kubernetes v1.26 |
-| Operator | `sandbox-operator`, `--sandbox-concurrent-workers=16`, `--sandbox-warm-pool-concurrent-workers=8`, `--kube-api-qps=200` |
-| Sandbox | `agents.x-k8s.io/v1beta1` Sandbox, `runtime: vk-cocoon`, Ubuntu microVM (2 vCPU / 8 GiB, hugepage-backed on demand) |
-| Driver | `test/poolbench` — controller-runtime client; watch-driven claim timing |
-
-## Headline: warm-pool claim latency (real microVM)
-
-A `SandboxWarmPool` keeps microVMs pre-booted; a `SandboxClaim` adopts one. The
-claim is **control-plane only** — the microVM is already running — so latency is
-a Kubernetes round-trip, independent of the microVM boot cost.
-
-| pool size | p50 | p95 | warm hits |
-|---|---|---|---|
-| 10 | **35 ms** | 40 ms | 100% |
-| 200 | **33 ms** | 39 ms | 100% |
-
-**~33 ms p50, and flat as the pool grows.** This is below e2b's published ~150 ms
-sandbox start, on a real microVM.
-
-### Comparison to e2b
-
-e2b's headline "~150 ms" is a snapshot-resume start
-([e2b.dev](https://e2b.dev), vendor-published — verify before quoting). Matching
-tiers rather than headlines:
-
-| tier | sandbox-operator (this repo) | cocoonstack/sandbox `sandboxd` | e2b (published) |
-|---|---|---|---|
-| **warm claim** (pre-booted) | **33 ms** p50 (measured, k8s control plane) | **0.2–0.7 ms** (node-local VM ownership transfer) | — |
-| **clone / snapshot resume** | n/a (uses cold boot) | 45–75 ms | ~150 ms |
-| **cold boot** (kernel start) | 26–32 s (full OCI microVM boot) | 200–350 ms | — |
-| substrate | real CH/KVM microVM | real FC/CH microVM | Firecracker microVM |
-| control plane | **Kubernetes CRDs, any k8s SDK** | node-local daemon + Go/Python SDK | proprietary hosted SDK |
-| self-hosted | yes (AGPL-3.0) | yes | no |
-
-Two honest caveats:
-
-1. **Cold boot is slow** (full OCI microVM boot, 26–32 s) — the warm pool exists
-   precisely to keep that off the request path. cocoon's snapshot-**clone** tier
-   (45–75 ms) is faster but lives in the `sandboxd` stack, not this operator.
-2. **The 33 ms claim degrades under extreme fan-out** (see below). The number
-   that beats e2b *at any scale* is the `sandboxd` sub-millisecond claim, because
-   it never touches a centralized control plane.
-
-### Claim latency vs. concurrency and scale
-
-| pool | concurrency | p50 | p95 | note |
-|---|---|---|---|---|
-| 200 | 1 | 33 ms | 39 ms | serial — the comparable single-start number |
-| 200 | 5 | 53 ms | 183 ms | mild contention |
-| 200 | 20 | 316 ms | 454 ms | 20 simultaneous claims + their replenishment |
-| ~2300 | 1 | 516 ms | 554 ms | apiserver LIST + operator informer cache of 2500 objects |
-
-The operator's warm claim beats e2b up to ~1000-sandbox pools. Beyond ~2000
-concurrent sandboxes the **centralized Kubernetes control plane** (apiserver list
-throughput + the operator's informer cache) becomes the bottleneck. This is
-inherent to a k8s-native design; the `sandboxd` node-local pool does not degrade.
-
-## Scale: thousands of concurrent microVMs
-
-A single `SandboxWarmPool` scaled to 2500:
-
-- **readyReplicas = 2303 / 2500** concurrent real microVMs (operator status;
-  cross-checked via per-node `cocoon vm list`).
-- **CR creation ~36/s**, **microVM boot ~27/s** at scale.
-- **0 operator restarts**; production microVMs on the same cluster **unaffected**
-  (their hugepage pool held steady the entire run).
-- Clean scale-to-0 with **0 stuck finalizers**.
-
-Reaching this scale required a `topologySpreadConstraint` (hostname) in the Pod
-template: virtual-kubelet nodes under-report utilization, so the default
-scheduler packs one node while leaving others idle; the spread constraint
-rebalances (an idle node went from 0 to ~127 microVMs). At very high per-node
-density the cocoon-net DHCP path is the next limiter (a small `WaitingForIP`
-tail).
-
-## sandboxd hot-pool tier (deployed, measured end-to-end)
-
-The `sandboxd` sub-millisecond claim is no longer only a data-plane number: it is
-now reachable **through the same Kubernetes API and this operator**, via
-`runtime: sandboxd`. The operator's `podruntime` mutator pins such a Sandbox to a
-[`vk-sandbox`](https://github.com/cocoonstack/vk-sandbox) virtual
-node (one per host, co-located with `vk-cocoon`), which serves the claim from the
-node-local `sandboxd` hot pool. Kubernetes stays the record-of-intent plane; the
-claim transaction runs on the node.
-
-Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
-`vk-sandbox` + `sandboxd`; warm pool of **125 golden microVMs**,
-`warm=5`/node, template `sandbox/rt:24.04` distributed **P2P** node-to-node):
-
-| metric | result |
-|---|---|
-| **Sandbox `create` → `Ready`** | **p50 < 1 s**, p95 / p99 / max **1 s** (warm claim) |
-| submit 100 `Sandbox` CRs | 2.9 s |
-| delivered | 98 / 100 warm (the 2 misses were `sandboxd` cold-provision on a single over-scheduled node, not the control plane) |
-| routing | **100 % landed on the `sandboxd` plane; 0 on `vk-cocoon`** |
-| apiserver under the burst | APF in-queue **0** throughout, **zero** new flow-control rejections, the `vke-list-limit` priority level **0 / 79** seats — no LIST-seat wedge at 100 concurrent creates (L0 cache-fed reads hold) |
-| isolation | cocoon-managed microVMs **unchanged** across the run (distinct image, `firecracker` hypervisor, `sbx-*` VMs — never cocoon's Cloud-Hypervisor VMs or image paths) |
-
-The end-to-end `create → Ready` is dominated by the Kubernetes round-trip
-(admission → operator reconcile → schedule → status propagation), sub-second at
-this scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms**
-and the `vk-sandbox` gateway overhead **~0.04 ms** (see the operator's
-`pkg/scale` L2 gateway bench). This is the operator's answer to the "cold boot is
-slow" caveat above: the hot tier now serves warm claims at node-local speed while
-`kubectl get sandboxes` keeps working.
-
-## Fleet scale: 50 000 microVMs from one `kubectl patch`
-
-The 100-sandbox run above is the deployed hot tier at small scale. The same
-stack, driven by one CRD write, was measured to **50 000** concurrent microVMs.
+## Fleet supply: 50 000 microVMs from one `kubectl patch`
 
 **Method.** A single `SandboxWarmPool` patched `replicas: 0 → 50000` on **20
 homogeneous bare-metal nodes** (384 vCPU / 1.5 TiB / local NVMe, 2 500 microVMs
@@ -145,6 +34,11 @@ Round 2 is the honest counter-example: on the single HDD-backed node, mmap CoW
 *regressed* fill from ~140 s to ~295 s while every NVMe node in the same round
 improved — the optimization's sign is set by the storage medium. Round 3 drops
 the six heterogeneous nodes and lands the clean 12 ± 3 s curve.
+
+Because sandbox objects are synthesized from `NodeInventory` rather than stored,
+etcd carried **~2 writes/s** across the whole 50 k run (20 inventories every
+30 s plus a little `status`), independent of sandbox count; the claim path
+writes nothing to etcd at all.
 
 ### Memory ledger
 
@@ -174,27 +68,141 @@ metadata — is node-local, and the control plane touches each node with one O(1
 
 ![supply rate is linear in node count](docs/images/perf-scaling-law.png)
 
-Because sandbox objects are synthesized from `NodeInventory` rather than stored,
-etcd carried **~2 writes/s** across the whole 50 k run (20 inventories every
-30 s plus a little `status`), independent of sandbox count; the claim path
-writes nothing to etcd at all.
+## sandboxd hot-pool tier (deployed, measured end-to-end)
+
+The `sandboxd` sub-millisecond claim is reachable **through the Kubernetes API**:
+a sandbox Pod routed to a [`vk-sandbox`](https://github.com/cocoonstack/vk-sandbox)
+virtual node is served from that node's hot pool. Kubernetes stays the
+record-of-intent plane; the claim transaction runs on the node.
+
+Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
+`vk-sandbox` + `sandboxd`; warm pool of **125 golden microVMs**,
+`warm=5`/node, template `sandbox/rt:24.04` distributed **P2P** node-to-node):
+
+| metric | result |
+|---|---|
+| **Sandbox `create` → `Ready`** | **p50 < 1 s**, p95 / p99 / max **1 s** (warm claim) |
+| submit 100 `Sandbox` CRs | 2.9 s |
+| delivered | 98 / 100 warm (the 2 misses were `sandboxd` cold-provision on a single over-scheduled node, not the control plane) |
+| routing | **100 % landed on the `sandboxd` plane; 0 on `vk-cocoon`** |
+| apiserver under the burst | APF in-queue **0** throughout, **zero** new flow-control rejections, the `vke-list-limit` priority level **0 / 79** seats — no LIST-seat wedge at 100 concurrent creates (L0 cache-fed reads hold) |
+| isolation | cocoon-managed microVMs **unchanged** across the run (distinct image, `firecracker` hypervisor, `sbx-*` VMs — never cocoon's Cloud-Hypervisor VMs or image paths) |
+
+The end-to-end `create → Ready` is dominated by the Kubernetes round-trip
+(admission → reconcile → schedule → status propagation), sub-second at this
+scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms** and
+the `vk-sandbox` gateway overhead **~0.04 ms** (`test/l2bench`).
+
+This run predates the upstream import: the Pod that reached the `vk-sandbox`
+node was produced by the forked controller plus the Pod mutator, both since
+removed. The node-side numbers are unaffected — the same Pod is now written by
+hand, per the [pod-template contract](docs/runtime-backends.md) — but the
+control-plane half is upstream's code and unmeasured here.
+
+## Upstream controller: warm claim on the sandboxd tier
+
+Measured on 2026-09-22 when the forked controllers were replaced by upstream's:
+two bare-metal hosts (384 cores, 1.5 TB each), an isolated control plane
+(kube-apiserver v1.37.0 + etcd), one `vk-sandbox` virtual node per host over
+sandboxd v0.1.13 with 30 warm `rt:24.04` microVMs each. One harness for both
+arms: a `SandboxTemplate` carrying the sandboxd pod-template contract, a
+`SandboxWarmPool` of 40, then 40 `SandboxClaim`s one at a time, latency measured
+from the claim create to the watch event that shows `status.sandboxStatus.name`.
+The arms ran interleaved on the same cluster (F1, U1, F2, U2), each on its own
+CRD set.
+
+| controller | pool fill (40) | claim p50 | p95 | p99 | max | warm hits |
+|---|---|---|---|---|---|---|
+| fork `0719d33` | 2 s | 52.4 ms | 102.9 ms | 104.4 ms | 105.4 ms | 40/40 |
+| upstream v1.0.3 | 2 s | 53.8 ms | 69.4 ms | 72.0 ms | 75.2 ms | 40/40 |
+| fork `0719d33` | 2 s | 44.5 ms | 69.7 ms | 73.8 ms | 75.7 ms | 40/40 |
+| upstream v1.0.3 | 2 s | 48.4 ms | 71.0 ms | 72.0 ms | 72.6 ms | 40/40 |
+
+Upstream's claim controller sits inside the fork's run-to-run spread; the CRD
+path lost nothing in the move. The same round re-ran the L3 half before and
+after the import on that cluster — the aggregated list across both nodes, the
+warm-pool driver setting both nodes' targets, every lifecycle verb over the
+Kubernetes and e2b surfaces (`examples/lifecycle`), and an e2b create on one
+host reached through `sandbox-envd-proxy` on the other — with identical
+results, and `test/l3bench` reports the same 3000 sandboxes from 8 etcd objects
+on both builds.
 
 ## Data plane
 
 k8s Pod `exec` is **not** available to `vk-cocoon` microVMs on a managed cluster
 (the control plane cannot reach virtual-node kubelets over the microVM network);
 the microVM data plane is `cocoon vm exec` / silkd (in-VM agent), validated in
-test evidence. The portable standard-kubelet backend uses ordinary Pod exec.
+test evidence. For the sandboxd tier the data plane is the e2b path —
+`sandbox-envd-proxy` into the guest's `envd` — and `test/envdproxysmoke` is its
+hardware harness. The portable standard-kubelet backend uses ordinary Pod exec.
 
 ## Reproduce
 
-```bash
-# warm-pool claim latency (real microVM), pinned to a labeled node pool
-go run -tags poolbench ./test/poolbench \
-  -runtime vk-cocoon -image <cocoon-oci-image> \
-  -node-selector <pool-label>=<v> -snapshot-policy never \
-  -pool 200 -claims 40 -claim-conc 1
+The harnesses that remain in this repository are build-tagged, one tag per
+directory, and write their evidence as JSON:
 
-# core + extensions E2E (12 scenarios) against a real cluster
-KUBECONFIG=<vke> go run -tags e2e ./test/e2e -ns <ns> -out /tmp/e2e-results.json
+```bash
+# L2: node-local claim gateway overhead and orphan-binding convergence
+go run -tags l2bench ./test/l2bench -out /tmp/l2-gateway.json
+
+# L3: aggregation contract and the O(pools+nodes) object-count invariant
+go run -tags l3bench ./test/l3bench -out /tmp/l3-aggregation.json
+
+# store and lookup scaling
+go test -run '^$' -bench . ./pkg/scale ./pkg/e2bcompat
+
+# envd-proxy against a live sandbox (see docs/envd-proxy.md for the node half)
+go run -tags envdproxysmoke ./test/envdproxysmoke \
+  -node <owner> -sandbox <id> -token <token> -port 49983
 ```
+
+`make vet-tagged` type-checks all three tagged harnesses.
+
+## Retired: the CRD-path fork controllers (measured at `0719d33`)
+
+Everything below was measured against the forked `Sandbox`, `SandboxClaim`,
+`SandboxWarmPool` and `SandboxTemplate` controllers this repository shipped as
+`cmd/sandbox-operator`, together with their `test/poolbench`, `test/scalebench`
+and `test/e2e` harnesses. All of it was deleted when the APIs moved to the
+upstream module. **These numbers are not claims about upstream's controller and
+are not reproducible from this tree.** They are kept because the design
+discussion in [docs/scaling-design.md](docs/scaling-design.md) refers to them.
+
+| | |
+|---|---|
+| Cluster | 27 virtual-kubelet (`vk-cocoon`) nodes, 384 cores / 1.5 TiB each; managed Kubernetes v1.26 |
+| Operator | the forked `sandbox-operator`, `--sandbox-concurrent-workers=16`, `--sandbox-warm-pool-concurrent-workers=8`, `--kube-api-qps=200` |
+| Sandbox | `agents.x-k8s.io/v1beta1` Sandbox, `runtime: vk-cocoon`, Ubuntu microVM (2 vCPU / 8 GiB, hugepage-backed on demand) |
+| Driver | `test/poolbench` — controller-runtime client; watch-driven claim timing |
+
+**Warm-pool claim latency.** A `SandboxClaim` adopted a pre-booted microVM, so
+latency was a Kubernetes round-trip independent of boot cost:
+
+| pool size | p50 | p95 | warm hits |
+|---|---|---|---|
+| 10 | 35 ms | 40 ms | 100% |
+| 200 | 33 ms | 39 ms | 100% |
+
+**Claim latency vs. concurrency and scale.**
+
+| pool | concurrency | p50 | p95 | note |
+|---|---|---|---|---|
+| 200 | 1 | 33 ms | 39 ms | serial — the comparable single-start number |
+| 200 | 5 | 53 ms | 183 ms | mild contention |
+| 200 | 20 | 316 ms | 454 ms | 20 simultaneous claims + their replenishment |
+| ~2300 | 1 | 516 ms | 554 ms | apiserver LIST + operator informer cache of 2500 objects |
+
+Beyond ~2000 concurrent sandboxes the centralized control plane (apiserver list
+throughput plus the controller's informer cache) became the bottleneck. That
+observation is what the L3 design answers, and it is why the aggregated
+apiserver exists.
+
+**Scale.** A single `SandboxWarmPool` scaled to 2500 reached **readyReplicas =
+2303 / 2500** concurrent real microVMs (cross-checked via per-node
+`cocoon vm list`), at CR creation ~36/s and microVM boot ~27/s, with 0 operator
+restarts and a clean scale-to-0 with 0 stuck finalizers. It needed a
+`topologySpreadConstraint` on hostname: virtual-kubelet nodes under-report
+utilization, so the default scheduler packs one node while leaving others idle.
+
+**Cold boot** on that path was 26–32 s (full OCI microVM boot) — the reason a
+warm pool exists at all.

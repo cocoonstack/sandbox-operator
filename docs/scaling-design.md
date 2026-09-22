@@ -20,30 +20,30 @@ scatter-gathering live node state, with *zero* etcd storage). Our thesis:
 > transaction plane down to the node — behind CRDs, RBAC, and watch, so
 > `kubectl get sandboxes` never stops working.**
 
-We stage this as four layers. L0 and L1 are shipped. L2 has a concrete,
-benchmarked gateway and orphan reconciler, but still needs deployment hardening
-before it is a supported mode. L3 is implemented by the aggregated-apiserver
-binary, manifests, scatter-gather store, and `NodeInventory` publisher. Its
-remaining routing follow-up is called out below.
+The staging is four layers. L0 is a property of the node providers. L1 is the
+CRD claim path, served by **upstream's agent-sandbox controller** — this
+repository no longer implements it. L2 and L3 are what this repository ships:
+the node-local claim gateway, and the aggregated apiserver with its warm-pool
+driver and `NodeInventory` publisher.
 
 ```mermaid
 flowchart LR
-    subgraph L0["L0 — API hygiene (shipped)"]
+    subgraph L0["L0 — API hygiene (node providers)"]
         L0a["cache-fed reads<br/>diff-before-write<br/>LIST off etcd"]
     end
-    subgraph L1["L1 — ownership transfer (this repo)"]
-        L1a["claim = Update + merge Patch<br/>O(nodes) pool status<br/>one leader-elected operator"]
+    subgraph L1["L1 — ownership transfer (upstream controller)"]
+        L1a["SandboxClaim adopts a warm Sandbox<br/>PVC→PV binding semantics"]
     end
-    subgraph L2["L2 — node-local claim gateway core"]
+    subgraph L2["L2 — node-local claim gateway (this repo)"]
         L2a["gateway → sandboxd<br/>sub-ms delivery<br/>async Bound record"]
     end
-    subgraph L3["L3 — aggregated apiserver (implemented)"]
+    subgraph L3["L3 — aggregated apiserver (this repo)"]
         L3a["scatter-gather node inventory<br/>etcd stores intent only<br/>O(sandboxes)→O(pools+nodes)"]
     end
     L0 --> L1 --> L2 --> L3
 ```
 
-### L0 — API hygiene (shipped)
+### L0 — API hygiene (shipped in the providers)
 
 The prerequisite, delivered in the `vk-cocoon` provider (2026-07-17): every
 periodic read is served from a node-scoped informer cache, every write is
@@ -56,7 +56,11 @@ count** of the resource, so at 2500 pods even a tiny per-node list goes
 max-width and saturates a dedicated priority level — client QPS caps cannot fix
 a seat-seconds problem, only removing the lists can.
 
-### L1 — claim is ownership transfer, not scheduling (implemented)
+`vk-sandbox` keeps the same rule: its status reads are served from the
+provider's own claim table, and the L3 apiserver and proxy read `NodeInventory`
+through an informer rather than listing it per request.
+
+### L1 — claim is ownership transfer, not scheduling (upstream)
 
 A warm claim is not a create. The Pod is already scheduled, bound, image-pulled,
 and booted; a `SandboxClaim` only needs to **transfer ownership** of one
@@ -64,48 +68,18 @@ pre-warmed `Sandbox` — the exact semantics Kubernetes already ships for
 `PersistentVolumeClaim → PersistentVolume` binding (`Phase: Bound`). Nothing on
 the claim path needs the scheduler, kubelet bind, or image pull.
 
-**Mechanisms**
+That is upstream agent-sandbox's model, and its controller implements it. This
+repository used to carry a fork of those controllers; it does not any more, so
+the mechanism, its failure modes and its numbers belong upstream. What remains
+here for the Pod path is the [pod-template contract](runtime-backends.md) that
+decides which node a claimed Pod lands on.
 
-1. **Claim fast-path — pop, adopt, record.** `getCandidate` pops one
-   `warm ∧ unclaimed` Sandbox from the in-memory queue (node-spread pick); the
-   claim records the adoption with an `Update` on the SandboxClaim and binds
-   the Sandbox with a merge `Patch` under a `resourceVersion` precondition. A
-   loser that raced the same Sandbox moves to the next candidate; a pass that
-   leaves a conflicted hand-over unsettled requeues instead, and the next pass
-   completes the adoption its claim already records or clears the reference.
-   These are two handover writes, followed by a separate claim status write;
-   they are not the total writes for the claim lifecycle. The sub-millisecond
-   figures below come from the node-local gateway (L2), not this CRD path.
-2. **Pool status from the informer cache, not etcd.** `readyReplicas` is
-   recomputed each reconcile from the pool's Sandboxes read through the indexed
-   cache without deep copies — an in-memory scan, never a `LIST` against the
-   apiserver.
-3. **One leader-elected operator.** The reconcilers share one manager under a
-   single `coordination.k8s.io` leader lease. Pools are independent workqueue
-   keys, not shards spread across replicas; per-pool sharding is not
-   implemented.
-
-**Kubernetes-semantics mapping**
-
-| Modal mechanism | L1 in pure Kubernetes |
-|---|---|
-| stateless scheduler fleet | single leader-elected operator + Lease |
-| worker accepts/rejects placement | optimistic PATCH with `resourceVersion` precondition |
-| no datastore on create path | claim = ownership PATCH of a pre-warmed object (like PVC→PV `Bound`) |
-| async result write | Sandbox status/conditions written after the fast-path returns |
-
-**Failure modes**
-
-| Scenario | Behavior | Breaks k8s semantics? |
-|---|---|---|
-| Two claims race one warm Sandbox | `resourceVersion` PATCH conflict; loser adopts the next candidate | No — standard optimistic concurrency |
-| Warm pool exhausted | No adoptable Sandbox: cold-start from the template; an unsettled handover conflict requeues | No |
-| The leader operator dies mid-claim | Lease expiry → another replica resumes; claim is idempotent | No |
-| Stale informer picks an already-claimed Sandbox | PATCH precondition fails → next candidate | No |
-
-**Acceptance:** claim p50 stays near-constant from a 100-pool to a 2000+-pool
-(measured 0.644 ms → 0.646 ms); the pod-exclusivity invariant (one Sandbox, at
-most one claim) holds under concurrent claims.
+The L1 numbers this repository once published (claim fast-path p50 0.644 ms at
+N=100 vs 0.646 ms at N=2000; claim→Bound p50 129 ms on real microVMs) were
+measured against the fork's controllers and their `test/scalebench` and
+`test/poolbench` harnesses, all of which were deleted with the fork. They are
+kept, labelled, in [PERFORMANCE.md](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md)
+as the historical record, and they are not claims about upstream's controller.
 
 ### L2 — node-local claim gateway (implemented core; deployment hardening pending)
 
@@ -113,14 +87,15 @@ L1 still round-trips the apiserver. L2 takes the claim off the central path
 entirely for the runtimes that have a node-local warm pool (`sandboxd`), while
 keeping the `SandboxClaim` object as the durable record.
 
-**Mechanism.** The implemented `ClaimGateway` is intended to run on each
+**Mechanism.** The `ClaimGateway` in `pkg/scale` is intended to run on each
 virtual-kubelet node in front of `sandboxd`. A claim request reaches the node
 gateway directly; `sandboxd` hands over an already-running microVM in
 **0.2–0.7 ms** and returns connection info immediately. The `SandboxClaim` is
 marked `Bound` **asynchronously** — the record follows the action, exactly as
 kubelet static Pods record to the apiserver after the container is already
-running. The repository contains the concrete gateway and orphan reconciler;
-packaging it as a supported DaemonSet remains roadmap work.
+running. The repository contains the concrete gateway and the
+`OrphanReconciler` that heals a lost record; packaging it as a supported
+DaemonSet remains roadmap work.
 
 **Authorization stays central.** The gateway runs a `SubjectAccessReview`
 before delivery; only ownership transfer moves to the node.
@@ -167,6 +142,14 @@ selectors, and `watch` (currently implemented by polling and diffing the
 cache-fed `NodeInventory` view) all keep working; users never see that storage
 decentralized.
 
+Warm capacity is intent too. The in-process warm-pool driver watches
+`SandboxWarmPool`, resolves its `SandboxTemplate` into a `(template, net, size)`
+key, spreads the desired replicas across the nodes that advertise a sandboxd
+address, and writes the pool's `status.replicas`/`readyReplicas` back from what
+those nodes report. The reconcile is `O(pools + nodes)` per tick and never
+per-sandbox, which is why the apiserver's background load does not grow with
+the sandbox count.
+
 ```go
 // SandboxStore backs the aggregated apiserver for sandboxes.agents.x-k8s.io.
 // It holds NO per-sandbox etcd objects: List/Get/Watch use the cache-fed node
@@ -185,8 +168,15 @@ type NodeInventory struct {
     metav1.ObjectMeta `json:"metadata,omitempty"`
     Node    string           `json:"node"`
     Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline}
+    Address string           `json:"address"` // the node's sandboxd advertise address
+    Pools   []PoolCapacity   `json:"pools"`   // per-pool warm capacity
 }
 ```
+
+`NodeInventory` is this repository's only CRD, in its own group
+`sandbox.cocoonstack.io` — deliberately not in `agents.x-k8s.io`, whose entire
+v1beta1 the `APIService` hands to the aggregated server, which serves only
+`sandboxes`.
 
 **Failure modes**
 
@@ -203,7 +193,7 @@ matching entry. Strong read-after-write and `O(1)` lookup remain follow-up work.
 
 ### L3 routing: why node choice is sampled, not maximized
 
-The operator schedules off `NodeInventory`, which each node republishes on a
+Create schedules off `NodeInventory`, which each node republishes on a
 5–30 s cadence. Picking the node with the highest advertised warm count would
 therefore send *every* claim in a refresh window to whichever node looked best
 in that one snapshot — draining it while its peers stay idle. The repo's own
@@ -281,10 +271,10 @@ intact. The one-line framing:
 > **Modal proved 1M needs a decentralized transaction plane. We show the
 > decentralized transaction plane can hide behind Kubernetes semantics.**
 
-| | Modal | sandbox-operator |
+| | Modal | this stack |
 |---|---|---|
-| Scheduling | stateless fleet, in-memory worker state | single leader-elected operator + Lease (L1) |
-| Create critical path | direct scheduler→worker RPC, no datastore | ownership PATCH (L1) → node-local gateway (L2) |
+| Scheduling | stateless fleet, in-memory worker state | upstream's leader-elected controller + Lease (L1) |
+| Create critical path | direct scheduler→worker RPC, no datastore | ownership transfer (L1) → node-local claim (L2/L3) |
 | State of record | Redis stream (async) | Kubernetes objects; node inventory in etcd is `O(nodes)` (L3) |
 | Sandbox storage | proprietary | aggregated apiserver, etcd stores intent only (L3) |
 | Client interface | proprietary SDK | any Kubernetes client — unchanged |
@@ -292,24 +282,23 @@ intact. The one-line framing:
 
 ### Measured performance
 
-Every acceptance claim above is backed by a reproducible benchmark committed under
-`test/` — the evidence is regenerated by the harness, never hand-written. Numbers
-are labelled by substrate: **algorithmic complexity** is proven on a fake apiserver
-(so it isolates the scaling term, not machine speed), while **absolute latency on
-real microVMs** is measured on a single `vk-cocoon` node (384 vCPU / 1.5 TB bare metal).
+Numbers are labelled by substrate: **algorithmic complexity** is proven on a
+fake apiserver or an in-process store (so it isolates the scaling term, not
+machine speed), while **absolute latency on real microVMs** is measured on
+bare-metal nodes. The harnesses that still live in this repository regenerate
+their own evidence; the rows marked *retired* were measured against the forked
+controllers this repository no longer contains, at commit `0719d33`.
 
 | Layer | Acceptance claim | Measured | Substrate / harness |
 |---|---|---|---|
-| **L1** | claim p50 stays near-constant as the pool grows | fast-path p50 **0.644 ms → 0.646 ms** from N=100 to N=2000 (**1.003×**); a full-`LIST` selection over the same fixtures degrades **15.7×** (1.3 → 20 ms) | fake apiserver + real reconciler — `test/scalebench` |
-| **L1** | warm claim on real microVMs | claim→Bound p50 **129 ms**, p95 926 ms, p99 935 ms; 100/100 warm hits, 0 failures. Pool fills 100 microVMs in 62 s (boot p50 47 s) | the microVM node, 100 concurrent claims — `test/poolbench` |
 | **L2** | sub-millisecond node-local claim | gateway overhead p50 **0.039 ms**, p95 0.053 ms (sandboxd delivery itself is 0.2–0.7 ms by contract); 200/200 orphan bindings reconciled, **0** VM destroys | httptest sandboxd + fake recorder — `test/l2bench` |
 | **L3** | etcd stores intent only, `kubectl` unchanged | **3000** sandboxes served through client-go List/Get/Watch from **8** etcd objects (3 nodes + 5 pools) — **0** per-sandbox objects, 3 server-side-apply writes | in-process aggregated apiserver — `test/l3bench` |
-| **e2e** | admission→claim→release→cleanup, zero leak | 100 real microVMs: four-way cross-check 100/100/100/100, 100/100 claims bound, **0 leaked**, production workloads on the same node unaffected | the microVM node, full stack — `test/e2ebench` |
-| **sandboxd tier (deployed)** | hot-pool warm claim via k8s, apiserver flat under load | 100 `Sandbox` (`runtime: sandboxd`) create→Ready **p50 < 1 s** (warm), 98/100, submitted in 2.9 s; **100 %** routed to the sandboxd plane; apiserver LIST 37 ms/7 ms, **0 APF rejections, in-queue 0**; cocoon microVMs untouched | 26-node fleet, `vk-sandbox` + sandboxd — the scale benches under `test/` |
+| **L3** | one lookup does not scan the fleet twice | `Get` 2.49 ms / 36 MB → **39 µs / 217 KB** with the owning-node index, at 200 nodes × 2000 sandboxes | Go benchmarks — `pkg/scale`, `pkg/e2bcompat` |
+| **sandboxd tier (deployed)** | hot-pool warm claim via k8s, apiserver flat under load | 100 `Sandbox` create→Ready **p50 < 1 s** (warm), 98/100, submitted in 2.9 s; **100 %** routed to the sandboxd plane; apiserver LIST 37 ms/7 ms, **0 APF rejections, in-queue 0** | 26-node fleet, `vk-sandbox` + sandboxd |
+| **fleet** | one `kubectl patch` supplies a fleet | **50 000** microVMs on 20 nodes in **10–15 s**, at **99 MB net RAM per microVM**, etcd ~2 writes/s across the run | 20 bare-metal nodes, warm-pool driver + sandboxd |
+| **L1** *(retired)* | claim p50 flat as the pool grows | fast-path p50 0.644 ms → 0.646 ms from N=100 to N=2000 | fake apiserver + the forked reconciler — harness deleted |
+| **L1** *(retired)* | warm claim on real microVMs | claim→Bound p50 129 ms, p95 926 ms; 100/100 warm hits | the microVM node, 100 concurrent claims — harness deleted |
 
-Two honest caveats. The sub-millisecond L1/L2 figures measure algorithmic cost and
-gateway overhead on fake substrates; real end-to-end latency additionally pays the
-apiserver round-trip, sandboxd delivery (0.2–0.7 ms), and informer convergence. And
-the real-microVM claim p95 (926 ms, ~7× the p50) is single-node
-optimistic-concurrency contention under 100 simultaneous claims — exactly the tail the
-node-local claim gateway (L2) takes off the apiserver path.
+One honest caveat: the sub-millisecond L2 figure measures gateway overhead on a
+fake node; real end-to-end latency additionally pays the apiserver round-trip,
+sandboxd delivery (0.2–0.7 ms), and inventory convergence.

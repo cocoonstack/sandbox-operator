@@ -1,73 +1,94 @@
 # sandbox-operator Helm chart
 
-This chart installs the operator, all upstream agent-sandbox CRDs, RBAC, the
-conversion webhook, and certificate management.
+The single source of deployment truth for this repo. It installs the L3
+aggregated `sandbox-apiserver` (the `v1beta1.agents.x-k8s.io` APIService, its
+Service, RBAC, PodDisruptionBudget and cert-manager serving-cert chain), the
+`nodeinventories.sandbox.cocoonstack.io` CRD, and — with the e2b surface
+enabled — the `sandbox-envd-proxy` data plane.
+
+It does not install a Pod-path controller: that is upstream's own
+`kubernetes-sigs/agent-sandbox` release. Do not install upstream's `Sandbox` CRD
+for `agents.x-k8s.io/v1beta1` — the APIService in this chart shadows it.
 
 ## Install
 
-```bash
-helm upgrade --install sandbox-operator ./helm \
-  --namespace sandbox-system \
-  --create-namespace \
-  --set image.tag=<version>
-```
-
-Extensions are enabled and standard kubelet is selected by default. After the
-vk-cocoon cluster is ready, it can be selected cluster-wide with:
+`sandbox-system` is the conventional namespace; every namespaced object lands in
+the release namespace.
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
   --namespace sandbox-system \
   --create-namespace \
-  --set image.tag=<version> \
-  --set controller.defaultRuntime=vk-cocoon
+  --set apiserver.image.tag=<version> \
+  --set envdProxy.image.tag=<version> \
+  --set envdProxy.domain=sandbox.example.com
 ```
 
-To use an existing namespace, set both `namespace.create=false` and
-`namespace.name=<namespace>`.
+Wildcard DNS for `*.{domain}` must resolve to the `sandbox-envd-proxy` Service:
+the SDK addresses every sandbox as `{port}-{sandboxID}.{domain}`.
+
+cert-manager must be installed first. Without it, set `certManager.enabled=false`
+and supply both a serving-cert Secret named in `certManager.servingCertSecret`
+and its CA in `certManager.caBundle`.
+
+The e2b-compatible REST surface is off by default, and the proxy renders only
+with it. Enabling it requires a domain and a Secret of API keys:
+
+```bash
+helm upgrade --install sandbox-operator ./helm \
+  --namespace sandbox-system \
+  --set apiserver.e2b.enabled=true \
+  --set apiserver.e2b.domain=sandbox.example.com \
+  --set apiserver.e2b.apiKeySecret.name=e2b-api-keys
+```
 
 ## Upgrade and uninstall
 
-Helm does not upgrade or delete resources in a chart's `crds/` directory.
-Apply changed CRDs before upgrading the controller:
+Helm does not upgrade or delete resources in a chart's `crds/` directory. Apply
+a changed CRD before upgrading:
 
 ```bash
 kubectl apply -f helm/crds/
-helm upgrade sandbox-operator ./helm \
-  --namespace sandbox-system \
-  --reuse-values \
-  --set image.tag=<new-version>
+helm upgrade sandbox-operator ./helm --namespace sandbox-system --reuse-values
 ```
 
-Do not delete the CRDs while sandbox custom resources still exist.
+`NodeInventory` moved from `extensions.agents.x-k8s.io` to
+`sandbox.cocoonstack.io`. A fleet coming from the old group runs a vk-sandbox
+that publishes into the new one on every node first, then deletes the old CRD;
+its objects are not converted.
 
-## Important values
+Do not delete the CRD while NodeInventory objects still exist.
+
+## Values
 
 | Parameter | Description | Default |
 |---|---|---|
-| `image.repository` | Operator image repository | `ghcr.io/cocoonstack/sandbox-operator` |
-| `image.tag` | Operator image tag; required | `""` |
-| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
-| `replicaCount` | Operator replicas | `1` |
-| `namespace.create` | Create the operator namespace | `true` |
-| `namespace.name` | Operator namespace | `sandbox-system` |
-| `podAnnotations` | Extra controller Pod annotations | `{}` |
-| `podLabels` | Extra controller Pod labels | `{}` |
-| `controller.leaderElect` | Enable leader election | `true` |
-| `controller.extensions` | Enable Template, WarmPool, and Claim | `true` |
-| `controller.defaultRuntime` | Default Pod backend | `standard` |
-| `controller.clusterDomain` | Kubernetes cluster domain | unset (`cluster.local` flag default) |
-| `controller.kubeApiQps` | API client QPS, `-1` means unlimited | unset |
-| `controller.kubeApiBurst` | API client burst | unset |
-| `controller.sandboxConcurrentWorkers` | Sandbox workers | unset (`16` flag default) |
-| `controller.sandboxClaimConcurrentWorkers` | Claim workers | unset (`50` flag default) |
-| `controller.sandboxWarmPoolConcurrentWorkers` | WarmPool workers | unset (`8` flag default) |
-| `controller.sandboxTemplateConcurrentWorkers` | Template workers | unset (`1` flag default) |
-| `controller.sandboxWarmPoolMaxBatchSize` | WarmPool batch size | unset (`300` flag default) |
-| `controller.enableWarmPoolEviction` | Mark warm Pods safe to evict | unset (`true` flag default) |
-| `controller.extraArgs` | Additional operator arguments | `[]` |
-| `webhookServiceName` | Conversion-webhook Service | `sandbox-webhook-service` |
-| `resources` | Operator requests and limits | `{}` |
-| `nodeSelector`, `tolerations`, `affinity` | Operator scheduling | empty |
-| `podSecurityContext` | Operator Pod security context | `null` |
-| `containerSecurityContext` | Operator container security context | `null` |
+| `apiserver.image.repository` | Aggregated apiserver image | `ghcr.io/cocoonstack/sandbox-apiserver` |
+| `apiserver.image.tag` | Image tag; pin a release | `latest` |
+| `apiserver.image.pullPolicy` | Image pull policy | `IfNotPresent` |
+| `apiserver.replicaCount` | Apiserver replicas | `2` |
+| `apiserver.securePort` | Port the aggregated API is served on | `6443` |
+| `apiserver.warmPoolDriver` | Run the in-process SandboxWarmPool driver | `true` |
+| `apiserver.sandboxdToken.secretName` | Secret holding the sandboxd api_token; empty leaves the write path closed | `""` |
+| `apiserver.sandboxdToken.key` | Key within that Secret | `token` |
+| `apiserver.e2b.enabled` | Serve the e2b-compatible REST surface | `false` |
+| `apiserver.e2b.domain` | Base domain sandbox hosts derive from; required once enabled | `""` |
+| `apiserver.e2b.namespace` | Namespace e2b claims land in | `default` |
+| `apiserver.e2b.envdVersion` | envd version reported to the SDK | `""` (binary default) |
+| `apiserver.e2b.defaultTimeoutSeconds` | Lease granted to a create naming no timeout | `0` (binary default) |
+| `apiserver.e2b.port` | Port the e2b surface listens on | `8080` |
+| `apiserver.e2b.apiKeySecret.name` | Secret of accepted API keys; required once enabled | `""` |
+| `apiserver.e2b.apiKeySecret.key` | Key within that Secret | `keys` |
+| `apiserver.resources` | Apiserver requests and limits | 100m/128Mi, limit 512Mi |
+| `envdProxy.image.repository` | Proxy image | `ghcr.io/cocoonstack/sandbox-envd-proxy` |
+| `envdProxy.image.tag` | Image tag; pin a release | `latest` |
+| `envdProxy.image.pullPolicy` | Image pull policy | `IfNotPresent` |
+| `envdProxy.replicaCount` | Proxy replicas | `2` |
+| `envdProxy.domain` | Base domain; falls back to `apiserver.e2b.domain` | `""` |
+| `envdProxy.namespace` | Namespace sandbox lookups are scoped to; falls back to `apiserver.e2b.namespace` | `""` |
+| `envdProxy.port` | Port the proxy listens on | `8443` |
+| `envdProxy.tlsSecretName` | Wildcard cert for `*.{domain}`; empty serves h2c | `""` |
+| `envdProxy.resources` | Proxy requests and limits | 100m/128Mi, limit 512Mi |
+| `certManager.enabled` | Generate the serving-cert chain and inject the CA | `true` |
+| `certManager.servingCertSecret` | Serving-cert Secret the apiserver mounts | `sandbox-apiserver-serving-certs` |
+| `certManager.caBundle` | Base64 PEM CA for the APIService; required when cert-manager is disabled | `""` |

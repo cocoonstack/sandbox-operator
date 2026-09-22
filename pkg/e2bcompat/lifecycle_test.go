@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -56,6 +59,32 @@ func TestPauseFilesystemOnlyIsRejected(t *testing.T) {
 	}
 }
 
+func TestPauseFilesystemOnlyIsRejectedBeforeThePausedCheck(t *testing.T) {
+	store := &lifecycleStore{}
+	nodeReportsPaused(store)
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", `{"memory":false}`, testKey)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 naming the unsupported option, not 409 for the paused state", w.Code)
+	}
+}
+
+func TestForkKeepsTheNodesRejectionStatus(t *testing.T) {
+	store := &lifecycleStore{err: k8serrors.NewBadRequest("count 9999 exceeds max_fork_count")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":9999}`, testKey)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want the node's 400, not a retryable 500: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "max_fork_count") {
+		t.Errorf("body = %s, want the node's reason", w.Body.String())
+	}
+}
+
 func TestConnectRunningIs200(t *testing.T) {
 	store := &lifecycleStore{}
 	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
@@ -89,6 +118,44 @@ func TestConnectPausedIs201AndResumes(t *testing.T) {
 	}
 	if store.resumedNode != "node-a" || store.resumedID != "sb_abc" {
 		t.Errorf("Resume(%q, %q), want (node-a, sb_abc)", store.resumedNode, store.resumedID)
+	}
+}
+
+func TestConnectEchoesThePresentedAccessToken(t *testing.T) {
+	store := &lifecycleStore{}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	r := httptest.NewRequest(http.MethodPost, "/sandboxes/sb-abc/connect", strings.NewReader(`{"timeout":30}`))
+	r.Header.Set(apiKeyHeader, testKey)
+	r.Header.Set(accessTokenHeader, "sandbox-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var got Sandbox
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.EnvdAccessToken != "sandbox-secret" {
+		t.Errorf("envdAccessToken = %q, want the token the client presented", got.EnvdAccessToken)
+	}
+}
+
+func TestConnectWithoutAnAccessTokenReportsItEmpty(t *testing.T) {
+	store := &lifecycleStore{}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
+	var got Sandbox
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.EnvdAccessToken != "" {
+		t.Errorf("envdAccessToken = %q; the token is minted once at claim time and cannot be re-derived here", got.EnvdAccessToken)
 	}
 }
 
@@ -262,6 +329,9 @@ type lifecycleStore struct {
 	forkChildren           []scale.Assignment
 	snapshotName           string
 	snapshot               scale.Snapshot
+	renewedID              string
+	renewedTTL             int
+	renewDeadline          time.Time
 	err                    error
 	statsErr               error
 
@@ -280,6 +350,11 @@ func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
 func (f *lifecycleStore) Resume(_ context.Context, node, id string) error {
 	f.resumedNode, f.resumedID = node, id
 	return f.err
+}
+
+func (f *lifecycleStore) Renew(_ context.Context, _, id string, ttlSeconds int) (time.Time, error) {
+	f.renewedID, f.renewedTTL = id, ttlSeconds
+	return f.renewDeadline, f.err
 }
 
 func (f *lifecycleStore) Fork(_ context.Context, _, id string, count, _ int) ([]scale.Assignment, error) {

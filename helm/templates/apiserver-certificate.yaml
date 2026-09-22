@@ -1,0 +1,66 @@
+{{- if .Values.certManager.enabled }}
+# Serving-cert chain for the aggregated apiserver: self-signed Issuer → CA
+# Certificate → CA Issuer → serving Certificate for the Service DNS name. The
+# APIService pins the same CA through cert-manager.io/inject-ca-from, so the
+# kube-apiserver fully verifies this server and needs no TLS-verify escape hatch.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: sandbox-apiserver-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sandbox-apiserver-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: sandbox-apiserver-ca
+  secretName: sandbox-apiserver-ca
+  duration: 87600h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: sandbox-apiserver-selfsigned
+    kind: Issuer
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: sandbox-apiserver-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: sandbox-apiserver-ca
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sandbox-apiserver-serving
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+  - sandbox-apiserver.{{ .Release.Namespace }}.svc
+  - sandbox-apiserver.{{ .Release.Namespace }}.svc.cluster.local
+  secretName: {{ .Values.certManager.servingCertSecret }}
+  duration: 8760h
+  renewBefore: 720h
+  issuerRef:
+    name: sandbox-apiserver-ca
+    kind: Issuer
+{{- end }}

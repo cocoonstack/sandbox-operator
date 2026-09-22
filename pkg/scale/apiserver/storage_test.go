@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,8 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -177,14 +179,36 @@ func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
 		storage rest.Storage
 		body    runtime.Object
 	}{
-		"pause":    {NewSandboxPauseREST(store), &sandboxv1beta1.SandboxPauseOptions{}},
-		"resume":   {NewSandboxResumeREST(store), &sandboxv1beta1.SandboxResumeOptions{}},
-		"fork":     {NewSandboxForkREST(store), &sandboxv1beta1.SandboxForkOptions{}},
-		"snapshot": {NewSandboxSnapshotREST(store), &sandboxv1beta1.SandboxSnapshotOptions{}},
+		"pause":    {NewSandboxPauseREST(store), &cocoonv1beta1.SandboxPauseOptions{}},
+		"resume":   {NewSandboxResumeREST(store), &cocoonv1beta1.SandboxResumeOptions{}},
+		"fork":     {NewSandboxForkREST(store), &cocoonv1beta1.SandboxForkOptions{}},
+		"snapshot": {NewSandboxSnapshotREST(store), &cocoonv1beta1.SandboxSnapshotOptions{}},
 	} {
 		_, err := tc.storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", tc.body, nil, &metav1.CreateOptions{})
 		require.Error(t, err, name)
 		assert.True(t, apierrors.IsNotFound(err), "%s: the node's 404 must stay a NotFound, got %v", name, err)
+	}
+}
+
+func TestLifecycleVerbsKeepTheNodesStatusCode(t *testing.T) {
+	sb := &sandboxv1beta1.Sandbox{
+		Namespace:   "ns",
+		Name:        "s1",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}
+	for name, tc := range map[string]struct {
+		nodeErr error
+		want    func(error) bool
+	}{
+		"bad request":  {apierrors.NewBadRequest("count exceeds max_fork_count"), apierrors.IsBadRequest},
+		"conflict":     {apierrors.NewConflict(sandboxv1beta1.Resource("sandboxes"), "sb_abc123", errors.New("already paused")), apierrors.IsConflict},
+		"node failure": {errors.New("provisioning failed"), apierrors.IsInternalError},
+	} {
+		store := &fakeStore{getSandbox: sb, verbErr: tc.nodeErr}
+		_, err := NewSandboxForkREST(store).(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", &cocoonv1beta1.SandboxForkOptions{}, nil, &metav1.CreateOptions{})
+		require.Error(t, err, name)
+		assert.True(t, tc.want(err), "%s: got %v", name, err)
 	}
 }
 
@@ -231,6 +255,10 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 func (f *fakeStore) Pause(context.Context, string, string) error { return f.verbErr }
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return f.verbErr }
+
+func (f *fakeStore) Renew(context.Context, string, string, int) (time.Time, error) {
+	return time.Time{}, f.verbErr
+}
 
 func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
 	return nil, f.verbErr

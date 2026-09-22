@@ -1,6 +1,6 @@
 apiVersion: v2
 name: sandbox-operator
-description: Kubernetes operator for agent-sandbox APIs on Cocoon runtimes
+description: Aggregated apiserver and envd data-plane proxy for agent-sandbox on Cocoon runtimes
 type: application
 version: 0.1.0
 keywords:

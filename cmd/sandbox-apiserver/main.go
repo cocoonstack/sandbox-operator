@@ -2,7 +2,7 @@
 // sandboxes.agents.x-k8s.io. It serves the resource by scatter-gathering
 // per-node NodeInventory objects (the metrics.k8s.io pattern) and stores NO
 // per-sandbox object in etcd. It is registered with the kube-apiserver via the
-// APIService in config/apiservice/, exactly as metrics-server is.
+// APIService the helm chart installs, exactly as metrics-server is.
 package main
 
 import (
@@ -23,12 +23,13 @@ import (
 	apiservercompatibility "k8s.io/apiserver/pkg/util/compatibility"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
@@ -79,6 +80,8 @@ type options struct {
 	E2BAddr           string
 	E2BNamespace      string
 	E2BDomain         string
+	E2BEnvdVersion    string
+	E2BTimeoutSeconds int
 	E2BAPIKeyFile     string
 	E2BAllowAnonymous bool
 }
@@ -120,7 +123,11 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.E2BNamespace, "e2b-namespace", o.E2BNamespace,
 		"Namespace e2b claims are made in; e2b has no namespace concept, so every compat claim lands here.")
 	fs.StringVar(&o.E2BDomain, "e2b-domain", o.E2BDomain,
-		"Base domain reported to the SDK, from which it derives the in-sandbox envd host. Empty leaves the SDK's own E2B_DOMAIN/E2B_SANDBOX_URL in charge.")
+		"Base domain the SDK derives the in-sandbox envd host from, as {port}-{sandboxID}.{domain}. Required with --enable-e2b-api: without it a created sandbox has no reachable data plane.")
+	fs.StringVar(&o.E2BEnvdVersion, "e2b-envd-version", o.E2BEnvdVersion,
+		"envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one.")
+	fs.IntVar(&o.E2BTimeoutSeconds, "e2b-default-timeout", o.E2BTimeoutSeconds,
+		"Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for.")
 	fs.StringVar(&o.E2BAPIKeyFile, "e2b-api-key-file", o.E2BAPIKeyFile,
 		"Path to a file (Secret mount) of accepted e2b API keys, one per line, presented by the SDK as X-API-KEY.")
 	fs.BoolVar(&o.E2BAllowAnonymous, "e2b-allow-anonymous", o.E2BAllowAnonymous,
@@ -222,8 +229,9 @@ func run() error {
 			return err
 		}
 	}
+	stopE2B := func() {}
 	if o.E2BAPI {
-		if err = startE2BServer(ctx, o, store, invSource); err != nil {
+		if stopE2B, err = startE2BServer(ctx, o, store, invSource); err != nil {
 			return err
 		}
 	}
@@ -236,10 +244,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build generic apiserver: %w", err)
 	}
-	if err := sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
+	if err = sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
 		return err
 	}
-	return server.PrepareRun().RunWithContext(ctx)
+	err = server.PrepareRun().RunWithContext(ctx)
+	stopE2B()
+	return err
 }
 
 // startInventoryCache builds, starts, and syncs a controller-runtime cache
@@ -292,6 +302,9 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register extensions scheme: %w", err)
 	}
+	if err := cocoonv1beta1.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("register node inventory scheme: %w", err)
+	}
 	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
 		Scheme:                  scheme,
 		Metrics:                 metricsserver.Options{BindAddress: "0"},
@@ -320,21 +333,23 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 
 // startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
 // the same way, and listed by the same scatter-gather read.
-func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) error {
+func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) (func(), error) {
 	keys, err := o.e2bAPIKeys()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	srv, err := e2bcompat.NewServer(store, e2bcompat.Options{
-		Namespace:      o.E2BNamespace,
-		Domain:         o.E2BDomain,
-		Inventory:      inv,
-		APIKeys:        keys,
-		AllowAnonymous: o.E2BAllowAnonymous,
-		Log:            ctrl.Log.WithName("e2b"),
+		Namespace:             o.E2BNamespace,
+		Domain:                o.E2BDomain,
+		EnvdVersion:           o.E2BEnvdVersion,
+		DefaultTimeoutSeconds: o.E2BTimeoutSeconds,
+		Inventory:             inv,
+		APIKeys:               keys,
+		AllowAnonymous:        o.E2BAllowAnonymous,
+		Log:                   ctrl.Log.WithName("e2b"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	httpSrv := &http.Server{
 		Addr:              o.E2BAddr,
@@ -343,7 +358,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 	}
 	ln, err := net.Listen("tcp", o.E2BAddr)
 	if err != nil {
-		return fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
+		return nil, fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
 	}
 	klog.InfoS("serving e2b-compatible API", "address", o.E2BAddr, "namespace", o.E2BNamespace,
 		"authenticated", len(keys) > 0)
@@ -352,15 +367,18 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 			klog.ErrorS(err, "e2b-compatible API server exited")
 		}
 	}()
+	e2bCtx, stop := context.WithCancel(ctx)
+	drained := make(chan struct{})
 	go func() {
-		<-ctx.Done()
+		defer close(drained)
+		<-e2bCtx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e2bShutdownTimeout)
 		defer cancel()
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 			klog.ErrorS(err, "e2b-compatible API server shutdown")
 		}
 	}()
-	return nil
+	return func() { stop(); <-drained }, nil
 }
 
 // currentNamespace returns the pod's namespace (for the leader-election lease),

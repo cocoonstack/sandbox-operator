@@ -12,8 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 var (
@@ -21,6 +22,7 @@ var (
 	Scheme = func() *runtime.Scheme {
 		s := runtime.NewScheme()
 		utilruntime.Must(sandboxv1beta1.AddToScheme(s))
+		utilruntime.Must(cocoonv1beta1.AddLifecycleToScheme(s))
 		// Register the served types under the internal version too, as an identity
 		// version: sandboxes is a virtual, read-only resource with no distinct
 		// storage schema, so the external v1beta1 type is also its own internal
@@ -31,12 +33,12 @@ var (
 		// The action subresources' request/response bodies round-trip through the
 		// same pipeline, so they need the identity internal version too.
 		s.AddKnownTypes(internalGV,
-			&sandboxv1beta1.SandboxPauseOptions{},
-			&sandboxv1beta1.SandboxResumeOptions{},
-			&sandboxv1beta1.SandboxForkOptions{},
-			&sandboxv1beta1.SandboxForkResult{},
-			&sandboxv1beta1.SandboxSnapshotOptions{},
-			&sandboxv1beta1.SandboxSnapshotResult{},
+			&cocoonv1beta1.SandboxPauseOptions{},
+			&cocoonv1beta1.SandboxResumeOptions{},
+			&cocoonv1beta1.SandboxForkOptions{},
+			&cocoonv1beta1.SandboxForkResult{},
+			&cocoonv1beta1.SandboxSnapshotOptions{},
+			&cocoonv1beta1.SandboxSnapshotResult{},
 		)
 		metav1.AddToGroupVersion(s, sandboxv1beta1.GroupVersion)
 		// The common request/response meta types (ListOptions, GetOptions, Status,

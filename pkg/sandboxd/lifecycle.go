@@ -30,6 +30,17 @@ type ForkResult struct {
 	Children []ClaimResult `json:"children"`
 }
 
+// RenewSpec is the POST /v1/sandboxes/{id}/renew body. TTLSeconds 0 asks for
+// the node default.
+type RenewSpec struct {
+	TTLSeconds int `json:"ttl_seconds,omitempty"`
+}
+
+// RenewResult carries the lease deadline the node granted.
+type RenewResult struct {
+	Deadline time.Time `json:"deadline"`
+}
+
 // CheckpointSpec is the POST /v1/sandboxes/{id}/checkpoint body.
 type CheckpointSpec struct {
 	Token string `json:"token,omitempty"`
@@ -90,6 +101,18 @@ func (c *Client) Hibernate(ctx context.Context, id string) error {
 // on a sandbox that is already awake.
 func (c *Client) Wake(ctx context.Context, id string) error {
 	return c.sandboxVerb(ctx, id, "wake")
+}
+
+// Renew performs POST /v1/sandboxes/{id}/renew, resetting the lease to
+// TTLSeconds from now. The node's grant is authoritative: 0 takes its default
+// and an oversized request is clamped, so the reply carries what was granted.
+func (c *Client) Renew(ctx context.Context, id string, spec RenewSpec) (time.Time, error) {
+	if id == "" {
+		return time.Time{}, fmt.Errorf("sandboxd: renew requires a sandbox id")
+	}
+	var out RenewResult
+	err := c.postJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/renew", spec, &out)
+	return out.Deadline, err
 }
 
 // Fork performs POST /v1/sandboxes/{id}/fork, branching the sandbox into count

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "sandbox-operator.apiserver.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: https
+    port: 443
+    targetPort: https
+    protocol: TCP
+  {{- if .Values.apiserver.e2b.enabled }}
+  - name: e2b
+    port: 80
+    targetPort: e2b
+    protocol: TCP
+  {{- end }}

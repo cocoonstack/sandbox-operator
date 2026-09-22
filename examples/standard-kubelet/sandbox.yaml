@@ -1,12 +1,11 @@
+# A Sandbox on an ordinary kubelet node. Isolation comes from the cluster's
+# RuntimeClass (Kata Containers, gVisor); no cocoon component is involved.
 apiVersion: agents.x-k8s.io/v1beta1
 kind: Sandbox
 metadata:
   name: standard-kubelet-example
 spec:
   podTemplate:
-    metadata:
-      annotations:
-        sandbox.cocoonstack.io/runtime: standard
     spec:
       runtimeClassName: kata
       containers:

@@ -1,0 +1,15 @@
+# minAvailable rather than maxUnavailable: it holds even when the Deployment is
+# scaled to 1, where maxUnavailable would still permit evicting the only replica
+# and with it cluster-wide discovery.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "sandbox-operator.apiserver.selectorLabels" . | nindent 6 }}

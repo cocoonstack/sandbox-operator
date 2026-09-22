@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
@@ -21,6 +22,18 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 		return nodeVerbError(err, "pause", id, node)
 	}
 	return nil
+}
+
+func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int) (time.Time, error) {
+	cl, err := s.nodeClient(ctx, node, "renew", id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	deadline, err := cl.Renew(ctx, id, sandboxd.RenewSpec{TTLSeconds: ttlSeconds})
+	if err != nil {
+		return time.Time{}, nodeVerbError(err, "renew", id, node)
+	}
+	return deadline, nil
 }
 
 func (s *scatterGatherStore) Resume(ctx context.Context, node, id string) error {
@@ -137,8 +150,16 @@ func (s *scatterGatherStore) nodeClient(ctx context.Context, node, verb, id stri
 }
 
 func nodeVerbError(err error, verb, id, node string) error {
-	if he, ok := errors.AsType[*sandboxd.HTTPError](err); ok && he.StatusCode == http.StatusNotFound {
+	he, ok := errors.AsType[*sandboxd.HTTPError](err)
+	switch {
+	case ok && he.StatusCode == http.StatusNotFound:
 		return k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), id)
+	case ok && he.StatusCode >= http.StatusBadRequest && he.StatusCode < http.StatusInternalServerError:
+		se := k8serrors.NewGenericServerResponse(he.StatusCode, verb, sandboxv1beta1.Resource("sandboxes"), id, he.Message, 0, false)
+		if he.Message != "" {
+			se.ErrStatus.Message = fmt.Sprintf("sandboxd %s of %q on node %q: %s", verb, id, node, he.Message)
+		}
+		return se
 	}
 	return fmt.Errorf("scale: sandboxd %s of %q on node %q: %w", verb, id, node, err)
 }

@@ -3,7 +3,9 @@ package apiserver
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -11,15 +13,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// The lifecycle subresources take the pods/eviction shape, not pods/status:
-// each is a synchronous node-local transaction with nothing to GET, and keeping
-// them as subresources leaves the standard Sandbox schema untouched.
-
+// The subresources take the pods/eviction shape: a synchronous verb with nothing to GET.
 var (
 	_ rest.Storage                  = &lifecycleREST{}
 	_ rest.Scoper                   = &lifecycleREST{}
@@ -81,12 +81,12 @@ func (r *lifecycleREST) Create(ctx context.Context, name string, obj runtime.Obj
 func NewSandboxPauseREST(store scale.SandboxStore) rest.Storage {
 	return &lifecycleREST{
 		store:      store,
-		newOptions: func() runtime.Object { return &sandboxv1beta1.SandboxPauseOptions{} },
+		newOptions: func() runtime.Object { return &cocoonv1beta1.SandboxPauseOptions{} },
 		verb: func(ctx context.Context, st scale.SandboxStore, sb *sandboxv1beta1.Sandbox, _ runtime.Object) (runtime.Object, error) {
 			if err := st.Pause(ctx, sb.Status.NodeName, claimID(sb)); err != nil {
 				return nil, verbError("pause", sb, err)
 			}
-			return &sandboxv1beta1.SandboxPauseOptions{}, nil
+			return &cocoonv1beta1.SandboxPauseOptions{}, nil
 		},
 	}
 }
@@ -95,12 +95,12 @@ func NewSandboxPauseREST(store scale.SandboxStore) rest.Storage {
 func NewSandboxResumeREST(store scale.SandboxStore) rest.Storage {
 	return &lifecycleREST{
 		store:      store,
-		newOptions: func() runtime.Object { return &sandboxv1beta1.SandboxResumeOptions{} },
+		newOptions: func() runtime.Object { return &cocoonv1beta1.SandboxResumeOptions{} },
 		verb: func(ctx context.Context, st scale.SandboxStore, sb *sandboxv1beta1.Sandbox, _ runtime.Object) (runtime.Object, error) {
 			if err := st.Resume(ctx, sb.Status.NodeName, claimID(sb)); err != nil {
 				return nil, verbError("resume", sb, err)
 			}
-			return &sandboxv1beta1.SandboxResumeOptions{}, nil
+			return &cocoonv1beta1.SandboxResumeOptions{}, nil
 		},
 	}
 }
@@ -109,9 +109,9 @@ func NewSandboxResumeREST(store scale.SandboxStore) rest.Storage {
 func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 	return &lifecycleREST{
 		store:      store,
-		newOptions: func() runtime.Object { return &sandboxv1beta1.SandboxForkOptions{} },
+		newOptions: func() runtime.Object { return &cocoonv1beta1.SandboxForkOptions{} },
 		verb: func(ctx context.Context, st scale.SandboxStore, sb *sandboxv1beta1.Sandbox, obj runtime.Object) (runtime.Object, error) {
-			opts, ok := obj.(*sandboxv1beta1.SandboxForkOptions)
+			opts, ok := obj.(*cocoonv1beta1.SandboxForkOptions)
 			if !ok {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("expected SandboxForkOptions, got %T", obj))
 			}
@@ -124,9 +124,9 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 			if err != nil {
 				return nil, verbError("fork", sb, err)
 			}
-			out := &sandboxv1beta1.SandboxForkResult{Children: make([]sandboxv1beta1.ForkedSandbox, 0, len(children))}
+			out := &cocoonv1beta1.SandboxForkResult{Children: make([]cocoonv1beta1.ForkedSandbox, 0, len(children))}
 			for _, c := range children {
-				out.Children = append(out.Children, sandboxv1beta1.ForkedSandbox{
+				out.Children = append(out.Children, cocoonv1beta1.ForkedSandbox{
 					SandboxID: c.SandboxName,
 					NodeName:  c.Node,
 					Address:   c.Address,
@@ -141,9 +141,9 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 	return &lifecycleREST{
 		store:      store,
-		newOptions: func() runtime.Object { return &sandboxv1beta1.SandboxSnapshotOptions{} },
+		newOptions: func() runtime.Object { return &cocoonv1beta1.SandboxSnapshotOptions{} },
 		verb: func(ctx context.Context, st scale.SandboxStore, sb *sandboxv1beta1.Sandbox, obj runtime.Object) (runtime.Object, error) {
-			opts, ok := obj.(*sandboxv1beta1.SandboxSnapshotOptions)
+			opts, ok := obj.(*cocoonv1beta1.SandboxSnapshotOptions)
 			if !ok {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("expected SandboxSnapshotOptions, got %T", obj))
 			}
@@ -151,7 +151,7 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 			if err != nil {
 				return nil, verbError("snapshot", sb, err)
 			}
-			return &sandboxv1beta1.SandboxSnapshotResult{
+			return &cocoonv1beta1.SandboxSnapshotResult{
 				SnapshotID:        snap.ID,
 				Name:              snap.Name,
 				NodeName:          snap.Node,
@@ -164,8 +164,8 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 func claimID(sb *sandboxv1beta1.Sandbox) string { return sb.Annotations[ClaimIDAnnotation] }
 
 func verbError(verb string, sb *sandboxv1beta1.Sandbox, err error) error {
-	if apierrors.IsNotFound(err) {
-		return err
+	if se, ok := errors.AsType[*apierrors.StatusError](err); ok && se.ErrStatus.Code < http.StatusInternalServerError {
+		return se
 	}
 	return apierrors.NewInternalError(fmt.Errorf("%s sandbox %s/%s: %w", verb, sb.Namespace, sb.Name, err))
 }

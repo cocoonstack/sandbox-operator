@@ -46,10 +46,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -107,14 +107,15 @@ func run(ctx context.Context, o options) error {
 		}
 		fmt.Printf("discovered template from the fleet: %s\n", o.template)
 	}
-	if err := runKubernetes(ctx, c, rc, o); err != nil {
+	checkpoint, err := runKubernetes(ctx, c, rc, o)
+	if err != nil {
 		return fmt.Errorf("kubernetes surface: %w", err)
 	}
 	if o.e2bURL == "" {
-		fmt.Println("\n-e2b-url not set; skipping the e2b surface.")
+		fmt.Printf("\n-e2b-url not set; skipping the e2b surface. Checkpoint %s stays on its node: only the e2b surface deletes checkpoints (DELETE /templates/{id}).\n", checkpoint)
 		return nil
 	}
-	if err := runE2B(ctx, o); err != nil {
+	if err := runE2B(ctx, o, checkpoint); err != nil {
 		return fmt.Errorf("e2b surface: %w", err)
 	}
 	return nil
@@ -132,7 +133,7 @@ func newScheme() (*runtime.Scheme, error) {
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := extv1beta1.AddToScheme(scheme); err != nil {
+	if err := cocoonv1beta1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	return scheme, nil
@@ -153,7 +154,7 @@ func newClient(kubeconfig string, scheme *runtime.Scheme) (client.Client, error)
 // template that actually has capacity, so the walk-through does not depend on
 // a hard-coded image.
 func discoverTemplate(ctx context.Context, c client.Client) (string, error) {
-	var inventories extv1beta1.NodeInventoryList
+	var inventories cocoonv1beta1.NodeInventoryList
 	if err := c.List(ctx, &inventories); err != nil {
 		return "", fmt.Errorf("list NodeInventory: %w", err)
 	}
@@ -167,7 +168,7 @@ func discoverTemplate(ctx context.Context, c client.Client) (string, error) {
 	return "", errors.New("no node advertises a warm pool; pass -template explicitly")
 }
 
-func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o options) error {
+func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o options) (string, error) {
 	section("Kubernetes API")
 
 	name := fmt.Sprintf("example-%d", time.Now().UnixNano()%1e9)
@@ -177,58 +178,75 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "agent", Image: o.template}}
 
 	if err := c.Create(ctx, sb); err != nil {
-		return fmt.Errorf("create Sandbox: %w", err)
+		return "", fmt.Errorf("create Sandbox: %w", err)
 	}
 	stepf("create", "Sandbox %s/%s", o.namespace, name)
 
 	live, err := waitVisible(ctx, c, o.namespace, name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	stepf("get", "node=%s claimID=%s", live.Status.NodeName, live.Annotations[claimIDAnnotation])
 
 	var list sandboxv1beta1.SandboxList
 	if err := c.List(ctx, &list, client.InNamespace(o.namespace)); err != nil {
-		return fmt.Errorf("list Sandboxes: %w", err)
+		return "", fmt.Errorf("list Sandboxes: %w", err)
 	}
 	stepf("list", "%d sandbox(es) in %s", len(list.Items), o.namespace)
 
-	snap := &sandboxv1beta1.SandboxSnapshotResult{}
+	snap := &cocoonv1beta1.SandboxSnapshotResult{}
 	if err := post(ctx, rc, o.namespace, name, "snapshot",
-		&sandboxv1beta1.SandboxSnapshotOptions{Name: "example-checkpoint"}, snap); err != nil {
-		return fmt.Errorf("snapshot: %w", err)
+		&cocoonv1beta1.SandboxSnapshotOptions{Name: "example-checkpoint"}, snap); err != nil {
+		return snap.SnapshotID, fmt.Errorf("snapshot: %w", err)
 	}
 	stepf("snapshot", "snapshotID=%s on node=%s", snap.SnapshotID, snap.NodeName)
 
-	forked := &sandboxv1beta1.SandboxForkResult{}
+	forked := &cocoonv1beta1.SandboxForkResult{}
 	if err := post(ctx, rc, o.namespace, name, "fork",
-		&sandboxv1beta1.SandboxForkOptions{Count: 2, TTLSeconds: 600}, forked); err != nil {
-		return fmt.Errorf("fork: %w", err)
+		&cocoonv1beta1.SandboxForkOptions{Count: 2, TTLSeconds: 600}, forked); err != nil {
+		return snap.SnapshotID, fmt.Errorf("fork: %w", err)
 	}
 	for i, child := range forked.Children {
 		stepf("fork", "child[%d] sandboxID=%s node=%s", i, child.SandboxID, child.NodeName)
 	}
 
 	start := time.Now()
-	if err := post(ctx, rc, o.namespace, name, "pause", &sandboxv1beta1.SandboxPauseOptions{}, nil); err != nil {
-		return fmt.Errorf("pause: %w", err)
+	if err := post(ctx, rc, o.namespace, name, "pause", &cocoonv1beta1.SandboxPauseOptions{}, nil); err != nil {
+		return snap.SnapshotID, fmt.Errorf("pause: %w", err)
 	}
 	stepf("pause", "took %s (proportional to guest memory)", time.Since(start).Round(time.Millisecond))
 
 	start = time.Now()
-	if err := post(ctx, rc, o.namespace, name, "resume", &sandboxv1beta1.SandboxResumeOptions{}, nil); err != nil {
-		return fmt.Errorf("resume: %w", err)
+	if err := post(ctx, rc, o.namespace, name, "resume", &cocoonv1beta1.SandboxResumeOptions{}, nil); err != nil {
+		return snap.SnapshotID, fmt.Errorf("resume: %w", err)
 	}
 	stepf("resume", "took %s (mmap restore fast path)", time.Since(start).Round(time.Millisecond))
 
 	if o.keep {
 		stepf("delete", "skipped (-keep)")
-		return nil
+		return snap.SnapshotID, nil
 	}
 	if err := c.Delete(ctx, live); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete Sandbox: %w", err)
+		return snap.SnapshotID, fmt.Errorf("delete Sandbox: %w", err)
 	}
 	stepf("delete", "released %s/%s", o.namespace, name)
+	return snap.SnapshotID, nil
+}
+
+func deleteCheckpoints(ctx context.Context, e *e2bClient, ids ...string) error {
+	for _, ck := range ids {
+		if ck == "" {
+			continue
+		}
+		code, err := e.status(ctx, http.MethodDelete, "/templates/"+ck, nil)
+		if err != nil {
+			return err
+		}
+		if code != http.StatusNoContent {
+			return fmt.Errorf("delete checkpoint %s returned %d, want 204", ck, code)
+		}
+		stepf("snapshot", "deleted checkpoint %s", ck)
+	}
 	return nil
 }
 
@@ -290,7 +308,7 @@ func newRESTClient(kubeconfig string, scheme *runtime.Scheme) (rest.Interface, e
 	return rest.RESTClientFor(cfg)
 }
 
-func runE2B(ctx context.Context, o options) error {
+func runE2B(ctx context.Context, o options, k8sCheckpoint string) error {
 	section("e2b-compatible REST API")
 	e := &e2bClient{base: strings.TrimRight(o.e2bURL, "/"), key: o.e2bKey}
 
@@ -408,6 +426,9 @@ func runE2B(ctx context.Context, o options) error {
 	if o.keep {
 		stepf("delete", "skipped (-keep)")
 		return nil
+	}
+	if err := deleteCheckpoints(ctx, e, fmt.Sprint(snap["snapshotID"]), k8sCheckpoint); err != nil {
+		return err
 	}
 	if code, err := e.status(ctx, http.MethodDelete, "/sandboxes/"+id, nil); err != nil {
 		return err

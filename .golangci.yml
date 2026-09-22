@@ -75,10 +75,6 @@ linters:
           - govet
         text: "shadow"
 
-      # kubebuilder API packages register their types through SchemeBuilder in init.
-      - path: (api|extensions/api)/.*\.go
-        linters:
-          - gochecknoinits
       # Every int32 conversion here narrows a Kubernetes replica/pool count, a slice
       # length, or an HTTP status code — none can reach 2^31.
       - linters: [gosec]

@@ -1,0 +1,39 @@
+# A single Sandbox materialized as a Cocoon microVM on a vk-cocoon virtual node.
+#
+# Every scheduling field is part of the pod-template contract: nothing mutates
+# this Pod on its way to the node. See docs/runtime-backends.md.
+#
+# There is no SandboxTemplate/SandboxWarmPool variant of this example on
+# purpose. vk-cocoon requires a per-VM `vm.cocoonstack.io/name`, and a static
+# pod template gives every Sandbox in a pool the same one — which makes the
+# second Pod adopt the first Pod's VM. Warm pools on the sandboxd path have no
+# such per-sandbox field; see examples/sandboxd/.
+#
+# On a cluster running cocoon-webhook, a Pod carrying the
+# virtual-kubelet.io/provider toleration or the vm.cocoonstack.io/name
+# annotation is denied unless its creator is listed in that webhook's
+# POD_CREATORS and the Pod is owned by a CocoonSet.
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: cocoon-agent-example
+spec:
+  podTemplate:
+    metadata:
+      annotations:
+        vm.cocoonstack.io/name: sandbox-default-cocoon-agent-example
+        cocoonset.cocoonstack.io/managed: "true"
+        cocoonset.cocoonstack.io/mode: run
+        cocoonset.cocoonstack.io/image: ubuntu-dev-base
+        cocoonset.cocoonstack.io/os: linux
+    spec:
+      nodeSelector:
+        cocoonstack.io/pool: default
+      tolerations:
+        - key: virtual-kubelet.io/provider
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: ubuntu-dev-base
+  shutdownPolicy: Delete

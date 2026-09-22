@@ -1,0 +1,112 @@
+{{- $e2b := .Values.apiserver.e2b -}}
+{{- $e2bKeySecret := "" -}}
+{{- if $e2b.enabled -}}
+{{- $e2bKeySecret = required "apiserver.e2b.apiKeySecret.name is required when apiserver.e2b.enabled is true" $e2b.apiKeySecret.name -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.apiserver.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sandbox-operator.apiserver.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox-operator.apiserver.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: sandbox-apiserver
+      # An unavailable APIService fails discovery for the whole cluster, not just
+      # this group, so both replicas on one node turn a single drain into a
+      # cluster-wide outage. Spreading is required, not preferred.
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            {{- include "sandbox-operator.apiserver.selectorLabels" . | nindent 12 }}
+      containers:
+      - name: sandbox-apiserver
+        image: {{ include "sandbox-operator.image" .Values.apiserver.image }}
+        imagePullPolicy: {{ .Values.apiserver.image.pullPolicy }}
+        args:
+        - --secure-port={{ .Values.apiserver.securePort }}
+        - --tls-cert-file=/etc/sandbox-apiserver/serving-certs/tls.crt
+        - --tls-private-key-file=/etc/sandbox-apiserver/serving-certs/tls.key
+        - --enable-warm-pool-driver={{ .Values.apiserver.warmPoolDriver }}
+        {{- with .Values.apiserver.sandboxdToken.secretName }}
+        - --sandboxd-token-file=/etc/sandbox-apiserver/sandboxd-token/{{ $.Values.apiserver.sandboxdToken.key }}
+        {{- end }}
+        {{- if $e2b.enabled }}
+        - --enable-e2b-api
+        - --e2b-bind-address=:{{ $e2b.port }}
+        - --e2b-namespace={{ $e2b.namespace }}
+        - --e2b-domain={{ required "apiserver.e2b.domain is required when apiserver.e2b.enabled is true" $e2b.domain }}
+        - --e2b-api-key-file=/etc/sandbox-apiserver/e2b-api-keys/{{ $e2b.apiKeySecret.key }}
+        {{- with $e2b.envdVersion }}
+        - --e2b-envd-version={{ . }}
+        {{- end }}
+        {{- with $e2b.defaultTimeoutSeconds }}
+        - --e2b-default-timeout={{ . }}
+        {{- end }}
+        {{- end }}
+        ports:
+        - name: https
+          containerPort: {{ .Values.apiserver.securePort }}
+          protocol: TCP
+        {{- if $e2b.enabled }}
+        - name: e2b
+          containerPort: {{ $e2b.port }}
+          protocol: TCP
+        {{- end }}
+        # readyz flips on shutdown so the Service drains before termination.
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: https
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.apiserver.resources | nindent 10 }}
+        volumeMounts:
+        - name: serving-certs
+          mountPath: /etc/sandbox-apiserver/serving-certs
+          readOnly: true
+        {{- if .Values.apiserver.sandboxdToken.secretName }}
+        - name: sandboxd-token
+          mountPath: /etc/sandbox-apiserver/sandboxd-token
+          readOnly: true
+        {{- end }}
+        {{- if $e2b.enabled }}
+        - name: e2b-api-keys
+          mountPath: /etc/sandbox-apiserver/e2b-api-keys
+          readOnly: true
+        {{- end }}
+      volumes:
+      - name: serving-certs
+        secret:
+          secretName: {{ .Values.certManager.servingCertSecret }}
+      {{- with .Values.apiserver.sandboxdToken.secretName }}
+      - name: sandboxd-token
+        secret:
+          secretName: {{ . }}
+      {{- end }}
+      {{- if $e2b.enabled }}
+      - name: e2b-api-keys
+        secret:
+          secretName: {{ $e2bKeySecret }}
+      {{- end }}

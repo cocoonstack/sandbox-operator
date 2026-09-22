@@ -1,7 +1,6 @@
 package e2bcompat
 
-// Field names and JSON casing below are fixed by the e2b OpenAPI contract the
-// SDKs unmarshal directly, so they are reproduced rather than restyled.
+// Field names and JSON casing are fixed by the e2b OpenAPI contract the SDKs unmarshal.
 
 // Sandbox states reported to the SDK (spec: SandboxState).
 const (
@@ -15,12 +14,14 @@ type NewSandbox struct {
 	TemplateID string `json:"templateID"`
 	// Timeout is the sandbox time-to-live in seconds (SDK default 15).
 	Timeout *int32 `json:"timeout,omitempty"`
-	// Metadata and EnvVars are accepted for SDK compatibility but discarded.
+	// Metadata is accepted for SDK compatibility but discarded: the node-local
+	// claim path takes none of it and nothing here stores a per-sandbox copy.
 	Metadata map[string]string `json:"metadata,omitempty"`
-	EnvVars  map[string]string `json:"envVars,omitempty"`
-	// AutoPause and Secure are accepted for SDK compatibility but discarded.
-	AutoPause *bool `json:"autoPause,omitempty"`
-	Secure    *bool `json:"secure,omitempty"`
+	// EnvVars, AutoPause and Secure name guarantees this backend cannot give,
+	// so a request that asks for one is refused rather than quietly dropped.
+	EnvVars   map[string]string `json:"envVars,omitempty"`
+	AutoPause *bool             `json:"autoPause,omitempty"`
+	Secure    *bool             `json:"secure,omitempty"`
 	// AllowInternetAccess selects the warm pool's network lane: true picks the
 	// egress-capable pool, false/nil the isolated one.
 	AllowInternetAccess *bool `json:"allow_internet_access,omitempty"`
@@ -64,6 +65,12 @@ type SandboxDetail struct {
 // (spec: SandboxTimeoutRequest) — the SDK's setTimeout call.
 type SandboxTimeoutRequest struct {
 	Timeout int32 `json:"timeout"`
+}
+
+// SandboxRefreshRequest is the POST /sandboxes/{sandboxID}/refreshes body.
+// Duration is optional; an absent or unrecognized one takes the server default.
+type SandboxRefreshRequest struct {
+	Duration *int32 `json:"duration,omitempty"`
 }
 
 // SandboxPauseRequest is the POST /sandboxes/{id}/pause body. memory=false

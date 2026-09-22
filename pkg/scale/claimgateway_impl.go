@@ -14,9 +14,9 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
@@ -57,6 +57,7 @@ type SandboxdClient interface {
 	// client already carries, so the control plane needs no per-sandbox secret.
 	Hibernate(ctx context.Context, id string) error
 	Wake(ctx context.Context, id string) error
+	Renew(ctx context.Context, id string, spec sandboxd.RenewSpec) (time.Time, error)
 	Fork(ctx context.Context, id string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error)
 	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)

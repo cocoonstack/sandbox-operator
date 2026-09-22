@@ -26,10 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
@@ -77,13 +77,12 @@ const (
 )
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
-// publisher server-side-applies. It lives in the extensions CRD group next to
-// SandboxClaim/Template/WarmPool — NOT in the aggregated agents.x-k8s.io group:
-// the APIService hands that entire group-version to the aggregated server,
-// which serves only `sandboxes`, so a NodeInventory registered there would 404
-// once the APIService cuts over.
+// publisher server-side-applies. It lives in this operator's own CRD group —
+// NOT in the aggregated agents.x-k8s.io group: the APIService hands that entire
+// group-version to the aggregated server, which serves only `sandboxes`, so a
+// NodeInventory registered there would 404 once the APIService cuts over.
 var (
-	NodeInventoryGVK = extv1beta1.GroupVersion.WithKind("NodeInventory")
+	NodeInventoryGVK = cocoonv1beta1.GroupVersion.WithKind("NodeInventory")
 
 	// ErrNoWarmCapacity lets the aggregated apiserver map an exhausted pool to a retryable 503 instead of writing an object.
 	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
@@ -334,14 +333,14 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			s.index.remember(nameKey(namespace, name), best.node)
 			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
-		if !errors.Is(claimErr, sandboxd.ErrNodeAtCapacity) {
+		if !claimUndelivered(claimErr) {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, best.node, claimErr)
 		}
-		s.log.V(1).Info("node warm-raced to zero during claim; trying another node",
-			"node", best.node, "remaining", len(candidates)-1)
+		s.log.V(1).Info("node delivered nothing for the claim; trying another node",
+			"node", best.node, "err", claimErr.Error(), "remaining", len(candidates)-1)
 		candidates = slices.Delete(candidates, idx, idx+1)
 	}
-	return Assignment{}, fmt.Errorf("scale: claim %s/%s: every warm node raced to zero: %w", namespace, name, ErrNoWarmCapacity)
+	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
 }
 
 // Release returns the claimed microVM id to node's pool via that node's sandboxd,
@@ -956,3 +955,16 @@ func splitNamespacedName(s string) (namespace, name string) {
 }
 
 func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }
+
+// A timeout after the request went out may have delivered a microVM, so it is never retried elsewhere.
+func claimUndelivered(err error) bool {
+	if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	var httpErr *sandboxd.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode >= http.StatusInternalServerError
+}

@@ -1,0 +1,77 @@
+{{- if .Values.apiserver.e2b.enabled }}
+{{- $tlsSecret := .Values.envdProxy.tlsSecretName -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-envd-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.envdProxy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.envdProxy.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sandbox-operator.envdProxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox-operator.envdProxy.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: sandbox-envd-proxy
+      # Every sandbox's files, commands and pty traffic crosses these pods, so
+      # both replicas on one node turn a single drain into a fleet-wide
+      # data-plane outage.
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            {{- include "sandbox-operator.envdProxy.selectorLabels" . | nindent 12 }}
+      containers:
+      - name: sandbox-envd-proxy
+        image: {{ include "sandbox-operator.image" .Values.envdProxy.image }}
+        imagePullPolicy: {{ .Values.envdProxy.image.pullPolicy }}
+        args:
+        - --bind-address=:{{ .Values.envdProxy.port }}
+        - --namespace={{ include "sandbox-operator.envdProxy.namespace" . }}
+        {{- with include "sandbox-operator.envdProxy.domain" . }}
+        - --domain={{ . }}
+        {{- end }}
+        {{- if $tlsSecret }}
+        - --tls-cert-file=/etc/sandbox-envd-proxy/serving-certs/tls.crt
+        - --tls-private-key-file=/etc/sandbox-envd-proxy/serving-certs/tls.key
+        {{- end }}
+        ports:
+        - name: proxy
+          containerPort: {{ .Values.envdProxy.port }}
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: proxy
+            scheme: {{ if $tlsSecret }}HTTPS{{ else }}HTTP{{ end }}
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: proxy
+            scheme: {{ if $tlsSecret }}HTTPS{{ else }}HTTP{{ end }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.envdProxy.resources | nindent 10 }}
+{{- if $tlsSecret }}
+        volumeMounts:
+        - name: serving-certs
+          mountPath: /etc/sandbox-envd-proxy/serving-certs
+          readOnly: true
+      volumes:
+      # A wildcard certificate for *.{domain}: the SDK addresses every sandbox
+      # by its own derived host.
+      - name: serving-certs
+        secret:
+          secretName: {{ $tlsSecret }}
+{{- end }}
+{{- end }}
