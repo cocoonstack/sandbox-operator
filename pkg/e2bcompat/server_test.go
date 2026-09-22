@@ -247,6 +247,14 @@ func TestGetReportsDetail(t *testing.T) {
 	}
 }
 
+func TestGetReportsTheClaimTimeAsStartedAt(t *testing.T) {
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
+	sb.CreationTimestamp = metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
+	if got := getDetail(t, sb); got.StartedAt != "2030-01-02T03:04:05Z" {
+		t.Errorf("startedAt = %q, want the claim time the node published", got.StartedAt)
+	}
+}
+
 func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
 	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
 	sb.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"

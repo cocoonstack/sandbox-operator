@@ -52,6 +52,10 @@ type InventoryEntry struct {
 	// deadline is the node-granted lease expiry, if published.
 	// +optional
 	Deadline *metav1.Time `json:"deadline,omitempty"`
+	// claimedAt is when the node first granted the claim, if published; a renew
+	// or a wake moves deadline, never this.
+	// +optional
+	ClaimedAt *metav1.Time `json:"claimedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -48,6 +48,7 @@ spec:
 | `spec.shutdownTime`, else `sandbox.cocoonstack.io/ttl-seconds` | the claim's lease; neither means the node's default |
 
 The response is synthesized, never stored. It carries
+`metadata.creationTimestamp` (the claim time the node published),
 `status.nodeName`, a `Ready` condition, and the annotations
 `sandbox.cocoonstack.io/claim-id`, `/address`, `/token` and `/deadline` — the
 granted expiry, which the node may clamp below what was asked for.

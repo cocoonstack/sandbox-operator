@@ -879,6 +879,9 @@ func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 			}},
 		},
 	}
+	if e.ClaimedAt != nil {
+		sb.CreationTimestamp = *e.ClaimedAt
+	}
 	return sb
 }
 
