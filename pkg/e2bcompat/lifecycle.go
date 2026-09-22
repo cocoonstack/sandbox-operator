@@ -31,6 +31,14 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
+	// memory=false asks for a filesystem-only snapshot whose resume cold-boots.
+	// The node's hibernate always captures memory, so honoring it would mean
+	// silently giving back a different sandbox than asked for.
+	if req.Memory != nil && !*req.Memory {
+		writeError(w, http.StatusBadRequest,
+			"filesystem-only pause (memory=false) is not supported; this backend always snapshots memory")
+		return
+	}
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
@@ -44,14 +52,6 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	if paused {
 		writeError(w, http.StatusConflict, fmt.Sprintf("sandbox %q is already paused", id))
-		return
-	}
-	// memory=false asks for a filesystem-only snapshot whose resume cold-boots.
-	// The node's hibernate always captures memory, so honoring it would mean
-	// silently giving back a different sandbox than asked for.
-	if req.Memory != nil && !*req.Memory {
-		writeError(w, http.StatusBadRequest,
-			"filesystem-only pause (memory=false) is not supported; this backend always snapshots memory")
 		return
 	}
 	if err := s.store.Pause(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
@@ -377,6 +377,10 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool
 func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg string) {
 	if k8serrors.IsNotFound(err) || errors.Is(err, errSandboxNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
+		return
+	}
+	if se, ok := errors.AsType[*k8serrors.StatusError](err); ok && se.ErrStatus.Code >= http.StatusBadRequest && se.ErrStatus.Code < http.StatusInternalServerError {
+		writeError(w, int(se.ErrStatus.Code), se.ErrStatus.Message)
 		return
 	}
 	s.opts.Log.Error(err, "e2b "+op+" failed", "sandboxID", id)

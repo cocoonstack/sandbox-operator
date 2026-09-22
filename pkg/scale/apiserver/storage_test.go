@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -186,6 +187,28 @@ func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
 		_, err := tc.storage.(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", tc.body, nil, &metav1.CreateOptions{})
 		require.Error(t, err, name)
 		assert.True(t, apierrors.IsNotFound(err), "%s: the node's 404 must stay a NotFound, got %v", name, err)
+	}
+}
+
+func TestLifecycleVerbsKeepTheNodesStatusCode(t *testing.T) {
+	sb := &sandboxv1beta1.Sandbox{
+		Namespace:   "ns",
+		Name:        "s1",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}
+	for name, tc := range map[string]struct {
+		nodeErr error
+		want    func(error) bool
+	}{
+		"bad request":  {apierrors.NewBadRequest("count exceeds max_fork_count"), apierrors.IsBadRequest},
+		"conflict":     {apierrors.NewConflict(sandboxv1beta1.Resource("sandboxes"), "sb_abc123", errors.New("already paused")), apierrors.IsConflict},
+		"node failure": {errors.New("provisioning failed"), apierrors.IsInternalError},
+	} {
+		store := &fakeStore{getSandbox: sb, verbErr: tc.nodeErr}
+		_, err := NewSandboxForkREST(store).(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", &cocoonv1beta1.SandboxForkOptions{}, nil, &metav1.CreateOptions{})
+		require.Error(t, err, name)
+		assert.True(t, tc.want(err), "%s: got %v", name, err)
 	}
 }
 

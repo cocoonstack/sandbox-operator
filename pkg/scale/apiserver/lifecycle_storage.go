@@ -3,7 +3,9 @@ package apiserver
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -162,8 +164,8 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 func claimID(sb *sandboxv1beta1.Sandbox) string { return sb.Annotations[ClaimIDAnnotation] }
 
 func verbError(verb string, sb *sandboxv1beta1.Sandbox, err error) error {
-	if apierrors.IsNotFound(err) {
-		return err
+	if se, ok := errors.AsType[*apierrors.StatusError](err); ok && se.ErrStatus.Code < http.StatusInternalServerError {
+		return se
 	}
 	return apierrors.NewInternalError(fmt.Errorf("%s sandbox %s/%s: %w", verb, sb.Namespace, sb.Name, err))
 }

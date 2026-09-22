@@ -59,6 +59,32 @@ func TestPauseFilesystemOnlyIsRejected(t *testing.T) {
 	}
 }
 
+func TestPauseFilesystemOnlyIsRejectedBeforeThePausedCheck(t *testing.T) {
+	store := &lifecycleStore{}
+	nodeReportsPaused(store)
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", `{"memory":false}`, testKey)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 naming the unsupported option, not 409 for the paused state", w.Code)
+	}
+}
+
+func TestForkKeepsTheNodesRejectionStatus(t *testing.T) {
+	store := &lifecycleStore{err: k8serrors.NewBadRequest("count 9999 exceeds max_fork_count")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":9999}`, testKey)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want the node's 400, not a retryable 500: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "max_fork_count") {
+		t.Errorf("body = %s, want the node's reason", w.Body.String())
+	}
+}
+
 func TestConnectRunningIs200(t *testing.T) {
 	store := &lifecycleStore{}
 	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}

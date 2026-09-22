@@ -43,6 +43,28 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	assert.False(t, k8serrors.IsNotFound(err), "a transport failure is not NotFound: %v", err)
 }
 
+func TestLifecycleVerbsKeepANodeRejectionsStatus(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777"))
+	f := &recordingFactory{verbErr: &sandboxd.HTTPError{StatusCode: http.StatusBadRequest, Message: "count 9999 exceeds max_fork_count"}}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	_, err := store.Fork(t.Context(), "n1", "sb_live", 9999, 0)
+	require.Error(t, err)
+	assert.True(t, k8serrors.IsBadRequest(err), "a node 400 must stay a 400, got %v", err)
+	assert.Contains(t, err.Error(), "max_fork_count", "the node's reason must reach the caller")
+
+	f.verbErr = &sandboxd.HTTPError{StatusCode: http.StatusConflict, Message: "already paused"}
+	err = store.Pause(t.Context(), "n1", "sb_live")
+	require.Error(t, err)
+	assert.True(t, k8serrors.IsConflict(err), "a node 409 must stay a 409, got %v", err)
+
+	f.verbErr = &sandboxd.HTTPError{StatusCode: http.StatusInternalServerError, Message: "provisioning failed"}
+	err = store.Pause(t.Context(), "n1", "sb_live")
+	require.Error(t, err)
+	assert.False(t, k8serrors.IsBadRequest(err) || k8serrors.IsConflict(err), "a node 5xx is not a client error: %v", err)
+}
+
 func TestReleaseOfAReapedSandboxIsASuccessThroughTheRealClient(t *testing.T) {
 	var releases atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
