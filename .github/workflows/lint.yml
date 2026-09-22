@@ -21,7 +21,7 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Download dependencies
-        run: make deps
+        run: go mod download
 
       - name: Lint
         run: make lint

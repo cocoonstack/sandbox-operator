@@ -14,11 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - image: sandbox-apiserver
-            dockerfile: Dockerfile.apiserver
-          - image: sandbox-envd-proxy
-            dockerfile: Dockerfile.envdproxy
+        image:
+          - sandbox-apiserver
+          - sandbox-envd-proxy
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -54,9 +52,12 @@ jobs:
         uses: docker/build-push-action@v7.4.0
         with:
           context: .
-          file: ./${{ matrix.dockerfile }}
+          file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            BINARY=${{ matrix.image }}
+            VERSION=${{ env.VERSION }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

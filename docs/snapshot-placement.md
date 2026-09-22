@@ -123,7 +123,7 @@ lost.** L3 heals a node that cannot *reach* a record; it does not replicate one.
 This is a deliberate, scoped decision, not an oversight — checkpoints here are
 branch points for agent workloads, not backups. Making them survive node loss
 needs asynchronous replication to N peers and a placement policy that tracks
-replica sets; that work is recorded in [ROADMAP.md](../ROADMAP.md) and is
+replica sets; that work is recorded in [the roadmap](roadmap.md) and is
 explicitly not built.
 
 Operationally: **treat a checkpoint as durable only while its node is.** If a

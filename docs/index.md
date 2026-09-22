@@ -70,16 +70,14 @@ sandbox is briefly invisible. Callers poll.
   `sandbox.cocoonstack.io/v1beta1`. The `agents.x-k8s.io` and
   `extensions.agents.x-k8s.io` types are upstream's; their reference is in
   [agent-sandbox's docs](https://github.com/kubernetes-sigs/agent-sandbox/blob/main/docs/api.md)
+- [Performance](performance.md) — the fleet-supply and claim numbers, how they
+  were measured, and how to reproduce them
+- [Security model](security.md) — trust boundaries and how to report a
+  vulnerability
+- [Roadmap](roadmap.md) — what comes next, by priority
 
 ## Repository
 
 Source and issue tracker:
 [github.com/cocoonstack/sandbox-operator](https://github.com/cocoonstack/sandbox-operator).
 Part of the [cocoonstack](https://cocoonstack.github.io/) MicroVM platform.
-
-- [Contributing](https://github.com/cocoonstack/sandbox-operator/blob/master/CONTRIBUTING.md)
-- [Governance](https://github.com/cocoonstack/sandbox-operator/blob/master/GOVERNANCE.md) and [maintainers](https://github.com/cocoonstack/sandbox-operator/blob/master/MAINTAINERS.md)
-- [Security reports](https://github.com/cocoonstack/sandbox-operator/blob/master/SECURITY.md)
-- [Roadmap](https://github.com/cocoonstack/sandbox-operator/blob/master/ROADMAP.md)
-- [Code of conduct](https://github.com/cocoonstack/sandbox-operator/blob/master/CODE_OF_CONDUCT.md)
-- [Performance](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md)

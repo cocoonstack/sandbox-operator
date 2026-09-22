@@ -19,7 +19,7 @@ restored from a golden snapshot.
 wall-clock) — an effective **3 300–5 000 microVMs/s** (CR steady-state
 3 654/s), at **99 MB net RAM per microVM**.
 
-![0 to 50000 fill, three rounds](docs/images/perf-50k-fill-rounds.png)
+![0 to 50000 fill, three rounds](images/perf-50k-fill-rounds.png)
 
 Three rounds isolate where the speed comes from — same target, same driver
 command, same measurement script:
@@ -50,7 +50,7 @@ Per-VM footprint, same golden and pool, from `/proc/<pid>/smaps` and a
 | eager copy | 359 MB | 353 | 6 | 358 MB | 672 G |
 | mmap CoW | 163 MB | 96 | 67 | **99 MB** | **186 G** |
 
-![memory footprint, eager copy versus mmap CoW](docs/images/perf-memory-mmap-cow.png)
+![memory footprint, eager copy versus mmap CoW](images/perf-memory-mmap-cow.png)
 
 ### Scaling law
 
@@ -66,7 +66,7 @@ metadata — is node-local, and the control plane touches each node with one O(1
 | single-cluster ceiling | 20 | 100 000 | 5 000 | ≈495 G | ≈25 s | >50% RAM headroom; 4 000/node co-residency measured |
 | linear extrapolation | 200 | 1 000 000 | 5 000 | ≈495 G | ≈25 s | control plane O(N): etcd ≈7 writes/s, driver 200 PUT/5 s |
 
-![supply rate is linear in node count](docs/images/perf-scaling-law.png)
+![supply rate is linear in node count](images/perf-scaling-law.png)
 
 ## sandboxd hot-pool tier (deployed, measured end-to-end)
 
@@ -96,7 +96,7 @@ the `vk-sandbox` gateway overhead **~0.04 ms** (`test/l2bench`).
 This run predates the upstream import: the Pod that reached the `vk-sandbox`
 node was produced by the forked controller plus the Pod mutator, both since
 removed. The node-side numbers are unaffected — the same Pod is now written by
-hand, per the [pod-template contract](docs/runtime-backends.md) — but the
+hand, per the [pod-template contract](runtime-backends.md) — but the
 control-plane half is upstream's code and unmeasured here.
 
 ## Upstream controller: warm claim on the sandboxd tier
@@ -151,12 +151,12 @@ go run -tags l3bench ./test/l3bench -out /tmp/l3-aggregation.json
 # store and lookup scaling
 go test -run '^$' -bench . ./pkg/scale ./pkg/e2bcompat
 
-# envd-proxy against a live sandbox (see docs/envd-proxy.md for the node half)
+# envd-proxy against a live sandbox (see envd-proxy.md for the node half)
 go run -tags envdproxysmoke ./test/envdproxysmoke \
   -node <owner> -sandbox <id> -token <token> -port 49983
 ```
 
-`make vet-tagged` type-checks all three tagged harnesses.
+`make vet` type-checks all three tagged harnesses.
 
 ## Retired: the CRD-path fork controllers (measured at `0719d33`)
 
@@ -166,7 +166,7 @@ Everything below was measured against the forked `Sandbox`, `SandboxClaim`,
 and `test/e2e` harnesses. All of it was deleted when the APIs moved to the
 upstream module. **These numbers are not claims about upstream's controller and
 are not reproducible from this tree.** They are kept because the design
-discussion in [docs/scaling-design.md](docs/scaling-design.md) refers to them.
+discussion in [scaling-design.md](scaling-design.md) refers to them.
 
 | | |
 |---|---|

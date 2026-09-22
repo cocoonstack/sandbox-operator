@@ -63,7 +63,7 @@ spec:
       serviceAccountName: sandbox-sdk-loadgen
       containers:
       - name: loadgen
-        # Build with Dockerfile.sdkloadgen and push to your registry.
+        # Build with `docker build --build-arg BINARY=sandbox-sdk-loadgen -t <registry>/sandbox-sdk-loadgen:<tag> .` and push it.
         image: ghcr.io/cocoonstack/sandbox-sdk-loadgen:latest
         args:
         - --namespace=sandbox-sdk-loadgen

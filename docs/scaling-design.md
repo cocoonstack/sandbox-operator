@@ -78,7 +78,7 @@ The L1 numbers this repository once published (claim fast-path p50 0.644 ms at
 N=100 vs 0.646 ms at N=2000; claim→Bound p50 129 ms on real microVMs) were
 measured against the fork's controllers and their `test/scalebench` and
 `test/poolbench` harnesses, all of which were deleted with the fork. They are
-kept, labelled, in [PERFORMANCE.md](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md)
+kept, labelled, in [performance.md](performance.md)
 as the historical record, and they are not claims about upstream's controller.
 
 ### L2 — node-local claim gateway (implemented core; deployment hardening pending)

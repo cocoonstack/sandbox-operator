@@ -21,20 +21,17 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Download dependencies
-        run: make deps
+        run: go mod download
 
       - name: Test with coverage
-        run: make coverage
-
-      - name: Type-check tagged harnesses
-        run: make vet-tagged
+        run: make test
 
       - name: Upload coverage artifact
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.1
         with:
           name: coverage
-          path: bin/coverage.out
+          path: coverage.out
           retention-days: 7
 
       - name: Build binaries

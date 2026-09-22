@@ -16,7 +16,8 @@ move any of these forward are welcome.
   node's inventory and sweeps the fleet only on a miss. What remains is the
   window before that node republishes `NodeInventory`: a claim is invisible
   to `get` until then. Fall back to an authoritative node lookup in that
-  window so lifecycle calls work immediately after `create`.
+  window so lifecycle calls work immediately after `create`. Tracked as
+  [#29](https://github.com/cocoonstack/sandbox-operator/issues/29).
 - **Engine-labeled pool metrics.** Once the engine axis exists, `sandboxd_pool_*`
   needs it as a label and the warm-pool driver needs it in the pool key; today
   both key on template/net/size only.
@@ -34,12 +35,10 @@ move any of these forward are welcome.
   is served today by re-listing the inventory and diffing against what the
   watcher has seen; serve it from live per-node inventory streams instead.
 
-## Medium term (continued)
-
 - **Checkpoints that survive node loss.** A checkpoint currently lives on the
   node that took it: peer healing moves a record to a node that cannot reach
   it, but nothing replicates one, so losing that node's disk loses the
-  checkpoint (see [docs/snapshot-placement.md](docs/snapshot-placement.md)).
+  checkpoint (see [snapshot-placement.md](snapshot-placement.md)).
   Making them durable needs asynchronous replication to N peers plus a
   placement policy that tracks replica sets and repairs under-replication.
   **Not built, and deliberately so** — checkpoints are branch points for agent

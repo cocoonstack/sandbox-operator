@@ -1,15 +1,6 @@
 bin/
 dist/
-release_assets/
-
-# local builds of the binaries and the tagged harnesses
-/sandbox-apiserver
-/sandbox-envd-proxy
-/sandbox-sdk-loadgen
-/l2bench
-/l3bench
-/envdproxysmoke
-
-.idea
-.vscode
-.claude
+*.out
+*.test
+coverage.out
+.claude/

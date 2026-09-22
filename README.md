@@ -4,7 +4,7 @@ An aggregated Kubernetes apiserver and e2b-compatible data plane for warm-pooled
 agent sandboxes. It serves `sandboxes.agents.x-k8s.io` by scatter-gathering
 per-node inventory instead of storing a per-sandbox object, so one
 `SandboxWarmPool` patch took 20 bare-metal nodes to **50 000 running microVMs in
-10–15 s** while etcd saw ~2 writes/s ([methodology](PERFORMANCE.md)).
+10–15 s** while etcd saw ~2 writes/s ([methodology](docs/performance.md)).
 
 **Documentation: [cocoonstack.github.io/sandbox-operator](https://cocoonstack.github.io/sandbox-operator/)**
 

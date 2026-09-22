@@ -1,13 +1,9 @@
-SHELL := /usr/bin/env bash
+.PHONY: all build test lint vet fmt fmt-check deps generate api-docs clean coverage cloc help
 
-APISERVER_BINARY := bin/sandbox-apiserver
-APISERVER_MAIN := ./cmd/sandbox-apiserver
-APISERVER_IMG ?= ghcr.io/cocoonstack/sandbox-apiserver:dev
-ENVDPROXY_BINARY := bin/sandbox-envd-proxy
-ENVDPROXY_MAIN := ./cmd/sandbox-envd-proxy
-ENVDPROXY_IMG ?= ghcr.io/cocoonstack/sandbox-envd-proxy:dev
+GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
 
-## Build-tagged harnesses under test/, one tag per directory
+## Shipped binaries under cmd/, and the build-tagged harnesses under test/ (one tag per directory)
+BINARIES := sandbox-apiserver sandbox-envd-proxy
 TAGGED_HARNESSES := l2bench l3bench envdproxysmoke
 
 ## Target OSes for vet / lint
@@ -30,9 +26,10 @@ GOFMT := $(GOFUMPT_ROOT)/gofumpt
 GOIMPORTS_VERSION ?= v0.49.0
 GOIMPORTS_ROOT := $(LOCALBIN)/goimports-$(GOIMPORTS_VERSION)
 GOIMPORTS := $(GOIMPORTS_ROOT)/goimports
-GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
 
-.DEFAULT_GOAL := all
+CONTROLLERGEN_VERSION ?= v0.21.0
+CONTROLLERGEN_ROOT := $(LOCALBIN)/controller-gen-$(CONTROLLERGEN_VERSION)
+CONTROLLER_GEN := $(CONTROLLERGEN_ROOT)/controller-gen
 
 ## Tool download targets
 .PHONY: golangci-lint
@@ -42,105 +39,99 @@ $(GOLANGCILINT):
 
 .PHONY: gofumpt
 gofumpt: $(GOFMT)
-$(GOFMT):
+$(GOFMT): | $(LOCALBIN)
 	GOBIN=$(GOFUMPT_ROOT) go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
 
 .PHONY: goimports
 goimports: $(GOIMPORTS)
-$(GOIMPORTS):
+$(GOIMPORTS): | $(LOCALBIN)
 	GOBIN=$(GOIMPORTS_ROOT) go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
 
-.PHONY: all
-all: fmt-check vet test build
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN)
+$(CONTROLLER_GEN): | $(LOCALBIN)
+	GOBIN=$(CONTROLLERGEN_ROOT) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLERGEN_VERSION)
 
-.PHONY: build
-build: apiserver-build envdproxy-build ## Build every shipped binary.
+# --- Primary targets ---
 
-.PHONY: apiserver-build
-apiserver-build: ## Build the aggregated sandbox-apiserver binary.
-	mkdir -p bin
-	go build -ldflags "-s -w" -o $(APISERVER_BINARY) $(APISERVER_MAIN)
+all: deps fmt lint test build ## Full pipeline: deps, fmt, lint, test, build
 
-.PHONY: apiserver-image
-apiserver-image: ## Build the aggregated sandbox-apiserver image (override APISERVER_IMG).
-	docker build -f Dockerfile.apiserver -t $(APISERVER_IMG) .
+# --- Dependencies ---
 
-.PHONY: envdproxy-build
-envdproxy-build: ## Build the sandbox-envd-proxy binary.
-	mkdir -p bin
-	go build -ldflags "-s -w" -o $(ENVDPROXY_BINARY) $(ENVDPROXY_MAIN)
+deps: ## Tidy Go modules (no-op when running inside a Go workspace)
+	@if [ -z "$$(go env GOWORK)" ] || [ "$$(go env GOWORK)" = "off" ]; then \
+		go mod tidy; \
+	else \
+		echo "==> workspace mode active ($$(go env GOWORK)); skipping go mod tidy"; \
+	fi
 
-.PHONY: envdproxy-image
-envdproxy-image: ## Build the sandbox-envd-proxy image (override ENVDPROXY_IMG).
-	docker build -f Dockerfile.envdproxy -t $(ENVDPROXY_IMG) .
+# --- Code generation ---
 
-.PHONY: test
-test: vet ## Run unit tests.
-	go test ./...
+generate: controller-gen ## Regenerate the NodeInventory CRD and the deepcopy methods from api/
+	$(CONTROLLER_GEN) object crd:maxDescLen=0 paths=./api/... output:crd:dir=helm/crds
 
-.PHONY: test-race
-test-race: ## Run unit tests with the race detector.
-	go test -race ./...
+api-docs: ## Regenerate docs/api.md from the API types
+	GOWORK=off go run github.com/elastic/crd-ref-docs@v0.2.0 --config=hack/crd-ref-docs.yaml --source-path=. --renderer=markdown --output-path=docs/api.md --max-depth=12
 
-.PHONY: coverage
-coverage: vet ## Write unit-test coverage to bin/coverage.out.
-	mkdir -p bin
-	go test -coverprofile=bin/coverage.out ./...
+# --- Build ---
 
-.PHONY: vet
-vet: ## Run go vet on every target OS.
+build: ## Build every shipped binary into bin/
+	@for b in $(BINARIES); do \
+		echo "==> go build $$b"; \
+		CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/$$b ./cmd/$$b || exit 1; \
+	done
+
+# --- Testing ---
+
+test: vet ## Run tests with race detection and coverage
+	go test -race -timeout 120s -count=1 -cover -coverprofile=coverage.out ./...
+
+coverage: test ## Generate and display coverage report
+	go tool cover -func=coverage.out
+	@echo ""
+	@echo "To view HTML coverage report: go tool cover -html=coverage.out"
+
+# --- Code quality ---
+
+vet: ## Run go vet on every target OS, then type-check the tagged harnesses
 	@for goos in $(GOOSES); do \
 		echo "==> go vet GOOS=$$goos"; \
 		GOOS=$$goos go vet ./... || exit 1; \
 	done
-
-.PHONY: vet-tagged
-vet-tagged: ## Type-check the build-tagged bench and smoke harnesses.
 	@for t in $(TAGGED_HARNESSES); do \
-		echo "go vet -tags $$t ./test/$$t"; \
+		echo "==> go vet -tags $$t ./test/$$t"; \
 		go vet -tags $$t ./test/$$t || exit 1; \
 	done
 
-.PHONY: lint
-lint: golangci-lint ## Run golangci-lint on every target OS.
+lint: golangci-lint ## Run golangci-lint on every target OS
 	@for goos in $(GOOSES); do \
 		echo "==> golangci-lint GOOS=$$goos"; \
 		GOOS=$$goos $(GOLANGCILINT) run ./... || exit 1; \
 	done
 
-.PHONY: fmt
-fmt: gofumpt goimports ## Format code with gofumpt and goimports.
+fmt: gofumpt goimports ## Format code with gofumpt and goimports
 	$(GOFMT) -l -w .
 	$(GOIMPORTS) -l -w --local '$(GOIMPORTS_LOCAL_PREFIXES)' .
 
-.PHONY: fmt-check
-fmt-check: gofumpt goimports ## Check formatting (fails if files need formatting).
+fmt-check: gofumpt goimports ## Check formatting (fails if files need formatting)
 	@test -z "$$($(GOFMT) -l .)" || { echo "Files need formatting (gofumpt):"; $(GOFMT) -l .; exit 1; }
 	@test -z "$$($(GOIMPORTS) -l .)" || { echo "Files need formatting (goimports):"; $(GOIMPORTS) -l .; exit 1; }
 
-.PHONY: generate
-generate: ## Regenerate CRDs and deep copies.
-	go mod download -modfile=tools.mod
-	go generate ./...
+# --- Maintenance ---
 
-.PHONY: deps
-deps: ## Download module dependencies.
-	go mod download
-	go mod download -modfile=tools.mod
-
-.PHONY: clean
-clean: ## Remove build and coverage outputs.
-	rm -rf bin
+clean: ## Remove build artifacts, coverage files, and test cache
+	rm -rf bin/ dist/
+	rm -f coverage.out coverage.html coverage.txt
 	go clean -testcache
 
-.PHONY: cloc
-cloc: ## Count lines of code excluding tests (requires cloc).
+cloc: ## Count lines of code excluding tests (requires cloc)
 	cloc --exclude-dir=vendor,dist,bin --exclude-ext=json --not-match-f='_test\.go$$' .
 
-.PHONY: help
-help: ## Show available targets.
-	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+# --- Help ---
 
-.PHONY: api-docs
-api-docs: ## Regenerate docs/api.md from the API types
-	GOWORK=off go run github.com/elastic/crd-ref-docs@v0.2.0 --config=hack/crd-ref-docs.yaml --source-path=. --renderer=markdown --output-path=docs/api.md --max-depth=12
+help: ## Show this help message
+	@echo "sandbox-operator Makefile targets:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@echo ""
