@@ -1,0 +1,20 @@
+# A claim against the L3 aggregated apiserver. Creating this object claims a
+# warm microVM from a node advertising capacity for the same pool key as
+# template-warmpool.yaml: image, net annotation and size class must match, or
+# the create is a retryable 503.
+#
+# The reply is synthesized, not stored: it carries status.nodeName and the
+# sandbox.cocoonstack.io/claim-id, /address, /token and /deadline annotations.
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: demo
+  annotations:
+    sandbox.cocoonstack.io/net: none
+    sandbox.cocoonstack.io/ttl-seconds: "600"
+spec:
+  podTemplate:
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/cocoonstack/sandbox/rt:24.04

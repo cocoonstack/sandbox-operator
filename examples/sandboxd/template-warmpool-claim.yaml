@@ -1,0 +1,54 @@
+# A warm pool of sandboxd-backed Sandboxes, served by upstream's agent-sandbox
+# controller and claimed on a vk-sandbox virtual node.
+#
+# Every scheduling field below is part of the pod-template contract: nothing
+# mutates this Pod on its way to the node. See docs/runtime-backends.md.
+#
+# The node's own hot pool is separate capacity: sandboxd must already hold warm
+# microVMs for the key (template=ghcr.io/cocoonstack/sandbox/rt:24.04,
+# net=none, size=small), set by the L3 warm-pool driver or by node config.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: sandboxd-agent
+spec:
+  networkPolicyManagement: Unmanaged
+  envVarsInjectionPolicy: Allowed
+  podTemplate:
+    metadata:
+      annotations:
+        sandbox.cocoonstack.io/runtime: sandboxd
+        sandbox.cocoonstack.io/template: ghcr.io/cocoonstack/sandbox/rt:24.04
+        sandbox.cocoonstack.io/net: none
+        sandbox.cocoonstack.io/size: small
+    spec:
+      nodeSelector:
+        sandbox.cocoonstack.io/runtime: sandboxd
+      tolerations:
+        - key: virtual-kubelet.io/provider
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: ghcr.io/cocoonstack/sandbox/rt:24.04
+---
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: sandboxd-agent
+spec:
+  replicas: 2
+  sandboxTemplateRef:
+    name: sandboxd-agent
+  updateStrategy:
+    type: OnReplenish
+---
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxClaim
+metadata:
+  name: sandboxd-agent-example
+spec:
+  warmPoolRef:
+    name: sandboxd-agent
+  lifecycle:
+    shutdownPolicy: Delete

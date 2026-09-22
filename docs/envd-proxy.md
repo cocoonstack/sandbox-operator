@@ -1,6 +1,6 @@
-# envd-proxy
+# sandbox-envd-proxy
 
-`envd-proxy` is the **data plane** half of the [e2b-compatible
+`sandbox-envd-proxy` is the **data plane** half of the [e2b-compatible
 API](e2b-compat.md). The apiserver's compat surface answers
 `Sandbox.create()`; everything the SDK does afterwards — `files`, `commands`,
 `pty` — goes to the in-sandbox `envd` daemon instead, over a completely
@@ -19,7 +19,7 @@ sandbox's token, and hands the bytes to the owning node.
     │ control REST │ data plane HTTPS          │
     │ E2B_API_URL  │ {port}-{sandboxID}.{domain}
     ▼              ▼
-sandbox-apiserver  envd-proxy          ← own Deployment, never a compute node
+sandbox-apiserver  sandbox-envd-proxy  ← own Deployment, never a compute node
 --enable-e2b-api        │ id → owning node (NodeInventory)
     │                   ▼
     │              sandboxd  GET /v1/sandboxes/{id}/ports/{port}
@@ -36,7 +36,7 @@ address.
 ## Run it
 
 ```bash
-envd-proxy \
+sandbox-envd-proxy \
   --bind-address=:8443 \
   --domain=sandbox.example.com \
   --namespace=sandboxes \
@@ -58,7 +58,7 @@ certificate covering it. `GET /healthz` is unauthenticated, for probes.
 
 It reads `NodeInventory` through an informer, so a data-plane request never
 becomes a LIST against the kube-apiserver; RBAC needs `get`/`list`/`watch` on
-`nodeinventories.extensions.agents.x-k8s.io`.
+`nodeinventories.sandbox.cocoonstack.io`.
 
 ## Routing
 
@@ -144,7 +144,7 @@ live in the sandbox repo under `e2e/cmd/`.
 
 | Status | Meaning |
 |---|---|
-| `400` | The host and headers name no sandbox, or the port is outside 1-65535. |
+| `400` | The host and headers name no sandbox, the port is outside 1-65535, or the node has no such guest port. |
 | `401` | No `X-Access-Token`, or the node rejected the one presented. |
 | `404` | An `envd` internal path. |
 | `502` | Sandbox unknown, paused past recovery, or its node unreachable. |

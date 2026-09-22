@@ -1,119 +1,75 @@
 # sandbox-operator
 
-A Kubernetes operator and aggregated apiserver implementing the agent-sandbox
-APIs over ordinary Pods or Cocoon microVMs. CRD warm claims measured **~33 ms
-at p50** on the microVM backend; see
-[performance methodology](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md).
+The L3 half of agent sandboxes on Kubernetes: an aggregated apiserver that
+serves `sandboxes.agents.x-k8s.io` from live node inventory, the warm-pool
+driver that fills those nodes, and the e2b-compatible control and data planes in
+front of them. The `Sandbox` API itself is
+[kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox),
+consumed as a Go module; this repository stores no copy of it and ships no
+controller of its own.
+
+## What is in the box
+
+| Component | What it is |
+|---|---|
+| `cmd/sandbox-apiserver` | Aggregated apiserver for `sandboxes.agents.x-k8s.io/v1beta1`: scatter-gather reads, node-local claim/release on create/delete, the pause/resume/fork/snapshot subresources, the optional e2b REST surface, and the in-process `SandboxWarmPool` driver |
+| `cmd/sandbox-envd-proxy` | The e2b data plane: one public entry point that carries `files`, `commands` and `pty` into a sandbox's guest port |
+| `nodeinventories.sandbox.cocoonstack.io` | The one CRD this repository owns: per-node summary of live sandboxes, warm capacity and the node's sandboxd address |
+| `api/v1beta1` | `NodeInventory` plus the lifecycle subresource payloads |
+| `pkg/scale`, `pkg/sandboxd`, `pkg/e2bcompat`, `pkg/envdproxy` | The store, the sandboxd client, the e2b translation layer, the proxy |
+
+## The three paths
 
 ```
 any Kubernetes client (kubectl / client-go / controller-runtime)
         |                                        e2b SDK (E2B_API_URL)
-        v                                                |
-kube-apiserver + agent-sandbox CRDs                       v
-        |                                     sandbox-apiserver (aggregated)
-        v                                                |
-sandbox-operator                                          |
-Sandbox / SandboxTemplate / SandboxWarmPool / SandboxClaim
-        |
-        v
-warm pool: N pre-booted microVMs
-        |
-        +-- claim: adopt one, control-plane only (~33 ms) --> delivered sandbox
-        |
-        +-- runtime: standard   -> ordinary Pod on a standard kubelet node
-        +-- runtime: vk-cocoon  -> Cocoon microVM on a virtual-kubelet node
-        +-- runtime: sandboxd   -> node-local sandboxd hot pool (0.2-0.7 ms)
+        v                                               |
+kube-apiserver + agent-sandbox CRDs                     v
+        |                                   sandbox-apiserver (aggregated)
+        +-- upstream controller -> Pod           |            |
+        |     routed by the pod-template         |            +-- e2b REST
+        |     contract to a virtual node         |
+        v                                        v
+   vk-sandbox / vk-cocoon  ------------>  sandboxd node-local warm pools
+                                                 ^
+                                  sandbox-envd-proxy (files / commands / pty)
 ```
 
-## The claim model
+The Pod path and the L3 path both end at the same node-local warm pool; they
+differ in what Kubernetes stores. On the Pod path etcd holds one object per
+sandbox. On the L3 path it holds one `NodeInventory` per node and the pool's
+intent, so object count is `O(pools + nodes)` however many sandboxes are live —
+which is why one `SandboxWarmPool` patch could take 20 nodes to 50 000 running
+microVMs while etcd saw ~2 writes/s.
 
-A cold `Sandbox` creates a Pod on demand; with the microVM backend that Pod
-boots a VM, which costs tens of seconds. The warm path keeps that off the
-request path: a `SandboxWarmPool` pre-provisions N Ready microVMs, and a
-`SandboxClaim` **adopts** one. The VM is already booted; the handover uses an
-`Update` on the claim plus a merge `Patch` on the Sandbox,
-followed by a separate claim status write. It needs no scheduler, kubelet bind
-or image pull. The pool replenishes in the background. Warm adoption requires
-an explicit pool; the default policy cold-starts from the template, as does a
-claim whose named CRD pool has no adoptable Sandbox.
-
-That is the same ownership-transfer shape Kubernetes already ships for
-`PersistentVolumeClaim → PersistentVolume` binding, which is why the whole model
-stays expressible in ordinary CRDs: `kubectl get sandboxes` keeps working, RBAC
-and audit keep applying, and any Kubernetes client is a valid client.
-
-## Runtime backends
-
-Runtime selection is per-Sandbox, via the Pod-template annotation
-`sandbox.cocoonstack.io/runtime`, falling back to the operator's
-`--default-runtime`:
-
-- **`standard`** (the default) — an ordinary Pod on a standard kubelet node.
-  Portable to any conformant cluster; no special substrate required.
-- **`vk-cocoon`** — a hardware-isolated Cloud-Hypervisor/KVM guest, materialized
-  on a [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) virtual-kubelet node
-  by [Cocoon](https://github.com/cocoonstack/cocoon).
-- **`sandboxd`** — routes the Pod to a
-  [vk-sandbox](https://github.com/cocoonstack/vk-sandbox) virtual node, which
-  serves the claim from the node-local `sandboxd` hot pool of
-  [cocoonstack/sandbox](https://github.com/cocoonstack/sandbox). The ownership
-  transfer itself is 0.2–0.7 ms.
-
-The adapter only fills in the scheduling fields a backend needs, and rejects —
-never overwrites — a conflicting explicit value.
-
-## Scaling design: L0 through L3
-
-Reaching a million sandboxes means removing the **centralized transaction
-path**, not the API semantics. The thesis is to keep Kubernetes as the
-record-of-intent and policy plane and push the transaction plane down to the
-node, behind CRDs, RBAC and watch. Four layers:
-
-| layer | what it does | status |
-|---|---|---|
-| **L0** — API hygiene | cache-fed reads, diff-before-write, no control-loop `LIST` against etcd; the qualifier that stops APF seat exhaustion at scale | shipped |
-| **L1** — ownership transfer | handover = queue pop + `Update` + `Patch`, followed by a claim status write; pool status from the informer cache; one leader-elected operator, no per-pool sharding | implemented here |
-| **L2** — node-local claim gateway | the concrete gateway fronts `sandboxd`, delivers a running microVM in 0.2–0.7 ms, records `Bound` asynchronously; authorization stays central | core implemented and benchmarked; supported DaemonSet packaging/hardening remains roadmap work |
-| **L3** — aggregated apiserver | `sandboxes` served by scatter-gathering per-node `NodeInventory`; etcd stores intent only, so object count drops from `O(sandboxes)` to `O(pools + nodes)` | implemented by `sandbox-apiserver`, its deployment/APIService manifests, and the cache-fed store |
-
-The measured consequence: one `kubectl patch` taking a `SandboxWarmPool` from 0
-to **50 000** microVMs on 20 bare-metal nodes reaches full supply in **10–15 s**
-at **99 MB net RAM per microVM**, while etcd sees ~2 writes/s across the whole
-run — independent of sandbox count. Full methodology, per-round sampling and the
-memory ledger are in
-[PERFORMANCE.md](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md).
-
-The same design has one visible cost: the read view is synthesized from
-`NodeInventory` published on a ~30 s cadence, so `list`/`get` are eventually
-consistent and a just-created sandbox is briefly invisible. Callers poll.
+The cost of that design is a read view assembled from inventory nodes republish
+on a ~30 s cadence: `list`/`get` are eventually consistent, and a just-created
+sandbox is briefly invisible. Callers poll.
 
 ## Guides
 
-- [Kubernetes client usage](usage.md) — SDK and YAML examples, pool selection and cold fallback
-- [API reference](api.md) — the generated reference for every type in
-  `agents.x-k8s.io` (v1alpha1, v1beta1) and `extensions.agents.x-k8s.io`
-  (v1alpha1, v1beta1)
-- [Operator configuration](configuration.md) — every flag: runtime and API
-  surface, controller concurrency, webhook and leader election, observability,
-  and a Helm/Deployment patch example
-- [Runtime backends](runtime-backends.md) — why standard kubelet is the rollout
-  default, the deterministic selection rules and their conflict cases, and the
-  full annotation contract each backend supplies
-- [e2b-compatible API](e2b-compat.md) — serving the e2b REST surface from the
-  aggregated apiserver so an unmodified e2b SDK claims from these warm pools:
-  flags, endpoint mapping, and the limits worth knowing
+- [Using the API](usage.md) — claiming through the aggregated apiserver, the
+  pool key a create derives, warm capacity, and what the Pod path does instead
+- [Configuration](configuration.md) — both binaries' flags, the chart values,
+  and the two install shapes
+- [Runtime backends](runtime-backends.md) — the explicit pod-template contract
+  for vk-sandbox and vk-cocoon, and what fails now that no mutator fills it in
+- [Lifecycle verbs](lifecycle.md) — pause, resume, fork and snapshot as
+  subresources, plus a runnable walk-through over both API surfaces
+- [e2b-compatible API](e2b-compat.md) — serving the e2b REST surface so an
+  unmodified e2b SDK claims from these warm pools: flags, endpoint mapping, and
+  the limits worth knowing
 - [envd-proxy](envd-proxy.md) — the data-plane half of that surface: one public
   entry point that carries `files`, `commands` and `pty` into the right
   sandbox's guest port, over vsock and without exposing a node
-- [Lifecycle verbs](lifecycle.md) — pause, resume, fork and snapshot as
-  subresources, plus a runnable walk-through over both API surfaces.
-
 - [Scaling design](scaling-design.md) — how claims stay off etcd and what the
-  per-node control plane owns.
-
+  per-node control plane owns
 - [Snapshot placement](snapshot-placement.md) — where a checkpoint lives, how a
-  branch reaches it from another node (local hit, probe + redirect, peer heal),
-  why this design keeps checkpoints node-local, and the durability this does *not* give
+  branch reaches it from another node, and the durability this does *not* give
+- [API reference](api.md) — the generated reference for
+  `sandbox.cocoonstack.io/v1beta1`. The `agents.x-k8s.io` and
+  `extensions.agents.x-k8s.io` types are upstream's; their reference is in
+  [agent-sandbox's docs](https://github.com/kubernetes-sigs/agent-sandbox/blob/main/docs/api.md)
 
 ## Repository
 
@@ -126,3 +82,4 @@ Part of the [cocoonstack](https://cocoonstack.github.io/) MicroVM platform.
 - [Security reports](https://github.com/cocoonstack/sandbox-operator/blob/master/SECURITY.md)
 - [Roadmap](https://github.com/cocoonstack/sandbox-operator/blob/master/ROADMAP.md)
 - [Code of conduct](https://github.com/cocoonstack/sandbox-operator/blob/master/CODE_OF_CONDUCT.md)
+- [Performance](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md)

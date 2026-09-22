@@ -18,8 +18,8 @@ move any of these forward are welcome.
   to `get` until then. Fall back to an authoritative node lookup in that
   window so lifecycle calls work immediately after `create`.
 - **Engine-labeled pool metrics.** Once the engine axis exists, `sandboxd_pool_*`
-  and the operator's pool series need it as a label; today both key on
-  template/net/size only.
+  needs it as a label and the warm-pool driver needs it in the pool key; today
+  both key on template/net/size only.
 
 ## Medium term
 
@@ -51,6 +51,6 @@ move any of these forward are welcome.
 
 - **Million-sandbox validation.** Exercise the full L0–L3 design at fleet
   scale and publish the methodology alongside the existing benchmarks.
-- **Upstream alignment.** Track `kubernetes-sigs/agent-sandbox` API evolution
-  (provenance in [UPSTREAM.md](UPSTREAM.md)) and contribute conformance
-  feedback upstream.
+- **Upstream alignment.** Track `sigs.k8s.io/agent-sandbox` releases — the
+  module this repository's APIs come from — and contribute the gaps the L3 path
+  exposes (subresource verbs, warm capacity as node-local intent) back upstream.

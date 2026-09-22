@@ -2,7 +2,7 @@
 
 The aggregated apiserver can serve an [e2b](https://e2b.dev)-compatible REST
 surface, so an **unmodified e2b SDK** (JS or Python) claims from the same warm
-microVM pools this operator already manages. Point `E2B_API_URL` at it and
+microVM pools the warm-pool driver already fills. Point `E2B_API_URL` at it and
 `Sandbox.create()` works.
 
 It is a translation layer, not a second control plane. Every request lands on
@@ -68,9 +68,9 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
 | `POST /sandboxes/{id}/connect` | `store.Resume` when paused | The SDK's resume operation. Returns `200` when already running or `201` after restoring a paused sandbox. Its `timeout` field does not change the node-owned lease. |
 | `POST /sandboxes/{id}/fork` | `store.Fork` | Creates `count` children (`1` by default), each with its own id and requested claim-time TTL. A paused source returns `409`; resume it first. |
-| `POST /sandboxes/{id}/snapshots` | `store.Snapshot` | Captures a checkpoint while the source keeps running; returns its `snapshotID`. |
+| `POST /sandboxes/{id}/snapshots` | `store.Snapshot` | Captures a checkpoint while the source keeps running; `201` with its `snapshotID`. |
 | `GET /snapshots` | `store.Snapshots` across nodes | Lists fleet checkpoints. One unreachable node is skipped rather than blanking the whole result. |
-| `DELETE /templates/{snapshotID}` | `store.DeleteSnapshot` across nodes | e2b addresses snapshot deletion through the templates path; deletion is idempotent and best-effort across nodes. |
+| `DELETE /templates/{snapshotID}` | `store.DeleteSnapshot` across nodes | e2b addresses snapshot deletion through the templates path. A checkpoint names no node, so the delete is offered to every node and a node that does not hold it reports success. `204` when at least one node answered, `500` when none did — an outage must not read as "already gone". |
 | `GET /templates`, `GET /v2/templates` | advertised warm-pool keys | Lists the distinct templates the fleet can currently claim; these are pool-derived entries, not e2b-hosted template builds. |
 | `GET /sandboxes/{id}/metrics` | `store.Stats` | Returns the complete e2b metric schema; see the zero-valued fields below. |
 | `GET /health` | — | Unauthenticated, for probes. |
@@ -81,8 +81,9 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   host as `{port}-{sandboxID}.{domain}`. The compatibility API renders the
   sandboxd claim id as a DNS-safe public id, but the deployment still needs
   wildcard DNS/TLS and a proxy that routes the derived host or the
-  `E2b-Sandbox-Id` / `E2b-Sandbox-Port` headers the SDK sends. `envd-proxy` is
-  that proxy; see [envd-proxy](envd-proxy.md). Control plane without it means
+  `E2b-Sandbox-Id` / `E2b-Sandbox-Port` headers the SDK sends.
+  `sandbox-envd-proxy` is that proxy; see [envd-proxy](envd-proxy.md). Control
+  plane without it means
   `Sandbox.create()` works and `files`/`commands`/`pty` do not. The pool must
   also run an image that carries `envd` — the sandbox repo's `e2b-rt` flavor —
   or there is nothing on the other end of the proxy.

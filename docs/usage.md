@@ -1,74 +1,154 @@
-# Using the Kubernetes API
+# Using the API
 
-The CRD operator uses standard Kubernetes clients. In the following fragment,
-`c` is a configured controller-runtime client and `ctx` is the caller's context;
-register `sandboxv1beta1.AddToScheme` on the client's scheme before use.
-
-Typed (controller-runtime), or `unstructured` / dynamic client if you don't want
-to vendor the types:
+Both paths serve `agents.x-k8s.io/v1beta1`, so any Kubernetes client works:
+`kubectl`, client-go, controller-runtime, the dynamic client. The types come
+from the `sigs.k8s.io/agent-sandbox` module; only the lifecycle payloads and
+`NodeInventory` come from this one.
 
 ```go
 import (
-    corev1 "k8s.io/api/core/v1"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-    sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+    sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+    cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-sb := &sandboxv1beta1.Sandbox{
-    ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
-    Spec: sandboxv1beta1.SandboxSpec{
-        SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-            PodTemplate: sandboxv1beta1.PodTemplate{
-                // Requires a vk-cocoon virtual node.
-                ObjectMeta: sandboxv1beta1.PodMetadata{
-                    Annotations: map[string]string{"sandbox.cocoonstack.io/runtime": "vk-cocoon"},
-                },
-                Spec: corev1.PodSpec{
-                    Containers: []corev1.Container{{Name: "agent", Image: "ghcr.io/cocoonstack/cocoon/ubuntu:24.04"}},
-                },
-            },
-        },
-    },
-}
-if err := c.Create(ctx, sb); err != nil {
-    return err
-}
+sandboxv1beta1.AddToScheme(scheme) // Sandbox
+cocoonv1beta1.AddToScheme(scheme)  // NodeInventory
 ```
 
-Or plain YAML:
+## Claiming through the aggregated apiserver
+
+A `Create` against the L3 apiserver is a warm claim, not a scheduling request.
+The server derives the pool key from the submitted object and hands back the
+sandbox a node just delivered:
 
 ```yaml
 apiVersion: agents.x-k8s.io/v1beta1
 kind: Sandbox
-metadata: { name: demo, namespace: default }
+metadata:
+  name: demo
+  namespace: default
+  annotations:
+    sandbox.cocoonstack.io/net: none          # pool network lane
+    sandbox.cocoonstack.io/ttl-seconds: "600" # lease, when spec.shutdownTime is unset
+spec:
+  podTemplate:
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/cocoonstack/sandbox/rt:24.04
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+```
+
+| Input | Becomes |
+|---|---|
+| first container's `image` | the pool's `template` |
+| `sandbox.cocoonstack.io/net` on the Sandbox or its pod template | the pool's `net` (default `none`) |
+| first container's CPU/memory request, else its limit | the pool's `size`: `>4 CPU` or `>8Gi` is `large`, `>1 CPU` or `>2Gi` is `medium`, otherwise `small` |
+| `spec.shutdownTime`, else `sandbox.cocoonstack.io/ttl-seconds` | the claim's lease; neither means the node's default |
+
+The response is synthesized, never stored. It carries
+`status.nodeName`, a `Ready` condition, and the annotations
+`sandbox.cocoonstack.io/claim-id`, `/address`, `/token` and `/deadline` — the
+granted expiry, which the node may clamp below what was asked for.
+
+No warm microVM for the requested pool is a `503`, retryable as capacity
+refills. The aggregated path never cold-starts one.
+
+`Delete` releases the node-local claim and destroys the microVM. Server-side
+dry-run is refused with `400` on create, delete and every lifecycle
+subresource: the node APIs have no dry-run transaction.
+
+### Reads are eventually consistent
+
+`List` and `Get` are assembled from `NodeInventory`, which nodes republish on a
+~30 s cadence, so a read immediately after a create legitimately returns
+`NotFound`. Poll until visible — that is what
+[`examples/lifecycle`](https://github.com/cocoonstack/sandbox-operator/blob/master/examples/lifecycle/example.go)
+does:
+
+```go
+err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &sb)
+if apierrors.IsNotFound(err) {
+    // not published yet; retry
+}
+```
+
+`watch` is served by re-deriving that view and diffing it, so it inherits the
+same lag. Label selectors work against the axes the store stamps:
+`sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`.
+
+## Warm capacity
+
+Warm capacity is a `SandboxWarmPool` plus the `SandboxTemplate` it names. On an
+L3 cluster the in-process driver resolves that pair into a `(template, net,
+size)` key and sets each node's warm target; nothing creates per-sandbox
+objects:
+
+```yaml
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: rt
 spec:
   podTemplate:
     metadata:
-      annotations: { sandbox.cocoonstack.io/runtime: vk-cocoon }   # real microVM
+      annotations:
+        sandbox.cocoonstack.io/net: none
     spec:
       containers:
-        - { name: agent, image: ghcr.io/cocoonstack/cocoon/ubuntu:24.04 }
+        - name: agent
+          image: ghcr.io/cocoonstack/sandbox/rt:24.04
+---
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: rt
+spec:
+  replicas: 50
+  sandboxTemplateRef:
+    name: rt
 ```
 
-For low-latency acquisition, define a `SandboxTemplate` + `SandboxWarmPool` and
-create `SandboxClaim`s — see [examples](https://github.com/cocoonstack/sandbox-operator/tree/master/examples).
+The template's pod template must resolve to the same key a claim derives, or
+claims never match the capacity provisioned for them and every create is a
+`503`. `status.replicas` and `status.readyReplicas` report the warm microVMs
+the fleet actually holds, sampled once per driver tick.
 
-## Selecting a warm pool
+`kubectl patch sandboxwarmpool rt --type=merge -p '{"spec":{"replicas":200}}'`
+is the whole scaling interface.
 
-In v1alpha1, an omitted `spec.warmpool`, `"default"`, or `"none"` cold-starts
-from the template. A named pool enables warm adoption; it does not search all
-pools sharing that template. In v1beta1, use `spec.warmPoolRef.name` for the
-same explicit selection. If a named CRD pool has no adoptable Sandbox, the
-claim falls back to creating one from the template.
+## The Pod path
 
-The L3 aggregated apiserver has a different capacity contract: it claims from
-node-local pools and returns `503 ServiceUnavailable` if no warm capacity is
-available. It does not cold-start a CRD Sandbox. See [scaling design](scaling-design.md).
+Against upstream's controller, a `Sandbox` becomes a Pod and a `SandboxClaim`
+adopts a pre-warmed one:
 
-## Lifecycle and other clients
+```yaml
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxClaim
+metadata:
+  name: demo
+spec:
+  warmPoolRef:
+    name: rt
+```
 
-CRD sandboxes suspend and resume through `spec.operatingMode`. The aggregated
-apiserver additionally serves pause, resume, fork and snapshot subresources;
-see [lifecycle verbs](lifecycle.md). Its optional [e2b API](e2b-compat.md) maps
-SDK calls to the same node-local lifecycle.
+That path's semantics — claim binding, cold fallback, `spec.operatingMode`
+suspend and resume — are upstream's; see
+[agent-sandbox](https://agent-sandbox.sigs.k8s.io/docs/). What this repository
+adds there is the [pod-template contract](runtime-backends.md) that puts the
+Pod on a microVM node.
+
+## Examples
+
+[`examples/`](https://github.com/cocoonstack/sandbox-operator/tree/master/examples)
+holds one runnable file per path: `l3/` (warm capacity plus a claim through the
+aggregated apiserver), `sandboxd/` (the Pod path on a vk-sandbox node),
+`vk-cocoon/`, `standard-kubelet/`, and `lifecycle/` (a Go walk-through of every
+verb on both surfaces).
+
+## Lifecycle verbs and the e2b surface
+
+Pause, resume, fork and snapshot are subresources of the aggregated
+`sandboxes`; see [lifecycle verbs](lifecycle.md). The optional
+[e2b API](e2b-compat.md) maps the same operations onto an unmodified e2b SDK.

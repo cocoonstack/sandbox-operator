@@ -1,0 +1,28 @@
+# Warm capacity for the L3 path: the in-process driver resolves this pair into
+# the pool key (template, net, size) and sets each sandboxd node's warm target.
+#
+# No Pod is ever created from this template, so it carries no scheduling fields:
+# the driver reads only the first container's image, the net annotation, and the
+# size class implied by the container's resource requests.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: rt
+spec:
+  podTemplate:
+    metadata:
+      annotations:
+        sandbox.cocoonstack.io/net: none
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/cocoonstack/sandbox/rt:24.04
+---
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: rt
+spec:
+  replicas: 10
+  sandboxTemplateRef:
+    name: rt

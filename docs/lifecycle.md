@@ -5,8 +5,10 @@ title: Lifecycle verbs
 # Lifecycle verbs
 
 The L3 aggregated apiserver serves four action verbs beyond create/delete as
-**subresources** of `sandboxes.agents.x-k8s.io`. The CRD operator uses
-`spec.operatingMode` for suspend/resume instead.
+**subresources** of `sandboxes.agents.x-k8s.io`. They are installed alongside
+the `sandboxes` storage, so the standard Sandbox schema is untouched and an
+unmodified upstream client keeps working. Upstream's own controller has no
+equivalent; on the Pod path, suspend and resume are `spec.operatingMode`.
 
 L3 create, delete and these action subresources reject server-side dry-run
 (`dryRun=All`) with `400 BadRequest` before accessing the store or issuing a
@@ -19,11 +21,26 @@ node-local RPC. The node APIs do not provide a dry-run transaction.
 | `sandboxes/fork` | `SandboxForkOptions{count,ttlSeconds}` | branches N children; the source keeps running |
 | `sandboxes/snapshot` | `SandboxSnapshotOptions{name}` | captures a checkpoint later sandboxes branch from |
 
+The bodies are this repository's types, registered in upstream's
+`agents.x-k8s.io/v1beta1` because that is the group-version the subresources
+are served under:
+
 ```bash
 kubectl create --raw \
   /apis/agents.x-k8s.io/v1beta1/namespaces/default/sandboxes/my-sandbox/snapshot \
   -f - <<<'{"apiVersion":"agents.x-k8s.io/v1beta1","kind":"SandboxSnapshotOptions","name":"before-migration"}'
 ```
+
+`fork` replies with `SandboxForkResult`: one `{sandboxID, nodeName, address}`
+per child, in request order. A fork is node-local, so every child lands on the
+source's node. `count` defaults to 1 and is bounded by the node's configured
+fork limit; `ttlSeconds` is each child's own lease — children never inherit the
+parent's. `snapshot` replies with `SandboxSnapshotResult{snapshotID, name,
+nodeName, creationTimestamp}`.
+
+A verb against a sandbox the read view cannot resolve is a `404`; a sandbox
+whose inventory entry names no owning node or carries no claim id is a `500`,
+because acting by Kubernetes name would target the wrong microVM.
 
 **These verbs are not uniformly fast.** `resume` takes cocoon's mmap restore
 path and a fork's children clone node-locally, but `pause` and `snapshot` write

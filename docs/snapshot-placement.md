@@ -49,7 +49,10 @@ A node asked to branch a checkpoint it does not hold `HEAD`-probes its mesh
 peers in parallel (HMAC-signed when the mesh carries a `cluster_key`) and
 answers with a **redirect** to the first owners that respond, capped at three
 addresses — the same `200` + `redirect: [addrs]` contract a warm-miss claim
-already uses, and the client retries there with `no_redirect: true`.
+already uses, and a client that chases redirects retries there with
+`no_redirect: true`. This repository's sandboxd client deliberately does not
+chase them: a redirect-only answer is a capacity miss, which the L3 store turns
+into a retryable `503` and the L2 gateway into its fallback signal.
 
 The record does not move. The clone still happens on a node whose disk already
 holds the data, on its local fast path. Cross-node correctness is bought with
