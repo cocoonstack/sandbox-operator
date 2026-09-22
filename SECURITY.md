@@ -20,8 +20,8 @@ Security fixes land on `master` and the most recent tagged release.
 
 Useful context when assessing impact:
 
-- The aggregated apiserver and controllers authenticate callers through
-  standard Kubernetes authn/authz; access to `agents.x-k8s.io` resources is
+- The aggregated apiserver authenticates callers through standard Kubernetes
+  authn/authz; access to `agents.x-k8s.io` resources is
   governed by RBAC.
 - Node-local warm-pool claims are authorized by the sandboxd bearer token;
   per-sandbox exec is authorized by a per-claim token surfaced as the
