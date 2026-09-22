@@ -6,17 +6,6 @@ import (
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 )
 
-// The lifecycle verbs below are served as SUBRESOURCES of sandboxes
-// (sandboxes/pause, /resume, /fork, /snapshot), never as fields on SandboxSpec.
-// Upstream agent-sandbox has no pause/fork/snapshot concept, and the value of
-// this operator is that an unmodified upstream client keeps working: adding
-// fields to the standard schema would fork it, whereas a subresource is a verb
-// the standard type does not have to know about.
-//
-// They are actions, not desired state, which is also why they are POSTed rather
-// than reconciled — each one is a synchronous node-local transaction, the same
-// shape as the claim that delivered the sandbox.
-
 // +kubebuilder:object:root=true
 
 // SandboxPauseOptions is the body of POST sandboxes/{name}/pause. Pausing

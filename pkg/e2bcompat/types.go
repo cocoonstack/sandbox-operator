@@ -1,7 +1,6 @@
 package e2bcompat
 
-// Field names and JSON casing below are fixed by the e2b OpenAPI contract the
-// SDKs unmarshal directly, so they are reproduced rather than restyled.
+// Field names and JSON casing are fixed by the e2b OpenAPI contract the SDKs unmarshal.
 
 // Sandbox states reported to the SDK (spec: SandboxState).
 const (

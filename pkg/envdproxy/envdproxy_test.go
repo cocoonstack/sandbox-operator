@@ -182,9 +182,6 @@ func TestProxyReportsAnUnreachableNode(t *testing.T) {
 	}
 }
 
-// TestProxyDowngradesToTheGuestsProtocol pins the default that keeps envd
-// reachable: the client may speak HTTP/2 to the edge, but the guest side stays
-// HTTP/1.1 unless the deployment says that daemon serves h2c.
 func TestProxyDowngradesToTheGuestsProtocol(t *testing.T) {
 	node := newFakeNode(t, guestEcho)
 	h := newTestProxy(t, node.resolver())
@@ -239,8 +236,6 @@ func TestProxyCarriesHTTP2ToTheGuestWhenAsked(t *testing.T) {
 	}
 }
 
-// TestProxyServesCleartextHTTP2 covers the edge behind a TLS-terminating
-// front: the client's h2 must survive it, so the deck is h2c on both sides.
 func TestProxyServesCleartextHTTP2(t *testing.T) {
 	node := newFakeNode(t, func(c net.Conn) {
 		srv := &http.Server{Protocols: Protocols(), Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -324,8 +319,7 @@ func request(t *testing.T, h http.Handler, host, path, token string) *http.Respo
 	return w.Result()
 }
 
-// guestEcho answers one request with the bytes it received, so a test can
-// assert on exactly what crossed into the sandbox.
+// guestEcho answers one request with the bytes it received.
 func guestEcho(c net.Conn) {
 	defer c.Close()
 	br := bufio.NewReader(c)
@@ -344,8 +338,7 @@ func guestEcho(c net.Conn) {
 	fmt.Fprintf(c, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
 }
 
-// oneConnListener serves a single already-accepted connection, so a guest can
-// be an http.Server on the far side of the relay.
+// oneConnListener serves a single already-accepted connection.
 type oneConnListener struct {
 	c    net.Conn
 	done bool
@@ -363,8 +356,7 @@ func (l *oneConnListener) Accept() (net.Conn, error) {
 	return l.c, nil
 }
 
-// fakeNode is a sandboxd stand-in: it answers the guest-port upgrade and then
-// hands the connection to a guest handler.
+// fakeNode answers the guest-port upgrade and hands the connection to a guest handler.
 type fakeNode struct {
 	addr     string
 	refuse   int

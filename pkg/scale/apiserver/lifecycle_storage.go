@@ -17,10 +17,7 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// The lifecycle subresources take the pods/eviction shape, not pods/status:
-// each is a synchronous node-local transaction with nothing to GET, and keeping
-// them as subresources leaves the standard Sandbox schema untouched.
-
+// The subresources take the pods/eviction shape: a synchronous verb with nothing to GET.
 var (
 	_ rest.Storage                  = &lifecycleREST{}
 	_ rest.Scoper                   = &lifecycleREST{}
