@@ -10,13 +10,26 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s
+      - -s -w
     goos:
       - linux
     goarch:
       - amd64
       - arm64
     main: ./cmd/sandbox-apiserver
+
+  - id: sandbox-envd-proxy-linux
+    binary: sandbox-envd-proxy
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/sandbox-envd-proxy
 
 archives:
   - id: apiserver
@@ -36,6 +49,28 @@ archives:
       - sandbox-apiserver-linux
     name_template: >-
       sandbox-apiserver_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+
+  - id: envd-proxy
+    ids:
+      - sandbox-envd-proxy-linux
+    name_template: >-
+      sandbox-envd-proxy_{{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+
+  - id: envd-proxy-latest
+    ids:
+      - sandbox-envd-proxy-linux
+    name_template: >-
+      sandbox-envd-proxy_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386

@@ -1,0 +1,17 @@
+# Wildcard DNS for *.{domain} must resolve to this Service: the SDK addresses
+# every sandbox as {port}-{sandboxID}.{domain}.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-envd-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.envdProxy.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "sandbox-operator.envdProxy.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: {{ if .Values.envdProxy.tlsSecretName }}https{{ else }}http{{ end }}
+    port: {{ if .Values.envdProxy.tlsSecretName }}443{{ else }}80{{ end }}
+    targetPort: proxy
+    protocol: TCP

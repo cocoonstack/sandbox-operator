@@ -1,7 +1,8 @@
-// Command envd-proxy is the edge data plane for the e2b-compatible surface. It
-// is the one public entry point an unmodified e2b SDK reaches for files,
-// commands and pty traffic: it resolves the sandbox a request names from node
-// inventory and relays the bytes through the owning node's guest-port endpoint.
+// Command sandbox-envd-proxy is the edge data plane for the e2b-compatible
+// surface. It is the one public entry point an unmodified e2b SDK reaches for
+// files, commands and pty traffic: it resolves the sandbox a request names from
+// node inventory and relays the bytes through the owning node's guest-port
+// endpoint.
 //
 // It runs as its own Deployment, never on a compute node — no client learns a
 // node address, and a node's sandboxd stays the only thing holding sandboxes.
@@ -75,14 +76,14 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 func main() {
 	ctx := ctrl.SetupSignalHandler()
 	o := &options{Addr: ":8443", Namespace: "default"}
-	fs := pflag.NewFlagSet("envd-proxy", pflag.ExitOnError)
+	fs := pflag.NewFlagSet("sandbox-envd-proxy", pflag.ExitOnError)
 	o.addFlags(fs)
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		klog.ErrorS(err, "parse flags")
 		os.Exit(1)
 	}
 	if err := run(ctx, o); err != nil {
-		klog.ErrorS(err, "envd-proxy exited")
+		klog.ErrorS(err, "sandbox-envd-proxy exited")
 		os.Exit(1)
 	}
 }

@@ -15,7 +15,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY api/ ./api/
 COPY cmd/ ./cmd/
-COPY extensions/ ./extensions/
 COPY pkg/ ./pkg/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X main.version=${VERSION}" \

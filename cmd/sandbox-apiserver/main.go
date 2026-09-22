@@ -2,7 +2,7 @@
 // sandboxes.agents.x-k8s.io. It serves the resource by scatter-gathering
 // per-node NodeInventory objects (the metrics.k8s.io pattern) and stores NO
 // per-sandbox object in etcd. It is registered with the kube-apiserver via the
-// APIService in config/apiservice/, exactly as metrics-server is.
+// APIService the helm chart installs, exactly as metrics-server is.
 package main
 
 import (

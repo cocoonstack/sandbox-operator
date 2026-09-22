@@ -3,9 +3,9 @@ SHELL := /usr/bin/env bash
 APISERVER_BINARY := bin/sandbox-apiserver
 APISERVER_MAIN := ./cmd/sandbox-apiserver
 APISERVER_IMG ?= ghcr.io/cocoonstack/sandbox-apiserver:dev
-ENVDPROXY_BINARY := bin/envd-proxy
-ENVDPROXY_MAIN := ./cmd/envd-proxy
-ENVDPROXY_IMG ?= ghcr.io/cocoonstack/envd-proxy:dev
+ENVDPROXY_BINARY := bin/sandbox-envd-proxy
+ENVDPROXY_MAIN := ./cmd/sandbox-envd-proxy
+ENVDPROXY_IMG ?= ghcr.io/cocoonstack/sandbox-envd-proxy:dev
 
 ## Build-tagged harnesses under test/, one tag per directory
 TAGGED_HARNESSES := l2bench l3bench envdproxysmoke
@@ -66,12 +66,12 @@ apiserver-image: ## Build the aggregated sandbox-apiserver image (override APISE
 	docker build -f Dockerfile.apiserver -t $(APISERVER_IMG) .
 
 .PHONY: envdproxy-build
-envdproxy-build: ## Build the envd-proxy binary.
+envdproxy-build: ## Build the sandbox-envd-proxy binary.
 	mkdir -p bin
 	go build -ldflags "-s -w" -o $(ENVDPROXY_BINARY) $(ENVDPROXY_MAIN)
 
 .PHONY: envdproxy-image
-envdproxy-image: ## Build the envd-proxy image (override ENVDPROXY_IMG).
+envdproxy-image: ## Build the sandbox-envd-proxy image (override ENVDPROXY_IMG).
 	docker build -f Dockerfile.envdproxy -t $(ENVDPROXY_IMG) .
 
 .PHONY: test

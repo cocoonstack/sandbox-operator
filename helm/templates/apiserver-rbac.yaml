@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+
+---
+# Delegated authn (TokenReview) and authz (SubjectAccessReview) against the host
+# kube-apiserver, as every aggregated apiserver does.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sandbox-apiserver:system:auth-delegator
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: system:auth-delegator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Reads kube-system/extension-apiserver-authentication for the client-CA and
+# requestheader config delegated authn needs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-apiserver-auth-reader
+  namespace: kube-system
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: extension-apiserver-authentication-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sandbox-apiserver-inventory-reader
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["sandbox.cocoonstack.io"]
+  resources: ["nodeinventories"]
+  verbs: ["get", "list", "watch"]
+{{- if .Values.apiserver.warmPoolDriver }}
+- apiGroups: ["extensions.agents.x-k8s.io"]
+  resources: ["sandboxwarmpools", "sandboxtemplates"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions.agents.x-k8s.io"]
+  resources: ["sandboxwarmpools/status"]
+  verbs: ["get", "update", "patch"]
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sandbox-apiserver-inventory-reader
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: sandbox-apiserver-inventory-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- if .Values.apiserver.warmPoolDriver }}
+
+---
+# Leader election picks the one replica that drives the warm pools.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-apiserver-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-apiserver-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: sandbox-apiserver
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: sandbox-apiserver-leader-election
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

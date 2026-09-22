@@ -17,6 +17,8 @@ jobs:
         include:
           - image: sandbox-apiserver
             dockerfile: Dockerfile.apiserver
+          - image: sandbox-envd-proxy
+            dockerfile: Dockerfile.envdproxy
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1

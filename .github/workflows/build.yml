@@ -45,5 +45,5 @@ jobs:
           name: sandbox-operator-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             bin/sandbox-apiserver
-            bin/envd-proxy
+            bin/sandbox-envd-proxy
           retention-days: 30

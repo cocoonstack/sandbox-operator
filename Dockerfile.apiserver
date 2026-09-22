@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Image for cmd/sandbox-apiserver, the L3 aggregated apiserver serving
-# sandboxes.agents.x-k8s.io (see config/apiserver/ for the Deployment).
+# sandboxes.agents.x-k8s.io (see helm/ for the Deployment).
 #   docker build -f Dockerfile.apiserver -t <registry>/sandbox-apiserver:<tag> .
 
 FROM --platform=$BUILDPLATFORM golang:1.27.1@sha256:f44f6e88636cfb311f9ebace870ded69d943f227bb3cb27d32ffd84ea18c43ea AS builder
@@ -14,7 +14,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY api/ ./api/
 COPY cmd/ ./cmd/
-COPY extensions/ ./extensions/
 COPY pkg/ ./pkg/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w" \
