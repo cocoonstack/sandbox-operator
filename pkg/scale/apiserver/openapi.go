@@ -6,13 +6,8 @@ import (
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 )
 
-// The canonical Go package names openapinamer derives from the Scheme for the
-// aggregated types; the model map MUST be keyed by them so the namer resolves
-// the sandboxes resource and its action subresources to these definitions.
-const (
-	sandboxDefPrefix = "sigs.k8s.io/agent-sandbox/api/v1beta1."
-	actionDefPrefix  = "github.com/cocoonstack/sandbox-operator/api/v1beta1."
-)
+// sandboxDefPrefix is the Go package path the namer derives for Sandbox and SandboxList; the model map is keyed by it.
+const sandboxDefPrefix = "sigs.k8s.io/agent-sandbox/api/v1beta1."
 
 // gvkExtension is the x-kubernetes-group-version-kind marker the managed-fields
 // TypeConverter (managedfields/internal.indexModels) reads to map a GVK to its
@@ -94,11 +89,9 @@ func sandboxOpenAPIDefinitions(ref openapicommon.ReferenceCallback) map[string]o
 		sandboxDefPrefix + "Sandbox":     sandbox,
 		sandboxDefPrefix + "SandboxList": list,
 	}
-	// The action-subresource bodies embed metav1.TypeMeta, and the definition
-	// builder walks embedded field types through this map, not the Scheme.
-	// Without this entry it aborts the whole group install with "cannot find
-	// model definition for ...meta.v1.TypeMeta" — a crash loop on rollout, not
-	// a degraded feature.
+	// The action bodies embed only metav1.TypeMeta, whose generated
+	// OpenAPIModelName is promoted, so the namer resolves every subresource to
+	// this model; without it the whole group install aborts.
 	typeMeta := openapicommon.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
@@ -116,41 +109,5 @@ func sandboxOpenAPIDefinitions(ref openapicommon.ReferenceCallback) map[string]o
 	// group install.
 	defs["k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"] = typeMeta
 	defs["io.k8s.apimachinery.pkg.apis.meta.v1.TypeMeta"] = typeMeta
-	for _, kind := range []string{
-		"SandboxPauseOptions",
-		"SandboxResumeOptions",
-		"SandboxForkOptions",
-		"SandboxForkResult",
-		"SandboxSnapshotOptions",
-		"SandboxSnapshotResult",
-	} {
-		defs[actionDefPrefix+kind] = actionDefinition(kind)
-	}
 	return defs
-}
-
-// actionDefinition is the model for one action-subresource body. Like the
-// Sandbox model it is deliberately coarse: these types are never persisted, so
-// per-field server-side-apply tracking buys nothing — the model exists so the
-// TypeConverter can resolve the GVK at all.
-func actionDefinition(kind string) openapicommon.OpenAPIDefinition {
-	ext := gvkExtension(kind)
-	// These bodies carry their own fields (count, ttlSeconds, children, ...).
-	// Declaring only kind/apiVersion would make every other field "unknown" to
-	// the field manager, so the interior is preserved rather than enumerated —
-	// the same trade the Sandbox model makes, and for the same reason: nothing
-	// here is persisted, so per-field tracking buys nothing.
-	ext["x-kubernetes-preserve-unknown-fields"] = true
-	return openapicommon.OpenAPIDefinition{
-		Schema: spec.Schema{
-			VendorExtensible: spec.VendorExtensible{Extensions: ext},
-			SchemaProps: spec.SchemaProps{
-				Type: spec.StringOrArray{"object"},
-				Properties: map[string]spec.Schema{
-					"kind":       stringSchema(),
-					"apiVersion": stringSchema(),
-				},
-			},
-		},
-	}
 }

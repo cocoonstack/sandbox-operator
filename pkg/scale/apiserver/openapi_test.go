@@ -1,7 +1,6 @@
 package apiserver
 
 import (
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -12,11 +11,14 @@ import (
 	apiservercompatibility "k8s.io/apiserver/pkg/util/compatibility"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/kube-openapi/pkg/builder3"
+	openapiutil "k8s.io/kube-openapi/pkg/util"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
+
+const typeMetaModel = "io.k8s.apimachinery.pkg.apis.meta.v1.TypeMeta"
 
 func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
 	cfg := NewOpenAPIV3Config()
@@ -47,41 +49,40 @@ func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
 	}
 }
 
-func TestEveryServedTypeHasAnOpenAPIModelUnderItsOwnGoPackage(t *testing.T) {
+func TestEveryServedTypeResolvesToAnOpenAPIModel(t *testing.T) {
 	defs := sandboxOpenAPIDefinitions(func(path string) spec.Ref { return spec.Ref{} })
 
-	for _, obj := range []runtime.Object{
-		&sandboxv1beta1.Sandbox{},
-		&sandboxv1beta1.SandboxList{},
-		&cocoonv1beta1.SandboxPauseOptions{},
-		&cocoonv1beta1.SandboxResumeOptions{},
-		&cocoonv1beta1.SandboxForkOptions{},
-		&cocoonv1beta1.SandboxForkResult{},
-		&cocoonv1beta1.SandboxSnapshotOptions{},
-		&cocoonv1beta1.SandboxSnapshotResult{},
+	for _, tt := range []struct {
+		obj  runtime.Object
+		want string
+	}{
+		{&sandboxv1beta1.Sandbox{}, sandboxDefPrefix + "Sandbox"},
+		{&sandboxv1beta1.SandboxList{}, sandboxDefPrefix + "SandboxList"},
+		{&cocoonv1beta1.SandboxPauseOptions{}, typeMetaModel},
+		{&cocoonv1beta1.SandboxResumeOptions{}, typeMetaModel},
+		{&cocoonv1beta1.SandboxForkOptions{}, typeMetaModel},
+		{&cocoonv1beta1.SandboxForkResult{}, typeMetaModel},
+		{&cocoonv1beta1.SandboxSnapshotOptions{}, typeMetaModel},
+		{&cocoonv1beta1.SandboxSnapshotResult{}, typeMetaModel},
 	} {
-		typ := reflect.TypeOf(obj).Elem()
-		kind := typ.Name()
-		key := typ.PkgPath() + "." + kind
-		def, ok := defs[key]
-		if !ok {
-			t.Errorf("no OpenAPI model for %s; InstallAPIGroup will fail to start the apiserver", key)
+		name := openapiutil.GetCanonicalTypeName(tt.obj)
+		if name != tt.want {
+			t.Errorf("%T resolves to model %q, want %q", tt.obj, name, tt.want)
+		}
+		if _, ok := defs[name]; !ok {
+			t.Errorf("no OpenAPI model for %q; InstallAPIGroup will fail to start the apiserver", name)
+		}
+	}
+	for _, kind := range []string{"Sandbox", "SandboxList"} {
+		gvks, _ := defs[sandboxDefPrefix+kind].Schema.Extensions["x-kubernetes-group-version-kind"].([]any)
+		if len(gvks) != 1 {
+			t.Errorf("%s gvk extension = %v, want exactly one entry", kind, gvks)
 			continue
 		}
-		gvks, ok := def.Schema.Extensions["x-kubernetes-group-version-kind"]
-		if !ok {
-			t.Errorf("%s has no x-kubernetes-group-version-kind; the managed-fields TypeConverter cannot map it", key)
-			continue
-		}
-		entries, ok := gvks.([]any)
-		if !ok || len(entries) != 1 {
-			t.Errorf("%s gvk extension = %v, want exactly one entry", key, gvks)
-			continue
-		}
-		m, _ := entries[0].(map[string]any)
+		m, _ := gvks[0].(map[string]any)
 		gv := sandboxv1beta1.GroupVersion
 		if m["group"] != gv.Group || m["version"] != gv.Version || m["kind"] != kind {
-			t.Errorf("%s declares %v/%v %v, want %s %s", key, m["group"], m["version"], m["kind"], gv, kind)
+			t.Errorf("%s declares %v/%v %v, want %s %s", kind, m["group"], m["version"], m["kind"], gv, kind)
 		}
 	}
 }
