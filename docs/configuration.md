@@ -53,17 +53,19 @@ Enabling it without the key secret fails at render
 (`apiserver.e2b.apiKeySecret.name is required when apiserver.e2b.enabled is
 true`) — the surface refuses to serve unauthenticated.
 
-The chart's default render is 21 objects: the
-`nodeinventories.sandbox.cocoonstack.io` CRD, a Deployment, Service and
-ServiceAccount for each binary, the apiserver's PodDisruptionBudget, the
-`APIService`, the RBAC (one ClusterRole per binary granting `get`/`list`/`watch`
-on `nodeinventories`, the `system:auth-delegator` binding, the leader-election
-Role, and the `sandbox-apiserver-auth-reader` RoleBinding that must live in
-`kube-system` to read `extension-apiserver-authentication`), and the cert-manager
-chain — a self-signed Issuer, a CA Certificate, a CA Issuer and the serving
-Certificate. Every other object goes to `.Release.Namespace`; object names are
-fixed (`sandbox-apiserver`, `sandbox-envd-proxy`), not release-prefixed, so the
-release name is free.
+The chart's default render is 16 objects: the
+`nodeinventories.sandbox.cocoonstack.io` CRD, the apiserver's Deployment,
+Service, ServiceAccount and PodDisruptionBudget, the `APIService`, the RBAC (a
+ClusterRole granting `get`/`list`/`watch` on `nodeinventories` plus the pool
+rules, the `system:auth-delegator` binding, the leader-election Role, and the
+`sandbox-apiserver-auth-reader` RoleBinding that must live in `kube-system` to
+read `extension-apiserver-authentication`), and the cert-manager chain — a
+self-signed Issuer, a CA Certificate, a CA Issuer and the serving Certificate.
+Enabling the e2b surface adds the proxy's Deployment, Service, ServiceAccount
+and its own `nodeinventories` ClusterRole and binding (21 objects): the proxy
+is that surface's data plane and renders only with it. Every other object goes
+to `.Release.Namespace`; object names are fixed (`sandbox-apiserver`,
+`sandbox-envd-proxy`), not release-prefixed, so the release name is free.
 
 It ships no upstream CRD.
 

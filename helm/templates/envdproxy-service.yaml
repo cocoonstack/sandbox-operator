@@ -1,3 +1,4 @@
+{{- if .Values.apiserver.e2b.enabled }}
 # Wildcard DNS for *.{domain} must resolve to this Service: the SDK addresses
 # every sandbox as {port}-{sandboxID}.{domain}.
 apiVersion: v1
@@ -15,3 +16,4 @@ spec:
     port: {{ if .Values.envdProxy.tlsSecretName }}443{{ else }}80{{ end }}
     targetPort: proxy
     protocol: TCP
+{{- end }}

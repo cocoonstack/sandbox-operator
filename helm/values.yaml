@@ -36,6 +36,7 @@ apiserver:
     limits:
       memory: 512Mi
 
+# envdProxy renders only with apiserver.e2b.enabled: it is that surface's data plane.
 envdProxy:
   image:
     repository: ghcr.io/cocoonstack/sandbox-envd-proxy

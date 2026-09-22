@@ -1,3 +1,4 @@
+{{- if .Values.apiserver.e2b.enabled }}
 {{- $tlsSecret := .Values.envdProxy.tlsSecretName -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -72,4 +73,5 @@ spec:
       - name: serving-certs
         secret:
           secretName: {{ $tlsSecret }}
+{{- end }}
 {{- end }}
