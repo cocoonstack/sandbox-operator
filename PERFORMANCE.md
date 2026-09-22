@@ -99,12 +99,33 @@ removed. The node-side numbers are unaffected — the same Pod is now written by
 hand, per the [pod-template contract](docs/runtime-backends.md) — but the
 control-plane half is upstream's code and unmeasured here.
 
-## Upstream controller: CRD-path measurement pending
+## Upstream controller: warm claim on the sandboxd tier
 
-Nothing in this repository measures upstream's agent-sandbox controller. A fresh
-warm-claim measurement on `sigs.k8s.io/agent-sandbox v1.0.3` belongs here, with
-its own environment table and method, and will be appended once it has been run.
-No number is carried over from the retired fork.
+Measured on 2026-09-22 when the forked controllers were replaced by upstream's:
+two bare-metal hosts (384 cores, 1.5 TB each), an isolated control plane
+(kube-apiserver v1.37.0 + etcd), one `vk-sandbox` virtual node per host over
+sandboxd v0.1.13 with 30 warm `rt:24.04` microVMs each. One harness for both
+arms: a `SandboxTemplate` carrying the sandboxd pod-template contract, a
+`SandboxWarmPool` of 40, then 40 `SandboxClaim`s one at a time, latency measured
+from the claim create to the watch event that shows `status.sandboxStatus.name`.
+The arms ran interleaved on the same cluster (F1, U1, F2, U2), each on its own
+CRD set.
+
+| controller | pool fill (40) | claim p50 | p95 | p99 | max | warm hits |
+|---|---|---|---|---|---|---|
+| fork `0719d33` | 2 s | 52.4 ms | 102.9 ms | 104.4 ms | 105.4 ms | 40/40 |
+| upstream v1.0.3 | 2 s | 53.8 ms | 69.4 ms | 72.0 ms | 75.2 ms | 40/40 |
+| fork `0719d33` | 2 s | 44.5 ms | 69.7 ms | 73.8 ms | 75.7 ms | 40/40 |
+| upstream v1.0.3 | 2 s | 48.4 ms | 71.0 ms | 72.0 ms | 72.6 ms | 40/40 |
+
+Upstream's claim controller sits inside the fork's run-to-run spread; the CRD
+path lost nothing in the move. The same round re-ran the L3 half before and
+after the import on that cluster — the aggregated list across both nodes, the
+warm-pool driver setting both nodes' targets, every lifecycle verb over the
+Kubernetes and e2b surfaces (`examples/lifecycle`), and an e2b create on one
+host reached through `sandbox-envd-proxy` on the other — with identical
+results, and `test/l3bench` reports the same 3000 sandboxes from 8 etcd objects
+on both builds.
 
 ## Data plane
 
