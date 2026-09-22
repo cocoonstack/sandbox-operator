@@ -344,10 +344,6 @@ func distribute(replicas int32, nodes []nodeView) map[string]int {
 	return targets
 }
 
-// apportionWarm splits each key's fleet warm across the pools that resolve to
-// it in proportion to their targets; the integer remainder goes one each to the
-// earlier pools. Two pools on one key sum their targets on the node side, so
-// reporting the key's whole warm to both would double-count it.
 func apportionWarm(desired []desiredPool, nodes []nodeView) []int {
 	fleet := make(map[scale.PoolKey]int, len(desired))
 	sumTarget := make(map[scale.PoolKey]int, len(desired))

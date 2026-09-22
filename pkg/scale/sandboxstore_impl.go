@@ -956,9 +956,7 @@ func splitNamespacedName(s string) (namespace, name string) {
 
 func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }
 
-// claimUndelivered reports whether a claim error proves the node handed nothing
-// over: a capacity miss, a failed dial, or a node-side 5xx. A timeout after the
-// request went out may have delivered a microVM, so it is never retried elsewhere.
+// A timeout after the request went out may have delivered a microVM, so it is never retried elsewhere.
 func claimUndelivered(err error) bool {
 	if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
 		return true
