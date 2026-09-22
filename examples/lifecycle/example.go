@@ -46,10 +46,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -132,7 +132,7 @@ func newScheme() (*runtime.Scheme, error) {
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := extv1beta1.AddToScheme(scheme); err != nil {
+	if err := cocoonv1beta1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	return scheme, nil
@@ -153,7 +153,7 @@ func newClient(kubeconfig string, scheme *runtime.Scheme) (client.Client, error)
 // template that actually has capacity, so the walk-through does not depend on
 // a hard-coded image.
 func discoverTemplate(ctx context.Context, c client.Client) (string, error) {
-	var inventories extv1beta1.NodeInventoryList
+	var inventories cocoonv1beta1.NodeInventoryList
 	if err := c.List(ctx, &inventories); err != nil {
 		return "", fmt.Errorf("list NodeInventory: %w", err)
 	}
@@ -193,16 +193,16 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	}
 	stepf("list", "%d sandbox(es) in %s", len(list.Items), o.namespace)
 
-	snap := &sandboxv1beta1.SandboxSnapshotResult{}
+	snap := &cocoonv1beta1.SandboxSnapshotResult{}
 	if err := post(ctx, rc, o.namespace, name, "snapshot",
-		&sandboxv1beta1.SandboxSnapshotOptions{Name: "example-checkpoint"}, snap); err != nil {
+		&cocoonv1beta1.SandboxSnapshotOptions{Name: "example-checkpoint"}, snap); err != nil {
 		return fmt.Errorf("snapshot: %w", err)
 	}
 	stepf("snapshot", "snapshotID=%s on node=%s", snap.SnapshotID, snap.NodeName)
 
-	forked := &sandboxv1beta1.SandboxForkResult{}
+	forked := &cocoonv1beta1.SandboxForkResult{}
 	if err := post(ctx, rc, o.namespace, name, "fork",
-		&sandboxv1beta1.SandboxForkOptions{Count: 2, TTLSeconds: 600}, forked); err != nil {
+		&cocoonv1beta1.SandboxForkOptions{Count: 2, TTLSeconds: 600}, forked); err != nil {
 		return fmt.Errorf("fork: %w", err)
 	}
 	for i, child := range forked.Children {
@@ -210,13 +210,13 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	}
 
 	start := time.Now()
-	if err := post(ctx, rc, o.namespace, name, "pause", &sandboxv1beta1.SandboxPauseOptions{}, nil); err != nil {
+	if err := post(ctx, rc, o.namespace, name, "pause", &cocoonv1beta1.SandboxPauseOptions{}, nil); err != nil {
 		return fmt.Errorf("pause: %w", err)
 	}
 	stepf("pause", "took %s (proportional to guest memory)", time.Since(start).Round(time.Millisecond))
 
 	start = time.Now()
-	if err := post(ctx, rc, o.namespace, name, "resume", &sandboxv1beta1.SandboxResumeOptions{}, nil); err != nil {
+	if err := post(ctx, rc, o.namespace, name, "resume", &cocoonv1beta1.SandboxResumeOptions{}, nil); err != nil {
 		return fmt.Errorf("resume: %w", err)
 	}
 	stepf("resume", "took %s (mmap restore fast path)", time.Since(start).Round(time.Millisecond))

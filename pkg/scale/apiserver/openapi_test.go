@@ -1,16 +1,21 @@
 package apiserver
 
 import (
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	apiservercompatibility "k8s.io/apiserver/pkg/util/compatibility"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/kube-openapi/pkg/builder3"
 	"k8s.io/kube-openapi/pkg/validation/spec"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
@@ -42,39 +47,57 @@ func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
 	}
 }
 
-func TestEveryServedTypeHasAnOpenAPIModel(t *testing.T) {
+func TestEveryServedTypeHasAnOpenAPIModelUnderItsOwnGoPackage(t *testing.T) {
 	defs := sandboxOpenAPIDefinitions(func(path string) spec.Ref { return spec.Ref{} })
 
-	for _, kind := range []string{
-		"Sandbox",
-		"SandboxList",
-		"SandboxPauseOptions",
-		"SandboxResumeOptions",
-		"SandboxForkOptions",
-		"SandboxForkResult",
-		"SandboxSnapshotOptions",
-		"SandboxSnapshotResult",
+	for _, obj := range []runtime.Object{
+		&sandboxv1beta1.Sandbox{},
+		&sandboxv1beta1.SandboxList{},
+		&cocoonv1beta1.SandboxPauseOptions{},
+		&cocoonv1beta1.SandboxResumeOptions{},
+		&cocoonv1beta1.SandboxForkOptions{},
+		&cocoonv1beta1.SandboxForkResult{},
+		&cocoonv1beta1.SandboxSnapshotOptions{},
+		&cocoonv1beta1.SandboxSnapshotResult{},
 	} {
-		key := sandboxDefPrefix + kind
+		typ := reflect.TypeOf(obj).Elem()
+		kind := typ.Name()
+		key := typ.PkgPath() + "." + kind
 		def, ok := defs[key]
 		if !ok {
-			t.Errorf("no OpenAPI model for %s; InstallAPIGroup will fail to start the apiserver", kind)
+			t.Errorf("no OpenAPI model for %s; InstallAPIGroup will fail to start the apiserver", key)
 			continue
 		}
 		gvks, ok := def.Schema.Extensions["x-kubernetes-group-version-kind"]
 		if !ok {
-			t.Errorf("%s has no x-kubernetes-group-version-kind; the managed-fields TypeConverter cannot map it", kind)
+			t.Errorf("%s has no x-kubernetes-group-version-kind; the managed-fields TypeConverter cannot map it", key)
 			continue
 		}
 		entries, ok := gvks.([]any)
 		if !ok || len(entries) != 1 {
-			t.Errorf("%s gvk extension = %v, want exactly one entry", kind, gvks)
+			t.Errorf("%s gvk extension = %v, want exactly one entry", key, gvks)
 			continue
 		}
 		m, _ := entries[0].(map[string]any)
-		if m["kind"] != kind {
-			t.Errorf("%s declares kind %v, want %s", kind, m["kind"], kind)
+		gv := sandboxv1beta1.GroupVersion
+		if m["group"] != gv.Group || m["version"] != gv.Version || m["kind"] != kind {
+			t.Errorf("%s declares %v/%v %v, want %s %s", key, m["group"], m["version"], m["kind"], gv, kind)
 		}
+	}
+}
+
+func TestOnlySandboxKindsUseTheUpstreamDefinitionPrefix(t *testing.T) {
+	defs := sandboxOpenAPIDefinitions(func(path string) spec.Ref { return spec.Ref{} })
+
+	var got []string
+	for key := range defs {
+		if kind, ok := strings.CutPrefix(key, sandboxDefPrefix); ok {
+			got = append(got, kind)
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"Sandbox", "SandboxList"}; !slices.Equal(got, want) {
+		t.Errorf("definitions under %q = %v, want %v", sandboxDefPrefix, got, want)
 	}
 }
 

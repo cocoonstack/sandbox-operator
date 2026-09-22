@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package v1beta1 contains API Schema definitions for the agents v1beta1 API group.
+// Package v1beta1 contains the API Schema definitions this operator owns on top
+// of upstream agent-sandbox: the NodeInventory CRD and the sandboxes action
+// subresource payloads.
 // +kubebuilder:object:generate=true
-// +groupName=agents.x-k8s.io
+// +groupName=sandbox.cocoonstack.io
 package v1beta1
 
 import (
@@ -25,9 +27,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "agents.x-k8s.io", Version: "v1beta1"}
-	// SchemeGroupVersion is group version used to register these objects.
-	SchemeGroupVersion = GroupVersion
+	GroupVersion = schema.GroupVersion{Group: "sandbox.cocoonstack.io", Version: "v1beta1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
 	SchemeBuilder = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
@@ -38,8 +38,3 @@ var (
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
 )
-
-// Resource takes an unqualified resource and returns a Group qualified GroupResource.
-func Resource(resource string) schema.GroupResource {
-	return SchemeGroupVersion.WithResource(resource).GroupResource()
-}

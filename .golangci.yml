@@ -76,7 +76,7 @@ linters:
         text: "shadow"
 
       # kubebuilder API packages register their types through SchemeBuilder in init.
-      - path: (api|extensions/api)/.*\.go
+      - path: api/.*\.go
         linters:
           - gochecknoinits
       # Every int32 conversion here narrows a Kubernetes replica/pool count, a slice

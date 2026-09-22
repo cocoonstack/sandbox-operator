@@ -7,7 +7,7 @@
 #      kube-system/extension-apiserver-authentication ConfigMap (client-CA and
 #      requestheader config for delegated authn).
 #   3. nodeinventories read — get/list/watch on the O(nodes) NodeInventory
-#      objects (extensions.agents.x-k8s.io) the scatter-gather store is fed
+#      objects (sandbox.cocoonstack.io) the scatter-gather store is fed
 #      from. The server reads nothing else and writes nothing.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -54,7 +54,7 @@ metadata:
     app.kubernetes.io/component: aggregated-apiserver
 rules:
 - apiGroups:
-  - extensions.agents.x-k8s.io
+  - sandbox.cocoonstack.io
   resources:
   - nodeinventories
   verbs:

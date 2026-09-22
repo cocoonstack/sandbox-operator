@@ -6,9 +6,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 // ListOptions is the subset of client list parameters the aggregated store
@@ -30,8 +30,8 @@ type PoolKey struct {
 }
 
 // PoolCapacity is one node's warm capacity for a single pool. It aliases the
-// canonical extensions type so the scale contracts stay self-contained.
-type PoolCapacity = extv1beta1.PoolCapacity
+// canonical API type so the scale contracts stay self-contained.
+type PoolCapacity = cocoonv1beta1.PoolCapacity
 
 // SandboxStore is the L3 storage contract behind an aggregated apiserver serving
 // sandboxes.agents.x-k8s.io. It holds NO per-sandbox etcd objects: List/Get/Watch
@@ -136,7 +136,7 @@ type SandboxStats struct {
 }
 
 // InventoryEntry is one live sandbox as summarized by its owning node.
-type InventoryEntry = extv1beta1.InventoryEntry
+type InventoryEntry = cocoonv1beta1.InventoryEntry
 
 var _ runtime.Object = (*NodeInventory)(nil)
 
@@ -144,6 +144,6 @@ var _ runtime.Object = (*NodeInventory)(nil)
 // of that node's live sandboxes, server-side-applied on a slow cadence. The
 // per-sandbox truth lives in the node (the L0 node-scoped cache), not etcd; a
 // lost NodeInventory is rebuilt from the node's own live state on next publish.
-// The canonical type (and its CRD) lives in the extensions.agents.x-k8s.io
-// group; these aliases keep the scale contracts self-contained for callers.
-type NodeInventory = extv1beta1.NodeInventory
+// The canonical type (and its CRD) lives in the sandbox.cocoonstack.io group;
+// these aliases keep the scale contracts self-contained for callers.
+type NodeInventory = cocoonv1beta1.NodeInventory

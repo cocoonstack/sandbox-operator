@@ -26,10 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
@@ -77,13 +77,12 @@ const (
 )
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
-// publisher server-side-applies. It lives in the extensions CRD group next to
-// SandboxClaim/Template/WarmPool — NOT in the aggregated agents.x-k8s.io group:
-// the APIService hands that entire group-version to the aggregated server,
-// which serves only `sandboxes`, so a NodeInventory registered there would 404
-// once the APIService cuts over.
+// publisher server-side-applies. It lives in this operator's own CRD group —
+// NOT in the aggregated agents.x-k8s.io group: the APIService hands that entire
+// group-version to the aggregated server, which serves only `sandboxes`, so a
+// NodeInventory registered there would 404 once the APIService cuts over.
 var (
-	NodeInventoryGVK = extv1beta1.GroupVersion.WithKind("NodeInventory")
+	NodeInventoryGVK = cocoonv1beta1.GroupVersion.WithKind("NodeInventory")
 
 	// ErrNoWarmCapacity lets the aggregated apiserver map an exhausted pool to a retryable 503 instead of writing an object.
 	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")

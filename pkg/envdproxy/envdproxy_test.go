@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"golang.org/x/net/http2"
 )
 
 const testDomain = "sandbox.example.com"
@@ -214,10 +213,10 @@ func TestProxyDowngradesToTheGuestsProtocol(t *testing.T) {
 
 func TestProxyCarriesHTTP2ToTheGuestWhenAsked(t *testing.T) {
 	node := newFakeNode(t, func(c net.Conn) {
-		srv := &http2.Server{}
-		srv.ServeConn(c, &http2.ServeConnOpts{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := &http.Server{Protocols: Protocols(), Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "proto=%d authority=%s", r.ProtoMajor, r.Host)
-		})})
+		})}
+		_ = srv.Serve(&oneConnListener{c: c})
 	})
 	h := newTestProxy(t, node.resolver(), func(o *Options) { o.GuestHTTP2 = true })
 

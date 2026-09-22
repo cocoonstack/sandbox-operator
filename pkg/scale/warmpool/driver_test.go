@@ -10,12 +10,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
@@ -93,7 +93,7 @@ func TestReconcileWritesWarmStatus(t *testing.T) {
 			Name:    name,
 			Node:    name,
 			Address: "10.0.0." + name + ":7777",
-			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 4}},
+			Pools:   []scale.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 4}},
 		})
 		setter.reportWarm("10.0.0."+name+":7777", 4)
 	}
@@ -119,7 +119,7 @@ func TestStatusPrefersPutResponseOverStaleInventory(t *testing.T) {
 			Name:    name,
 			Node:    name,
 			Address: addr,
-			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 10}},
+			Pools:   []scale.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 10}},
 		})
 
 		setter.reportWarm(addr, 7)
@@ -145,7 +145,7 @@ func TestStatusFallsBackToInventoryWhenPutFails(t *testing.T) {
 			Name:    name,
 			Node:    name,
 			Address: addr,
-			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 5, Target: 10}},
+			Pools:   []scale.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 5, Target: 10}},
 		})
 		setter.reportWarm(addr, 9)
 	}
@@ -247,7 +247,7 @@ func TestADeletedTemplateStillDrainsItsPool(t *testing.T) {
 func TestEveryTriggerCollapsesOntoTheSyncKey(t *testing.T) {
 	for name, obj := range map[string]client.Object{
 		"pool":      warmPool("p", 1),
-		"inventory": &extv1beta1.NodeInventory{Name: "n1", Node: "n1"},
+		"inventory": &scale.NodeInventory{Name: "n1", Node: "n1"},
 	} {
 		got := syncRequest(t.Context(), obj)
 		if len(got) != 1 || got[0].Name != "sync" || got[0].Namespace != "" {

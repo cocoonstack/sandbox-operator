@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/component: data-plane-proxy
 rules:
 - apiGroups:
-  - extensions.agents.x-k8s.io
+  - sandbox.cocoonstack.io
   resources:
   - nodeinventories
   verbs:

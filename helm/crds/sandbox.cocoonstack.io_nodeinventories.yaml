@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: nodeinventories.extensions.agents.x-k8s.io
+  name: nodeinventories.sandbox.cocoonstack.io
 spec:
-  group: extensions.agents.x-k8s.io
+  group: sandbox.cocoonstack.io
   names:
     kind: NodeInventory
     listKind: NodeInventoryList
