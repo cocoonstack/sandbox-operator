@@ -369,7 +369,7 @@ func (f *lifecycleStore) Snapshot(_ context.Context, _, _, name string) (scale.S
 
 func pausedSandbox(name, claimID, node, template string) sandboxv1beta1.Sandbox {
 	sb := liveSandbox(name, claimID, node, template)
-	sb.Labels[scale.PhaseLabel] = phaseHibernated
+	sb.Labels[scale.PhaseLabel] = scale.PhaseHibernated
 	return sb
 }
 

@@ -247,10 +247,24 @@ func TestGetReportsDetail(t *testing.T) {
 	}
 }
 
-func TestGetReportsTheClaimTimeAsStartedAt(t *testing.T) {
-	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
-	sb.CreationTimestamp = metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
-	if got := getDetail(t, sb); got.StartedAt != "2030-01-02T03:04:05Z" {
+func TestDetailStartedAtIsTheNodesClaimTime(t *testing.T) {
+	claimed := metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
+	src := scale.NewStaticInventorySource()
+	src.Put(&scale.NodeInventory{
+		Name:    "node-a",
+		Node:    "node-a",
+		Address: "10.0.0.1:7777",
+		Entries: []scale.InventoryEntry{{Name: "sandboxes/sb-1", ID: "sb_0123abcd", Phase: scale.PhaseRunning, Address: "10.0.0.1:7777", ClaimedAt: &claimed}},
+	})
+	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	sb, err := s.lookup(httptest.NewRequest(http.MethodGet, "/sandboxes/x", nil), "sb_0123abcd")
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if got := s.detailFor(sb); got.StartedAt != "2030-01-02T03:04:05Z" {
 		t.Errorf("startedAt = %q, want the claim time the node published", got.StartedAt)
 	}
 }
@@ -423,7 +437,7 @@ func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
 	if got := s.detailFor(&sb).State; got != StateRunning {
 		t.Fatalf("running sandbox state = %q, want %q", got, StateRunning)
 	}
-	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
+	sb.Labels = map[string]string{scale.PhaseLabel: scale.PhaseHibernated}
 	if got := s.detailFor(&sb).State; got != StatePaused {
 		t.Fatalf("hibernated sandbox state = %q, want %q", got, StatePaused)
 	}

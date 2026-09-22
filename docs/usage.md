@@ -48,10 +48,11 @@ spec:
 | `spec.shutdownTime`, else `sandbox.cocoonstack.io/ttl-seconds` | the claim's lease; neither means the node's default |
 
 The response is synthesized, never stored. It carries
-`metadata.creationTimestamp` (the claim time the node published),
 `status.nodeName`, a `Ready` condition, and the annotations
 `sandbox.cocoonstack.io/claim-id`, `/address`, `/token` and `/deadline` — the
-granted expiry, which the node may clamp below what was asked for.
+granted expiry, which the node may clamp below what was asked for. Its
+`metadata.creationTimestamp` is the apiserver's clock at claim time; reads
+after the node's next publish carry the claim time the node recorded.
 
 No warm microVM for the requested pool is a `503`, retryable as capacity
 refills. The aggregated path never cold-starts one.

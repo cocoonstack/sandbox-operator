@@ -195,6 +195,8 @@ func TestEntryToSandbox_StampsCreationTimestamp(t *testing.T) {
 	claimed := metav1.NewTime(time.Date(2026, 8, 17, 11, 0, 0, 0, time.UTC))
 	with := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running", ClaimedAt: &claimed})
 	assert.Equal(t, claimed, with.CreationTimestamp)
+	assert.NotEqual(t, entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running"}).ResourceVersion,
+		with.ResourceVersion, "a published claim time must surface as a Modified entry")
 
 	assert.True(t, entryToSandbox("n1", InventoryEntry{Name: "ns/s1", Phase: "Running"}).CreationTimestamp.IsZero(),
 		"expected no creation timestamp when the node published none")
