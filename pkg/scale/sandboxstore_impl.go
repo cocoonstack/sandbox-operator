@@ -333,14 +333,14 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			s.index.remember(nameKey(namespace, name), best.node)
 			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
-		if !errors.Is(claimErr, sandboxd.ErrNodeAtCapacity) {
+		if !claimUndelivered(claimErr) {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, best.node, claimErr)
 		}
-		s.log.V(1).Info("node warm-raced to zero during claim; trying another node",
-			"node", best.node, "remaining", len(candidates)-1)
+		s.log.V(1).Info("node delivered nothing for the claim; trying another node",
+			"node", best.node, "err", claimErr.Error(), "remaining", len(candidates)-1)
 		candidates = slices.Delete(candidates, idx, idx+1)
 	}
-	return Assignment{}, fmt.Errorf("scale: claim %s/%s: every warm node raced to zero: %w", namespace, name, ErrNoWarmCapacity)
+	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
 }
 
 // Release returns the claimed microVM id to node's pool via that node's sandboxd,
@@ -955,3 +955,18 @@ func splitNamespacedName(s string) (namespace, name string) {
 }
 
 func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }
+
+// claimUndelivered reports whether a claim error proves the node handed nothing
+// over: a capacity miss, a failed dial, or a node-side 5xx. A timeout after the
+// request went out may have delivered a microVM, so it is never retried elsewhere.
+func claimUndelivered(err error) bool {
+	if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	var httpErr *sandboxd.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode >= http.StatusInternalServerError
+}

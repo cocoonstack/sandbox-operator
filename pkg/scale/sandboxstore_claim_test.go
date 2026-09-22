@@ -2,6 +2,10 @@ package scale
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"testing"
 	"time"
 
@@ -184,6 +188,54 @@ func TestStoreClaimFallsBackWhenTheSampledNodeRacedToZero(t *testing.T) {
 	}
 }
 
+func TestStoreClaimSkipsANodeThatDeliveredNothing(t *testing.T) {
+	dial := &url.Error{Op: "Post", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}
+	for _, tt := range []struct {
+		name string
+		err  error
+	}{
+		{"sandboxd down", fmt.Errorf("claim: %w", dial)},
+		{"sandboxd 500", fmt.Errorf("claim: %w", &sandboxd.HTTPError{StatusCode: 500, Message: "provisioning failed"})},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			src := NewStaticInventorySource()
+			src.Put(poolInv("dead", "dead:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
+			src.Put(poolInv("live", "live:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
+			f := &raceFactory{deadAddr: "dead:7777", deadErr: tt.err, result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
+			store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+			for range 20 {
+				a, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+				require.NoError(t, err, "a live warm node was in the candidate set the whole time")
+				assert.Equal(t, "live", a.Node)
+			}
+		})
+	}
+}
+
+func TestStoreClaimDoesNotRetryElsewhereAfterATimeout(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("slow", "slow:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
+	f := &raceFactory{deadAddr: "slow:7777", deadErr: fmt.Errorf("claim: %w", context.DeadlineExceeded)}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.False(t, IsNoWarmCapacity(err), "a lost reply may have delivered a microVM; it must not read as no capacity")
+	assert.Equal(t, 1, f.calls, "the claim must not be re-issued")
+}
+
+func TestStoreClaimIsRetryableWhenEveryNodeIsDown(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+	f := &raceFactory{deadAddr: "n1:7777", deadErr: fmt.Errorf("claim: %w", &sandboxd.HTTPError{StatusCode: 503})}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+	require.Error(t, err)
+	assert.True(t, IsNoWarmCapacity(err), "no node delivered, so the caller gets the retryable signal")
+}
+
 func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
@@ -201,6 +253,8 @@ func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
 type raceFactory struct {
 	emptyAddr string
 	emptyAll  bool
+	deadAddr  string
+	deadErr   error
 	result    sandboxd.ClaimResult
 	calls     int
 }
@@ -221,6 +275,9 @@ func (c *raceClient) Claim(context.Context, sandboxd.ClaimSpec) (sandboxd.ClaimR
 	c.f.calls++
 	if c.f.emptyAll || c.addr == c.f.emptyAddr {
 		return sandboxd.ClaimResult{}, sandboxd.ErrNodeAtCapacity
+	}
+	if c.addr == c.f.deadAddr {
+		return sandboxd.ClaimResult{}, c.f.deadErr
 	}
 	return c.f.result, nil
 }
