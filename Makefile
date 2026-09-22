@@ -1,22 +1,14 @@
 SHELL := /usr/bin/env bash
 
-BINARY := bin/sandbox-operator
-MAIN := ./cmd/sandbox-operator
 APISERVER_BINARY := bin/sandbox-apiserver
 APISERVER_MAIN := ./cmd/sandbox-apiserver
 APISERVER_IMG ?= ghcr.io/cocoonstack/sandbox-apiserver:dev
 ENVDPROXY_BINARY := bin/envd-proxy
 ENVDPROXY_MAIN := ./cmd/envd-proxy
 ENVDPROXY_IMG ?= ghcr.io/cocoonstack/envd-proxy:dev
-VERSION_PKG := github.com/cocoonstack/sandbox-operator/internal/version
-
-GIT_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
-GIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
-LD_FLAGS := -s -w -X $(VERSION_PKG).gitVersion=$(GIT_VERSION) -X $(VERSION_PKG).gitSHA=$(GIT_SHA) -X $(VERSION_PKG).buildDate=$(BUILD_DATE)
 
 ## Build-tagged harnesses under test/, one tag per directory
-TAGGED_HARNESSES := e2e e2ebench l2bench l3bench poolbench scalebench scalestress envdproxysmoke
+TAGGED_HARNESSES := l2bench l3bench envdproxysmoke
 
 ## Target OSes for vet / lint
 GOOSES ?= linux darwin
@@ -62,9 +54,7 @@ $(GOIMPORTS):
 all: fmt-check vet test build
 
 .PHONY: build
-build: ## Build the operator binary.
-	mkdir -p bin
-	go build -ldflags "$(LD_FLAGS)" -o $(BINARY) $(MAIN)
+build: apiserver-build envdproxy-build ## Build every shipped binary.
 
 .PHONY: apiserver-build
 apiserver-build: ## Build the aggregated sandbox-apiserver binary.
@@ -105,7 +95,7 @@ vet: ## Run go vet on every target OS.
 	done
 
 .PHONY: vet-tagged
-vet-tagged: ## Type-check the build-tagged e2e/bench harnesses.
+vet-tagged: ## Type-check the build-tagged bench and smoke harnesses.
 	@for t in $(TAGGED_HARNESSES); do \
 		echo "go vet -tags $$t ./test/$$t"; \
 		go vet -tags $$t ./test/$$t || exit 1; \
@@ -129,7 +119,7 @@ fmt-check: gofumpt goimports ## Check formatting (fails if files need formatting
 	@test -z "$$($(GOIMPORTS) -l .)" || { echo "Files need formatting (goimports):"; $(GOIMPORTS) -l .; exit 1; }
 
 .PHONY: generate
-generate: ## Regenerate CRDs, deep copies, and RBAC.
+generate: ## Regenerate CRDs and deep copies.
 	go mod download -modfile=tools.mod
 	go generate ./...
 

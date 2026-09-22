@@ -5,46 +5,12 @@ before:
     - go mod download
 
 builds:
-  - id: sandbox-operator-debug
-    binary: sandbox-operator.dbg
-    env:
-      - CGO_ENABLED=0
-    ldflags:
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.gitSHA={{.Commit}}
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.gitVersion={{.Env.VERSION}}
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.buildDate={{.Date}}
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-    main: ./cmd/sandbox-operator
-
-  - id: sandbox-operator-linux
-    binary: sandbox-operator
-    env:
-      - CGO_ENABLED=0
-    ldflags:
-      - -s
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.gitSHA={{.Commit}}
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.gitVersion={{.Env.VERSION}}
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.buildDate={{.Date}}
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-    main: ./cmd/sandbox-operator
-
   - id: sandbox-apiserver-linux
     binary: sandbox-apiserver
     env:
       - CGO_ENABLED=0
     ldflags:
       - -s
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.gitSHA={{.Commit}}
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.gitVersion={{.Env.VERSION}}
-      - -X github.com/cocoonstack/sandbox-operator/internal/version.buildDate={{.Date}}
     goos:
       - linux
     goarch:
@@ -53,17 +19,6 @@ builds:
     main: ./cmd/sandbox-apiserver
 
 archives:
-  - id: release
-    ids:
-      - sandbox-operator-linux
-    name_template: >-
-      {{- .ProjectName }}_{{- .Version }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end -}}
-
   - id: apiserver
     ids:
       - sandbox-apiserver-linux
@@ -75,29 +30,7 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end -}}
 
-  - id: debug
-    ids:
-      - sandbox-operator-debug
-    name_template: >-
-      {{- .ProjectName }}_{{- .Version }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}_debug
-      {{- if .Arm }}v{{ .Arm }}{{ end -}}
-
   # Unversioned aliases so releases/latest/download/<name>_Linux_x86_64 resolves.
-  - id: release-latest
-    ids:
-      - sandbox-operator-linux
-    name_template: >-
-      {{- .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end -}}
-
   - id: apiserver-latest
     ids:
       - sandbox-apiserver-linux

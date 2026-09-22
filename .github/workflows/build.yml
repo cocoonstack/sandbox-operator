@@ -37,13 +37,13 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: make build apiserver-build
+        run: make build
 
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
           name: sandbox-operator-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            bin/sandbox-operator
             bin/sandbox-apiserver
+            bin/envd-proxy
           retention-days: 30
