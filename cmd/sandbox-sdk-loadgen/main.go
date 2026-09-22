@@ -22,8 +22,8 @@
 // then delete every sandbox this loadgen owns (its namespace + name prefix)
 // at --delete-concurrency with the same confirm-or-leak release semantics;
 // then (with --loop) start the next cycle. Live claims stay bounded by
-// --target: waves never issue past it and the delete phase empties the
-// namespace before the next cycle begins.
+// --target: waves never issue past it and the delete phase re-lists until the
+// read view shows the namespace empty before the next cycle begins.
 package main
 
 import (
@@ -68,6 +68,10 @@ const (
 	// metricsReadHeaderTimeout bounds how long a client may take to send its
 	// request headers, so a stalled connection cannot pin a handler.
 	metricsReadHeaderTimeout = 5 * time.Second
+
+	// The read view lags a wave by a publish interval, so the delete phase re-lists until two passes come back empty.
+	deleteSettleTimeout = 2 * time.Minute
+	deleteResettle      = 10 * time.Second
 )
 
 var (
@@ -373,12 +377,44 @@ func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, 
 // synthesizes objects from node inventory and does not guarantee label
 // round-trip) — at o.deleteConcurrency with confirm-or-leak semantics.
 func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, deleted, leaked int64) {
-	var list sandboxv1beta1.SandboxList
-	if err := cl.List(ctx, &list, client.InNamespace(o.namespace)); err != nil {
-		fmt.Printf("delete phase: list %s failed: %v\n", o.namespace, err)
-		return 0, 0, 0
-	}
 	prefix := o.namegen + "-"
+	done := map[string]struct{}{}
+	deadline := time.Now().Add(deleteSettleTimeout)
+	for empty := 0; empty < 2 && ctx.Err() == nil; {
+		var list sandboxv1beta1.SandboxList
+		if err := cl.List(ctx, &list, client.InNamespace(o.namespace)); err != nil {
+			fmt.Printf("delete phase: list %s failed: %v\n", o.namespace, err)
+			return listed, deleted, leaked
+		}
+		var mine []*sandboxv1beta1.Sandbox
+		for i := range list.Items {
+			sb := &list.Items[i]
+			if _, seen := done[sb.Name]; seen || !strings.HasPrefix(sb.Name, prefix) {
+				continue
+			}
+			done[sb.Name] = struct{}{}
+			mine = append(mine, sb)
+		}
+		if len(mine) == 0 {
+			empty++
+		} else {
+			empty = 0
+			listed += int64(len(mine))
+			d, l := releaseAll(ctx, cl, o, mine)
+			deleted += d
+			leaked += l
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		if empty < 2 {
+			sleepCtx(ctx, deleteResettle)
+		}
+	}
+	return listed, deleted, leaked
+}
+
+func releaseAll(ctx context.Context, cl client.Client, o *options, sbs []*sandboxv1beta1.Sandbox) (deleted, leaked int64) {
 	work := make(chan *sandboxv1beta1.Sandbox)
 	var wg sync.WaitGroup
 	for range o.deleteConcurrency {
@@ -392,12 +428,7 @@ func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, delet
 			}
 		})
 	}
-	for i := range list.Items {
-		sb := &list.Items[i]
-		if !strings.HasPrefix(sb.Name, prefix) {
-			continue
-		}
-		listed++
+	for _, sb := range sbs {
 		if ctx.Err() != nil {
 			break
 		}
@@ -405,7 +436,7 @@ func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, delet
 	}
 	close(work)
 	wg.Wait()
-	return listed, deleted, leaked
+	return deleted, leaked
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) {
