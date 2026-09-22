@@ -58,7 +58,6 @@ linters:
     generated: strict
     paths:
       - vendor
-      - mocks
       - dist
     rules:
       - path: _test\.go
@@ -86,7 +85,7 @@ linters:
       # OpenAPI schema field names, Kubernetes label keys/values and Prometheus
       # label names read worse behind an identifier than as the literal they are.
       - linters: [goconst]
-        text: "string `(kind|object|apiVersion|app|name|namespace|true|None|controller|timeout|launch_type|v1beta1|1\\.1\\.1\\.1|8\\.8\\.8\\.8|sandbox-router|sandbox_template|warmpool_name|sandboxes\\.agents\\.x-k8s\\.io)`"
+        text: "string `(kind|object|apiVersion|name|namespace|true|timeout|v1beta1|sandboxes\\.agents\\.x-k8s\\.io)`"
 
 formatters:
   enable:

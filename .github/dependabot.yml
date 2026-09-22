@@ -3,7 +3,6 @@ updates:
   - package-ecosystem: docker
     directories:
       - /
-      - /deploy/loadgen
     schedule:
       interval: weekly
     commit-message:
