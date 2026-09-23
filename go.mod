@@ -97,7 +97,7 @@ require (
 )
 
 require (
-	github.com/cocoonstack/sandbox/sdk/go v0.1.14-0.20260923070732-4800131a603a
+	github.com/cocoonstack/sandbox/sdk/go v0.1.14-0.20260923075620-4c562605f992
 	github.com/go-logr/logr v1.4.4
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.10
@@ -110,7 +110,7 @@ require (
 	k8s.io/component-base v0.37.0
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
-	k8s.io/utils v0.0.0-20260626114624-be93311217bd
-	sigs.k8s.io/agent-sandbox v1.0.3
-	sigs.k8s.io/controller-runtime v0.25.0
+	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
+	sigs.k8s.io/agent-sandbox v1.0.4-0.20260922222611-ce66bdc1484d
+	sigs.k8s.io/controller-runtime v0.25.1
 )
