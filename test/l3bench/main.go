@@ -195,7 +195,6 @@ func main() {
 		fail("label-selected list returned %d, want %d", len(labelList.Items), perNode)
 	}
 
-	// stream, narrowed to the sample object so the initial sync is a single event.
 	watchEvents, watchOK := exerciseWatch(ctx, rc, sampleNS, sampleName)
 
 	kubectlGetWorks := len(allList.Items) == wantSandboxes &&

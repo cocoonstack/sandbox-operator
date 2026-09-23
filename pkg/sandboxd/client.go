@@ -92,8 +92,7 @@ type PoolSpec struct {
 	Warm     int    `json:"warm"`
 }
 
-// NodePool is one pool's live state in a NodeInfo. Only the fields the
-// warm-pool driver reports on are decoded.
+// NodePool is one pool's live state in a NodeInfo.
 type NodePool struct {
 	Key       PoolKey `json:"key"`
 	Warm      int     `json:"warm"`

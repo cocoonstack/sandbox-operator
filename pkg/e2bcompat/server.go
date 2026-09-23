@@ -16,7 +16,7 @@
 //	GET /snapshots, DELETE /templates/{id}     -> list or delete checkpoints
 //	GET /templates, /v2/templates              -> advertised warm-pool keys
 //	GET /sandboxes/{id}/metrics                -> node resource statistics
-//	POST timeout|refreshes, GET /health         -> existence or liveness checks
+//	POST timeout|refreshes, GET /health         -> lease renewal, liveness
 package e2bcompat
 
 import (

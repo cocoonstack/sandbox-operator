@@ -63,8 +63,8 @@ type PoolSetter interface {
 // uniform fleet api_token.
 type ClientFactory func(addr, token string) PoolSetter
 
-// NewSandboxdFactory returns the production factory. It shares the store's
-// address rendering and keep-alive client, so a node advertising a scheme is
+// NewSandboxdFactory returns the production factory. It renders addresses and
+// builds its client as the store does, so a node advertising a scheme is
 // reachable here too.
 func NewSandboxdFactory() ClientFactory {
 	hc := scale.NewSandboxdHTTPClient()

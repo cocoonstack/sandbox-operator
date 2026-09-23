@@ -24,8 +24,8 @@ var (
 		utilruntime.Must(sandboxv1beta1.AddToScheme(s))
 		utilruntime.Must(cocoonv1beta1.AddLifecycleToScheme(s))
 		// Register the served types under the internal version too, as an identity
-		// version: sandboxes is a virtual, read-only resource with no distinct
-		// storage schema, so the external v1beta1 type is also its own internal
+		// version: sandboxes is a virtual resource with no distinct storage
+		// schema, so the external v1beta1 type is also its own internal
 		// type. This lets the request pipeline round-trip without hand-written
 		// conversions while keeping v1beta1 the served, prioritized version.
 		internalGV := schema.GroupVersion{Group: sandboxv1beta1.GroupVersion.Group, Version: runtime.APIVersionInternal}

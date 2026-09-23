@@ -218,8 +218,6 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// deleteSnapshot also serves DELETE /templates/{templateID}: e2b addresses
-// snapshots as templates on delete.
 func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	snapshotID := r.PathValue("snapshotID")
 	snaps, complete, err := s.snapshotsOf(r)
