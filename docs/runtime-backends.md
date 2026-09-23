@@ -64,7 +64,8 @@ The container image is not the claim axis — `template` is. Keep the two equal
 unless the pool is built from a different reference, or the Pod claims from a
 pool nobody provisioned. The pool key the warm-pool driver provisions is
 `(template, net, size)`; a Pod naming a key with no warm capacity gets a typed
-`CreatePod` failure and stays `Pending`.
+`CreatePod` failure and stays `Pending`; under `restartPolicy: Never`
+virtual-kubelet marks it `Failed` instead and stops retrying.
 
 Three things set how fast a drained warm pool refills
 ([performance](performance.md#when-claims-drain-the-pool)):
@@ -152,11 +153,12 @@ admission-time rejection. A wrong pod template now fails later, and differently:
 | No node selector, or one matching no node | The scheduler never binds the Pod; it stays `Pending` with an unschedulable condition |
 | Selector set, toleration missing | The virtual node's `NoSchedule` taint keeps the Pod off it; still `Pending` |
 | `spec.nodeName` pinned to a virtual node | The Pod bypasses the scheduler and reaches the provider; it succeeds or fails on the annotations alone |
-| Missing required annotation | The provider's `CreatePod` fails; the Pod stays `Pending` and the error is on the Pod's events |
+| Missing required annotation | The provider's `CreatePod` fails; the Pod stays `Pending` and the error is on the Pod's events. Under `restartPolicy: Never` virtual-kubelet marks the Pod `Failed` instead and never retries it |
 | `sandbox.cocoonstack.io/runtime` set to something other than `sandboxd` on a vk-sandbox node | `CreatePod` refuses it: that node serves one runtime |
 
 The failure is visible on the Pod rather than on the API call that created the
-`Sandbox`. Read `kubectl describe pod` when a sandbox stays `Pending`.
+`Sandbox`. Read `kubectl describe pod` when a sandbox stays `Pending` or its Pod
+fails.
 
 ## Standard kubelet
 
