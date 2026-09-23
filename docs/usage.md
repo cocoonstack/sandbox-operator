@@ -81,7 +81,11 @@ only after its node publishes.
 
 `watch` is served by re-deriving that view and diffing it, so it inherits the
 same lag. Label selectors work against the axes the store stamps:
-`sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`.
+`sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`. The
+template label carries the pool template as is, and a registry image reference
+is not a valid label value (`/` and `:` are not allowed): a selector that names
+one is a `400`, so only the label's existence
+(`-l sandbox.cocoonstack.io/template`) selects on it.
 
 ## Warm capacity
 
