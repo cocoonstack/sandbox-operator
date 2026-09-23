@@ -113,9 +113,9 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   `POST /sandboxes` and `POST /sandboxes/{id}/fork` carry the token the node
   just issued, and `POST /sandboxes/{id}/connect` reads it back from the owning
   node (one node round trip; sandbox#229 or later), so a process that never
-  saw the sandbox before can connect and use the data plane. Node inventory deliberately carries no
-  per-sandbox secret, so `GET /sandboxes` and `GET /sandboxes/{id}` report it
-  empty.
+  saw the sandbox before can connect and use the data plane. Node inventory
+  deliberately carries no per-sandbox secret, so `GET /sandboxes` and
+  `GET /sandboxes/{id}` report it empty.
 - **`templateID` on read paths comes from node inventory.** The owning node
   publishes the pool template with each entry; a node that does not yet publish
   it makes `GET /sandboxes` and `GET /sandboxes/{id}` report an empty

@@ -27,8 +27,7 @@ type NewSandbox struct {
 	// AllowInternetAccess selects the warm pool's network lane: true picks the
 	// egress-capable pool, false/nil the isolated one.
 	AllowInternetAccess *bool `json:"allow_internet_access,omitempty"`
-	// The NewSandboxV2 fields below name guarantees this backend cannot give
-	// either, so a request that sets one is refused.
+	// The NewSandboxV2 fields below name guarantees this backend cannot give, so a request that sets one is refused.
 	Network         map[string]json.RawMessage `json:"network,omitempty"`
 	VolumeMounts    []json.RawMessage          `json:"volumeMounts,omitempty"`
 	AutoPauseMemory *bool                      `json:"autoPauseMemory,omitempty"`

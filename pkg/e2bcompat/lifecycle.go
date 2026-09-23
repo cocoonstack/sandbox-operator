@@ -204,9 +204,8 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// deleteSnapshot removes one of the caller's checkpoints on the node that
-// holds it. e2b addresses snapshots as templates on delete, so this serves
-// DELETE /templates/{templateID} too.
+// deleteSnapshot also serves DELETE /templates/{templateID}: e2b addresses
+// snapshots as templates on delete.
 func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	snapshotID := r.PathValue("snapshotID")
 	snaps, err := s.snapshotsOf(r)
@@ -228,9 +227,7 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// snapshotsOf lists the fleet's checkpoints recorded under the caller's
-// namespace, the prefix create stamps on their names, with that prefix removed.
-// One unreachable node is skipped, not fatal, so it cannot blank the listing.
+// snapshotsOf lists the caller's checkpoints across the nodes, the namespace prefix create stamps stripped; an unreachable node is skipped.
 func (s *Server) snapshotsOf(r *http.Request) ([]scale.Snapshot, error) {
 	nodes, err := s.nodesWithSandboxes(r)
 	if err != nil {
