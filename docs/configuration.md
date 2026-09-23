@@ -160,7 +160,7 @@ informer and relays the request into the owning node's guest-port endpoint.
 |---|---|---|
 | `--bind-address` | `:8443` | Address the proxy listens on. |
 | `--domain` | — | Base domain sandbox hosts are derived from, as `{port}-{sandboxID}.{domain}`. Must match the apiserver's `--e2b-domain`. |
-| `--namespace` | `default` | Namespace sandbox lookups are scoped to; empty matches every namespace. |
+| `--namespace` | `default` | Namespace inventory lookups are filtered to; empty matches every namespace. Not an access boundary: a caller holding a sandbox's token reaches it in any namespace. |
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext h2c behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Private key for `--tls-cert-file`. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2. |

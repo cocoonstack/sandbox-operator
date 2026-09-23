@@ -168,6 +168,16 @@ func (c *Client) Stats(ctx context.Context, id string) (SandboxStats, error) {
 	return out, err
 }
 
+// Sandbox performs GET /v1/sandboxes/{id}, one live claim in the index-row shape.
+func (c *Client) Sandbox(ctx context.Context, id string) (SandboxSummary, error) {
+	var out SandboxSummary
+	if id == "" {
+		return out, fmt.Errorf("sandboxd: sandbox read requires a sandbox id")
+	}
+	err := c.getJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id), &out)
+	return out, err
+}
+
 // Sandboxes performs GET /v1/sandboxes, this node's live claims.
 func (c *Client) Sandboxes(ctx context.Context) ([]SandboxSummary, error) {
 	var out struct {

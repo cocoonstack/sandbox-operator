@@ -61,11 +61,15 @@ refills. The aggregated path never cold-starts one.
 dry-run is refused with `400` on create, delete and every lifecycle
 subresource: the node APIs have no dry-run transaction.
 
-### Reads are eventually consistent
+### Lists are eventually consistent
 
-`List` and `Get` are assembled from `NodeInventory`, which nodes republish on a
-~30 s cadence, so a read immediately after a create legitimately returns
-`NotFound`. Poll until visible — that is what
+`List` and `Watch` are assembled from `NodeInventory`, which nodes republish on
+a ~30 s cadence, so a list right after a create may not show it yet. A `Get` by
+name that reaches the apiserver replica which served the create asks the node
+the claim went to, so it answers at once; one that reaches another replica
+answers `NotFound` until the node publishes. Lookups by claim id — the e2b
+surface and the envd proxy — ask the nodes from any replica. Polling covers
+the by-name case; it is what
 [`examples/lifecycle`](https://github.com/cocoonstack/sandbox-operator/blob/master/examples/lifecycle/example.go)
 does:
 

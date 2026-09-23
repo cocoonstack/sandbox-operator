@@ -42,9 +42,11 @@ intent, so object count is `O(pools + nodes)` however many sandboxes are live �
 which is why one `SandboxWarmPool` patch could take 20 nodes to 50 000 running
 microVMs while etcd saw ~2 writes/s.
 
-The cost of that design is a read view assembled from inventory nodes republish
-on a ~30 s cadence: `list`/`get` are eventually consistent, and a just-created
-sandbox is briefly invisible. Callers poll.
+The cost of that design is a list view assembled from inventory nodes
+republish on a ~30 s cadence: `list` and `watch` are eventually consistent. A
+lookup by claim id — the e2b surface, the envd proxy — for a sandbox the
+inventory does not list yet asks the nodes directly; a lookup by name does so
+on the apiserver replica that served the create.
 
 ## Guides
 

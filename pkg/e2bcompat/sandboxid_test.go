@@ -27,6 +27,17 @@ func TestPublicIDIsDNSLabelSafe(t *testing.T) {
 	}
 }
 
+func TestClaimIDInvertsPublicID(t *testing.T) {
+	for _, claim := range []string{"sb_0123456789abcdef", "sb_ffff"} {
+		if got := ClaimID(PublicID(claim)); got != claim {
+			t.Errorf("ClaimID(PublicID(%q)) = %q, want the claim id back", claim, got)
+		}
+		if got := ClaimID(claim); got != claim {
+			t.Errorf("ClaimID(%q) = %q, want a raw claim id untouched", claim, got)
+		}
+	}
+}
+
 func TestMatchesIDAcceptsBothForms(t *testing.T) {
 	const claim = "sb_0123456789abcdef"
 

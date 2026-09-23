@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,7 +119,7 @@ func TestGetKeepsTheClaimTimeHintThroughThePublishLag(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = store.Get(t.Context(), "ns", "s1")
-	require.True(t, k8serrors.IsNotFound(err), "before the node republishes the sandbox is not readable: %v", err)
+	require.True(t, k8serrors.IsNotFound(err), "a claim neither published nor listed by its node is not readable: %v", err)
 
 	node, hinted := store.index.lookup(nameKey("ns", "s1"))
 	require.True(t, hinted, "the claim-time hint must survive a Get during the publish lag")
@@ -299,6 +301,7 @@ func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {
 }
 
 type recordingFactory struct {
+	mu           sync.Mutex
 	builtAddr    string
 	builtToken   string
 	claimSpec    sandboxd.ClaimSpec
@@ -311,18 +314,27 @@ type recordingFactory struct {
 	claimErr    error
 	releaseErr  error
 	verbErr     error
+
+	rows     map[string][]sandboxd.SandboxSummary
+	rowReads []string
+	silent   string
 }
 
 func (f *recordingFactory) factory() SandboxdClientFactory {
 	return func(addr, token string) SandboxdClient {
+		f.mu.Lock()
 		f.builtAddr, f.builtToken = addr, token
-		return &recordingClient{f: f}
+		f.mu.Unlock()
+		return &recordingClient{f: f, addr: addr}
 	}
 }
 
 var _ SandboxdClient = (*recordingClient)(nil)
 
-type recordingClient struct{ f *recordingFactory }
+type recordingClient struct {
+	f    *recordingFactory
+	addr string
+}
 
 func (c *recordingClient) Claim(_ context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
 	c.f.claimCalls++
@@ -363,4 +375,27 @@ func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { retu
 
 func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
 	return sandboxd.SandboxStats{}, c.f.verbErr
+}
+
+func (c *recordingClient) Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error) {
+	if c.addr == c.f.silent {
+		<-ctx.Done()
+		return sandboxd.SandboxSummary{}, ctx.Err()
+	}
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.rowReads = append(c.f.rowReads, c.addr)
+	for _, row := range c.f.rows[c.addr] {
+		if row.ID == id {
+			return row, nil
+		}
+	}
+	return sandboxd.SandboxSummary{}, &sandboxd.HTTPError{StatusCode: http.StatusNotFound}
+}
+
+func (c *recordingClient) Sandboxes(context.Context) ([]sandboxd.SandboxSummary, error) {
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.rowReads = append(c.f.rowReads, c.addr)
+	return c.f.rows[c.addr], nil
 }

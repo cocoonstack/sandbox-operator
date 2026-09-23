@@ -18,10 +18,10 @@
 // Two behaviors of this system shape the code below and are worth reading
 // before copying it:
 //
-//   - Reads are eventually consistent. Sandbox objects are synthesized from
-//     per-node NodeInventory, which nodes republish on a ~30s cadence, so a
-//     just-created sandbox is not immediately in List/Get. waitVisible below is
-//     how a caller is expected to handle that.
+//   - Lists are eventually consistent. Sandbox objects are synthesized from
+//     per-node NodeInventory, which nodes republish on a ~30s cadence; a Get by
+//     name asks the node only on the apiserver replica that served the create.
+//     waitVisible below covers a Get that reaches another replica.
 //   - Latency is not uniform. resume takes cocoon's mmap restore fast path and
 //     fork clones a node-local snapshot, but pause and snapshot write the
 //     guest's memory out and therefore cost time proportional to its size.
@@ -250,10 +250,8 @@ func deleteCheckpoints(ctx context.Context, e *e2bClient, ids ...string) error {
 	return nil
 }
 
-// waitVisible polls until the synthesized read view publishes the sandbox.
-// Create returns as soon as the node-local claim completes, but List/Get are
-// served from NodeInventory, which is republished on a ~30s cadence — so a
-// caller that reads immediately after creating must expect a NotFound.
+// waitVisible polls until Get resolves the sandbox: at once on the replica that
+// served the create, at the node's next publish on another.
 func waitVisible(ctx context.Context, c client.Client, ns, name string) (*sandboxv1beta1.Sandbox, error) {
 	var sb sandboxv1beta1.Sandbox
 	err := pollVisible(ctx, fmt.Sprintf("sandbox %s/%s", ns, name), func() (bool, error) {

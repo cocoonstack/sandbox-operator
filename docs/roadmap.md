@@ -11,13 +11,6 @@ move any of these forward are welcome.
   It starts in sandboxd (pool config, `PoolKey`, metrics), then reaches
   `NodeInventory`, `SandboxTemplate`/`SandboxWarmPool` and the warm-pool
   driver so a single node can run mixed-engine pools under operator control.
-- **Read-after-write routing for L3 claims.** A bounded owner index already
-  remembers the node at claim time and on every hit, so a lookup reads one
-  node's inventory and sweeps the fleet only on a miss. What remains is the
-  window before that node republishes `NodeInventory`: a claim is invisible
-  to `get` until then. Fall back to an authoritative node lookup in that
-  window so lifecycle calls work immediately after `create`. Tracked as
-  [#29](https://github.com/cocoonstack/sandbox-operator/issues/29).
 - **Engine-labeled pool metrics.** Once the engine axis exists, `sandboxd_pool_*`
   needs it as a label and the warm-pool driver needs it in the pool key; today
   both key on template/net/size only.

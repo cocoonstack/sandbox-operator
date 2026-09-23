@@ -52,7 +52,7 @@ type options struct {
 	// Domain must match the apiserver's --e2b-domain: both spell a sandbox host
 	// as "{port}-{sandboxID}.{domain}".
 	Domain string
-	// Namespace scopes sandbox lookups; empty matches every namespace.
+	// Namespace filters inventory lookups; empty matches every namespace.
 	Namespace string
 	CertFile  string
 	KeyFile   string
@@ -65,7 +65,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.Domain, "domain", o.Domain,
 		"Base domain sandbox hosts are derived from, as {port}-{sandboxID}.{domain}. Must match the apiserver's --e2b-domain.")
 	fs.StringVar(&o.Namespace, "namespace", o.Namespace,
-		"Namespace sandbox lookups are scoped to; empty matches every namespace.")
+		"Namespace inventory lookups are filtered to; empty matches every namespace. Not an access boundary: a caller holding a sandbox's token reaches it in any namespace.")
 	fs.StringVar(&o.CertFile, "tls-cert-file", o.CertFile,
 		"Wildcard certificate for *.{domain}. Omit to serve cleartext h2c behind an edge that terminates TLS.")
 	fs.StringVar(&o.KeyFile, "tls-private-key-file", o.KeyFile, "Private key for --tls-cert-file.")
