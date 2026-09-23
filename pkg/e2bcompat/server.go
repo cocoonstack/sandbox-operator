@@ -307,10 +307,7 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
-	// Release against the raw node-local claim id, never the id as the client
-	// spelled it: the published id is a DNS-safe rendering, and sandboxd knows
-	// only the original.
-	claimID := sb.Annotations[scale.ClaimIDAnnotation]
+	claimID := claimIDOf(sb)
 	if err := s.store.Release(r.Context(), node, claimID); err != nil {
 		s.opts.Log.Error(err, "e2b delete: release failed", "sandboxID", id, "claimID", claimID, "node", node)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
@@ -404,7 +401,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 	return SandboxDetail{
 		TemplateID:  templateOf(sb),
-		SandboxID:   PublicID(sb.Annotations[scale.ClaimIDAnnotation]),
+		SandboxID:   PublicID(claimIDOf(sb)),
 		ClientID:    sb.Status.NodeName,
 		StartedAt:   started.UTC().Format(time.RFC3339),
 		EndAt:       endAt.UTC().Format(time.RFC3339),
