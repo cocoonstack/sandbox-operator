@@ -44,8 +44,10 @@ envdProxy:
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
-  # domain and namespace default to the apiserver.e2b values: the proxy
-  # resolves the sandboxes that surface claims, under the same host scheme.
+  # domain defaults to apiserver.e2b.domain: the proxy resolves the sandboxes
+  # that surface claims, under the same host scheme. namespace narrows its
+  # inventory lookups; empty resolves across every namespace, which keyed
+  # namespaces need.
   domain: ""
   namespace: ""
   port: 8443

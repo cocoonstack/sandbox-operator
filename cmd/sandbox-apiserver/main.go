@@ -113,7 +113,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.E2BAddr, "e2b-bind-address", o.E2BAddr,
 		"Address the e2b-compatible surface listens on.")
 	fs.StringVar(&o.E2BNamespace, "e2b-namespace", o.E2BNamespace,
-		"Namespace e2b claims are made in; e2b has no namespace concept, so every compat claim lands here.")
+		"Namespace a key that names none claims in, and where anonymous claims land; e2b has no namespace concept.")
 	fs.StringVar(&o.E2BDomain, "e2b-domain", o.E2BDomain,
 		"Base domain the SDK derives the in-sandbox envd host from, as {port}-{sandboxID}.{domain}. Required with --enable-e2b-api: without it a created sandbox has no reachable data plane.")
 	fs.StringVar(&o.E2BEnvdVersion, "e2b-envd-version", o.E2BEnvdVersion,
