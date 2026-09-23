@@ -61,7 +61,7 @@ type SandboxStore interface {
 	// Get resolves one sandbox from the cache-fed node inventories, or from its
 	// node when the node has not republished.
 	Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error)
-	// Watch merges per-node inventory streams into a single sandbox watch.
+	// Watch emits sandbox events as the node inventories change.
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)
 	// Claim delivers a warm microVM for namespace/name from a node advertising warm
 	// capacity for pool, returning the node-local assignment (claim id, node,

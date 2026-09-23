@@ -350,10 +350,7 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	return nil
 }
 
-// Watch merges per-node inventory into a single Sandbox event stream. This
-// minimal-correct implementation re-derives the fanned-out list on a slow cadence
-// and translates the diff into Added/Modified/Deleted events; a production
-// implementation would merge real per-node watch streams instead of polling.
+// Watch re-derives the fanned-out list every watch poll interval and emits the diff as Added/Modified/Deleted events.
 func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) {
 	if _, _, err := parseSelectors(opts); err != nil {
 		return nil, err
