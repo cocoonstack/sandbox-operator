@@ -269,6 +269,18 @@ func TestDetailStartedAtIsTheNodesClaimTime(t *testing.T) {
 	}
 }
 
+func TestLookupHandsTheStoreTheNodeLocalID(t *testing.T) {
+	store := &fakeStore{items: []sandboxv1beta1.Sandbox{liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")}}
+	h := newTestServer(t, store)
+
+	if w := do(t, h, http.MethodGet, "/sandboxes/"+PublicID("sb_one"), "", testKey); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if store.lookedUpID != "sb_one" {
+		t.Errorf("store looked up %q, want the node-local claim id its nodes answer to", store.lookedUpID)
+	}
+}
+
 func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
 	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
 	sb.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"
@@ -465,7 +477,8 @@ type fakeStore struct {
 	claimErr  error
 	assign    scale.Assignment
 
-	items []sandboxv1beta1.Sandbox
+	items      []sandboxv1beta1.Sandbox
+	lookedUpID string
 
 	releasedNode string
 	releasedID   string
@@ -484,7 +497,8 @@ func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbo
 	return nil, nil
 }
 
-func (f *fakeStore) GetByClaimID(_ context.Context, _, _ string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
+func (f *fakeStore) GetByClaimID(_ context.Context, _, id string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
+	f.lookedUpID = id
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

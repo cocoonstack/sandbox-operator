@@ -104,7 +104,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "missing "+accessTokenHeader)
 		return
 	}
-	owner, err := s.resolver.Owner(r.Context(), rt.sandboxID)
+	owner, err := s.resolver.Owner(r.Context(), rt.sandboxID, token)
 	if err != nil {
 		// A caller must not learn from this whether the id exists, which node
 		// holds it, or whether the fleet is reachable.

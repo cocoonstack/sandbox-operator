@@ -89,7 +89,7 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `envdProxy.image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `envdProxy.replicaCount` | Proxy replicas | `2` |
 | `envdProxy.domain` | Base domain; falls back to `apiserver.e2b.domain` | `""` |
-| `envdProxy.namespace` | Namespace sandbox lookups are scoped to; falls back to `apiserver.e2b.namespace` | `""` |
+| `envdProxy.namespace` | Namespace inventory lookups are filtered to (not an access boundary); falls back to `apiserver.e2b.namespace` | `""` |
 | `envdProxy.port` | Port the proxy listens on | `8443` |
 | `envdProxy.tlsSecretName` | Wildcard cert for `*.{domain}`; empty serves h2c | `""` |
 | `envdProxy.resources` | Proxy requests and limits | 100m/128Mi, limit 512Mi |

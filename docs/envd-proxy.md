@@ -48,7 +48,7 @@ sandbox-envd-proxy \
 |---|---|---|
 | `--bind-address` | `:8443` | Public listener. |
 | `--domain` | — | **Required.** Base domain sandbox hosts are derived from. Must match the apiserver's `--e2b-domain`. |
-| `--namespace` | `default` | Namespace sandbox lookups are scoped to; empty matches every namespace. |
+| `--namespace` | `default` | Namespace inventory lookups are filtered to; empty matches every namespace. Not an access boundary: a caller holding a sandbox's token reaches it in any namespace. |
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Key for the above; the two must be set together. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. `envd` 0.8.0 does not serve it. |
@@ -59,6 +59,19 @@ certificate covering it. `GET /healthz` is unauthenticated, for probes.
 It reads `NodeInventory` through an informer, so a data-plane request never
 becomes a LIST against the kube-apiserver; RBAC needs `get`/`list`/`watch` on
 `nodeinventories.sandbox.cocoonstack.io`.
+
+A sandbox created after its node last published inventory is not in the
+informer yet. For such an id the proxy asks every node's
+`GET /v1/sandboxes/{id}/owner` with the caller's `X-Access-Token`: only the
+owning node answers, and only for that sandbox's own token. The owner is kept
+for a minute, past the node's next publish. These asks share one budget per
+proxy replica, 200 a second with a burst of 400, which is also what bounds the
+node traffic unknown ids can cause: each ask costs every node one lookup. Past
+the budget, any id the inventory does not list answers `502` until its node
+publishes it, whoever used the budget up. The asks are not filtered by
+`--namespace`, so a caller that holds a sandbox's token reaches that sandbox
+whichever namespace it was claimed in; a sandbox outside `--namespace` is
+always resolved this way, inside the same budget.
 
 ## Routing
 

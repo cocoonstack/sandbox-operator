@@ -333,7 +333,7 @@ type staticResolver struct {
 	publicID string
 }
 
-func (r staticResolver) Owner(_ context.Context, sandboxID string) (envdproxy.Owner, error) {
+func (r staticResolver) Owner(_ context.Context, sandboxID, _ string) (envdproxy.Owner, error) {
 	if sandboxID != r.publicID && sandboxID != r.claimID {
 		return envdproxy.Owner{}, envdproxy.ErrSandboxNotFound
 	}

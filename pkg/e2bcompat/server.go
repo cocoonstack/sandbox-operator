@@ -345,7 +345,7 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 	if strings.TrimSpace(id) == "" {
 		return nil, errSandboxNotFound
 	}
-	sb, err := s.resolver.GetByClaimID(r.Context(), s.opts.Namespace, id, func(claimID string) bool {
+	sb, err := s.resolver.GetByClaimID(r.Context(), s.opts.Namespace, ClaimID(id), func(claimID string) bool {
 		return MatchesID(claimID, id)
 	})
 	if err != nil {

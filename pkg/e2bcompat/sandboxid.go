@@ -21,6 +21,14 @@ func PublicID(claimID string) string {
 	}, strings.ToLower(claimID))
 }
 
+// ClaimID inverts PublicID for sandboxd's "sb_" + hex claim ids and returns any other id as given.
+func ClaimID(sandboxID string) string {
+	if rest, ok := strings.CutPrefix(sandboxID, "sb-"); ok {
+		return "sb_" + rest
+	}
+	return sandboxID
+}
+
 // MatchesID reports whether a live sandbox's claim id is the one a client asked
 // for, accepting both the raw claim id and its published DNS-safe rendering.
 // The rendering is compared in place: the store sweep calls this per scanned

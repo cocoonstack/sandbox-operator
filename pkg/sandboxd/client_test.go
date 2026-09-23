@@ -2,6 +2,7 @@ package sandboxd
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,57 @@ func TestSandboxesDecodesTheClaimTime(t *testing.T) {
 	require.Len(t, rows, 2)
 	assert.Equal(t, time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC), rows[0].ClaimedAt)
 	assert.True(t, rows[1].ClaimedAt.IsZero(), "a node that publishes no claimed_at leaves it zero")
+}
+
+func TestSandboxReadsOneRow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "the per-id read is a root-token operator surface")
+		if r.URL.Path != "/v1/sandboxes/sb_1" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"sb_1","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z","claimed_at":"2030-01-02T03:04:05Z","claim_ref":"ns/s1"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "root-token")
+
+	row, err := c.Sandbox(t.Context(), "sb_1")
+	require.NoError(t, err)
+	assert.Equal(t, "ns/s1", row.ClaimRef)
+	assert.Equal(t, time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC), row.ClaimedAt)
+
+	_, err = c.Sandbox(t.Context(), "sb_2")
+	he, ok := errors.AsType[*HTTPError](err)
+	require.True(t, ok, "an unknown id must surface the node's status, got %v", err)
+	assert.Equal(t, http.StatusNotFound, he.StatusCode)
+}
+
+func TestIsOwnerAsksWithTheSandboxsOwnToken(t *testing.T) {
+	var fail atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case fail.Load():
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.URL.Path == "/v1/sandboxes/sb_1/owner" && r.Header.Get("Authorization") == "Bearer sbtok":
+			_, _ = w.Write([]byte(`{"owner_addr":"10.0.0.1:7777"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "root-token")
+
+	owns, err := c.IsOwner(t.Context(), "sb_1", "sbtok")
+	require.NoError(t, err)
+	assert.True(t, owns)
+	owns, err = c.IsOwner(t.Context(), "sb_1", "root-token")
+	require.NoError(t, err)
+	assert.False(t, owns, "the node's own api token is not the sandbox's")
+
+	fail.Store(true)
+	_, err = c.IsOwner(t.Context(), "sb_1", "sbtok")
+	assert.Error(t, err, "a node error is not a no")
 }
 
 func TestSetPoolsReplacesTheNodeTargetsAndDecodesTheEcho(t *testing.T) {

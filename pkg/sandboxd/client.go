@@ -211,6 +211,18 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/release", token, "release", http.StatusNoContent, http.StatusNotFound)
 }
 
+// IsOwner performs GET /v1/sandboxes/{id}/owner with the sandbox's own token; the node's 404 is false.
+func (c *Client) IsOwner(ctx context.Context, id, token string) (bool, error) {
+	if id == "" {
+		return false, fmt.Errorf("sandboxd: owner requires a sandbox id")
+	}
+	err := c.sendNoBody(ctx, http.MethodGet, "/v1/sandboxes/"+url.PathEscape(id)+"/owner", token, "owner", http.StatusOK)
+	if he, ok := errors.AsType[*HTTPError](err); ok && he.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // sendNoBody performs a body-less request authenticated with token, accepting the statuses in ok.
 func (c *Client) sendNoBody(ctx context.Context, method, path, token, op string, ok ...int) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)

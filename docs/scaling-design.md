@@ -185,11 +185,11 @@ v1beta1 the `APIService` hands to the aggregated server, which serves only
 | Node partitioned from aggregated server | Its sandboxes briefly absent from `List` (eventual consistency, same as an informer lag) | No |
 | A node `inventory` object lost | Rebuilt from the node's own live state on next publish | No |
 | Aggregated server restart | Stateless; rebuilds from node fan-out | No |
-| Client reads before the owning node republishes inventory | The sandbox is briefly absent; retry until the next publish. Direct authoritative routing is the remaining follow-up below. | No — the read surface is explicitly eventually consistent |
+| Client reads before the owning node republishes inventory | Lookups by claim id (e2b, envd proxy) ask the nodes; by name, the replica that served the create asks the claiming node and another replica answers `NotFound`; `list` and `watch` show it at the next publish | No — the read surface stays eventually consistent: `list`, `watch`, reads by name on another replica, and a deleted sandbox until its node publishes |
 
 **Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
 sandboxes` returns the fanned-out list; per-sandbox `Get` only materializes the
-matching entry. Strong read-after-write and `O(1)` lookup remain follow-up work.
+matching entry, and reads a claim from its node before that node publishes it.
 
 ### L3 routing: why node choice is sampled, not maximized
 
@@ -213,42 +213,37 @@ purpose: a widened interval would let a sandbox created and deleted inside the
 gap produce neither an Added nor a Deleted event. One watcher per fleet is the
 supported shape.
 
-### L3 remaining follow-up: read after write without published inventory
+### L3 read after write without published inventory
 
-Single-sandbox lookup no longer builds the cluster-wide `SandboxList`.
+Single-sandbox lookup does not build the cluster-wide `SandboxList`.
 `SandboxStore.Get` and the e2b claim-id resolver fan out across the cache-fed
 per-node inventories, cancel on the first match, and materialize only that
-entry. This removes the previous `O(total sandboxes)` `Sandbox` allocation, but
-two limitations remain: the lookup cannot see a claim until the owning node
-publishes it, and a miss still scans up to every inventory entry.
+entry. An owning-node index answers a repeat lookup from one node's inventory:
+measured at 200 nodes × 2000 sandboxes, `Get` fell from 2.49 ms / 36 MB to
+39 µs / 217 KB per call. A first lookup, or one whose index entry was evicted,
+still compares entries across the fleet.
 
-**It is stale for one publish interval.** A sandbox is live on its node the
-moment `Claim` returns, but it does not appear in the read view until that node
-republishes its `NodeInventory` (default 30 s). Measured against a 20-node
-fleet: `p50` 29.0 s on the e2b surface, 28.6 s through the aggregated API. A
-lifecycle verb issued inside that window answers `404`. Callers work around it
-by polling until visible — which is what `examples/lifecycle` does — so
-"create, then immediately pause" costs half a minute of polling.
+A sandbox is live on its node the moment `Claim` returns, but it reaches the
+inventory only when that node republishes (default 30 s; measured against a
+20-node fleet, `p50` 29.0 s on the e2b surface, 28.6 s through the aggregated
+API). Reads do not wait for it:
 
-**A first lookup is still `O(total inventory entries)` CPU.** An owning-node
-index now answers a repeat lookup from one node's inventory: measured at 200
-nodes × 2000 sandboxes, `Get` fell from 2.49 ms / 36 MB to 39 µs / 217 KB per
-call. A first lookup, or one whose index entry was evicted, still compares
-entries across the fleet.
-
-Both fall out of the same omission: `Claim` already returns the node and the
-claim id — the e2b create response even hands the node back to the client as
-`clientID` — and a lifecycle verb needs nothing else. The plan keeps that
-routing information instead of re-deriving it:
-
-- **A. Claim-time index.** Implemented: the store records the owning node when
-  a claim is made and when a sweep resolves one, and consults it before fanning
-  out. It is bounded by generation swap rather than per-entry recency
-  bookkeeping, so memory is a fixed budget rather than a function of load.
-- **B. Authoritative fan-out on a miss.** A different replica, or an evicted
-  entry, falls back to asking the nodes directly — the authoritative route the
-  risk table already prescribes. Bounded by node count, off the read path for
-  anything older than one publish interval.
+- **Claim-time index.** The store records the owning node when a claim is made
+  and when a sweep resolves one, and consults it before fanning out. It is
+  bounded by generation swap rather than per-entry recency bookkeeping, so
+  memory is a fixed budget rather than a function of load.
+- **Authoritative lookup on a miss.** When the indexed node's inventory lacks
+  the entry, the apiserver asks that node with the fleet token before sweeping
+  the fleet's inventories; by claim id it then asks every node with one
+  `GET /v1/sandboxes/{id}` each. A name has no per-node query, so a name the
+  index does not know is not looked up on the nodes: the replica that did not
+  serve the create waits for the publish, and a client-side `kubectl apply`,
+  which reads before it creates, costs no node traffic. The envd proxy, which
+  holds no fleet token, asks `GET /v1/sandboxes/{id}/owner` with the caller's
+  sandbox token under a per-replica budget and keeps the answer for a minute,
+  past the node's next publish. A node that has not answered within 500 ms
+  counts as a miss, so a node that is gone but still publishes an inventory
+  object does not hold a lookup up.
 
 Neither touches etcd. **Publishing inventory on change was considered and
 rejected:** `NodeInventory` carries one 105 B entry per live sandbox

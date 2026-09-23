@@ -100,10 +100,13 @@ claim time and the submitted object is the only place `Create` can hear it:
 
 ## Two behaviors callers must handle
 
-- **Reads are eventually consistent.** `Create` returns as soon as the
-  node-local claim completes, but `List`/`Get` are served from `NodeInventory`,
-  which nodes republish on a ~30s cadence — so a read immediately after a
-  create legitimately returns `NotFound`. The example polls; so should you.
+- **Lists are eventually consistent.** `Create` returns as soon as the
+  node-local claim completes. `List` and `Watch` are served from
+  `NodeInventory`, which nodes republish on a ~30s cadence, so a list right
+  after a create may not show it yet. `Get` and the lifecycle verbs by name
+  answer at once on the apiserver replica that served the create and after the
+  node's next publish on another; by claim id (the e2b surface) they answer at
+  once on any replica. The example polls, which covers both.
 - **The published sandbox id is DNS-label safe.** The e2b SDK builds the
   in-sandbox host as `{port}-{sandboxID}.{domain}`, so the node's raw claim id
   (`sb_...`) is rendered as `sb-...` on the e2b surface.

@@ -260,11 +260,10 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 
 // Get resolves which node's published inventory holds namespace/name and
 // returns that entry synthesized as a Sandbox: the hinted node first, then a
-// fleet sweep that cancels on the first hit. Either way the answer lags a
-// claim by up to one publish interval; authoritative node routing is roadmap
-// work.
+// fleet sweep that cancels on the first hit. A sandbox this replica claimed is
+// read from its node before that node republishes.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.findEntry(ctx, "get", nameKey(namespace, name), func(inv *NodeInventory, i int) bool {
+	found, err := s.resolve(ctx, "get", nameKey(namespace, name), listRows, false, func(inv *NodeInventory, i int) bool {
 		ens, ename := splitNamespacedName(inv.Entries[i].Name)
 		return ens == namespace && ename == name
 	})
@@ -283,7 +282,7 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 // caller's spelling of the claim id and keys the owning-node index; match owns
 // which node-local id it accepts.
 func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.findEntry(ctx, "claim-id get", claimKey(namespace, id), func(inv *NodeInventory, i int) bool {
+	found, err := s.resolve(ctx, "claim-id get", claimKey(namespace, id), rowByID(id), true, func(inv *NodeInventory, i int) bool {
 		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
 			return false
 		}
@@ -377,67 +376,42 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 	return w, nil
 }
 
-// findEntry resolves the first match via the last-known node (index) or, on a miss, a fleet sweep that cancels on first hit. Nil, nil means no match.
-func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
+// resolve looks in the indexed node's inventory, then asks that node itself,
+// then sweeps every inventory, and last, when fleet is set, asks every node.
+// Nil, nil means no match.
+func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows nodeRows, fleet bool, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
-		if sb := s.matchOnNode(ctx, node, match); sb != nil {
+		if sb := s.matchOnNode(ctx, op, node, match); sb != nil {
+			return sb, nil
+		}
+		if sb := s.liveOnNode(ctx, op, node, rows, match); sb != nil {
 			return sb, nil
 		}
 	}
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-	gctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	g := &errgroup.Group{}
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	var (
-		mu    sync.Mutex
-		found *sandboxv1beta1.Sandbox
-	)
-	for _, node := range nodes {
-		g.Go(func() error {
-			if gctx.Err() != nil {
-				return nil
-			}
-			inv, err := s.src.NodeInventory(gctx, node)
-			if err != nil {
-				// A sibling goroutine's hit cancels gctx, which fails every read
-				// still in flight; those are not unavailable nodes.
-				if gctx.Err() == nil {
-					s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
-						"node", node, "err", err.Error())
-				}
-				return nil
-			}
-			for i := range inv.Entries {
-				if !match(inv, i) {
-					continue
-				}
-				mu.Lock()
-				if found == nil {
-					found = entryToSandbox(inv.Node, inv.Entries[i])
-					s.index.remember(key, inv.Node)
-				}
-				mu.Unlock()
-				cancel()
-				return nil
-			}
-			return nil
+	found, err := FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, node string) *sandboxv1beta1.Sandbox {
+		return s.matchOnNode(gctx, op, node, match)
+	})
+	if found == nil && err == nil && fleet && s.sandboxdFactory != nil {
+		found, err = FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, node string) *sandboxv1beta1.Sandbox {
+			return s.liveOnNode(gctx, op, node, rows, match)
 		})
 	}
-	_ = g.Wait()
-	return found, nil
+	if found != nil {
+		s.index.remember(key, found.Status.NodeName)
+	}
+	return found, err
 }
 
 // matchOnNode resolves match against one node's inventory, returning nil when
 // that node is unreadable or no longer holds the entry.
-func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
+func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
 	inv, err := s.src.NodeInventory(ctx, node)
 	if err != nil {
+		// a sibling's hit cancels ctx; reads failing from that are not unavailable nodes
+		if ctx.Err() == nil {
+			s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
+				"node", node, "err", err.Error())
+		}
 		return nil
 	}
 	for i := range inv.Entries {
@@ -807,6 +781,44 @@ func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (
 		pools = append(pools, pc)
 	}
 	return addr, pools, nil
+}
+
+// FirstHit runs find on every node src lists, concurrency at a time, and
+// returns the first non-zero result, canceling the rest.
+func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrency int, find func(ctx context.Context, node string) T) (T, error) {
+	var found T
+	nodes, err := src.ListNodes(ctx)
+	if err != nil {
+		return found, fmt.Errorf("scale: enumerate node inventories: %w", err)
+	}
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g := &errgroup.Group{}
+	if concurrency > 0 {
+		g.SetLimit(concurrency)
+	}
+	var (
+		mu   sync.Mutex
+		zero T
+	)
+	for _, node := range nodes {
+		g.Go(func() error {
+			if gctx.Err() != nil {
+				return nil
+			}
+			hit := find(gctx, node)
+			if hit == zero {
+				return nil
+			}
+			mu.Lock()
+			found = cmp.Or(found, hit)
+			mu.Unlock()
+			cancel()
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return found, nil
 }
 
 // fanOutNodes enumerates the node inventories and runs work per node with
