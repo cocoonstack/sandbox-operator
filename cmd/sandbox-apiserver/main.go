@@ -189,7 +189,8 @@ func run() error {
 
 	// Route the warm-pool driver's controller-runtime logs into the apiserver's own stream.
 	ctrl.SetLogger(klog.NewKlogr())
-	ctx := genericapiserver.SetupSignalContext()
+	ctx, fail := context.WithCancelCause(genericapiserver.SetupSignalContext())
+	defer fail(nil)
 
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
@@ -210,7 +211,7 @@ func run() error {
 	)
 
 	if o.WarmPoolDriver {
-		if err = startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
+		if err = startWarmPoolDriver(ctx, fail, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
 			return err
 		}
 	}
@@ -234,6 +235,9 @@ func run() error {
 	}
 	err = server.PrepareRun().RunWithContext(ctx)
 	stopE2B()
+	if cause := context.Cause(ctx); err == nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
 	return err
 }
 
@@ -246,7 +250,7 @@ func run() error {
 // aggregated apiserver owns the serving port. inv is the process-wide cache-fed
 // inventory source; the manager's own client would read NodeInventory
 // unstructured and so bypass its cache on every node read.
-func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
+func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register extensions scheme: %w", err)
@@ -274,7 +278,7 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	}
 	go func() {
 		if err := mgr.Start(ctx); err != nil {
-			klog.ErrorS(err, "warm-pool manager exited")
+			fail(fmt.Errorf("warm-pool manager: %w", err))
 		}
 	}()
 	return nil
