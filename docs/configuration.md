@@ -15,7 +15,15 @@ kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/downl
 
 That is the whole install for the Pod path; nothing from this repository is
 needed. Routing a Sandbox Pod to a microVM node is the
-[pod-template contract](runtime-backends.md).
+[pod-template contract](runtime-backends.md). Two of the controller's flags
+drop one apiserver write per claim each, with no effect on latency
+([performance](performance.md#when-claims-drain-the-pool)):
+
+```bash
+kubectl -n agent-sandbox-system patch deployment agent-sandbox-controller --type=json -p '[
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--disable-claim-events"},
+  {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--disable-claim-observability-annotations"}]'
+```
 
 ### L3 path
 

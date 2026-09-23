@@ -162,10 +162,26 @@ Pod IP it has seen, waits up to 2 s for one, then creates its own, and a slow
 node side makes that fallback fire. Its median is better throughout, because a
 claim it binds is ready.
 
-Per claim, upstream writes a little more: 23–24 apiserver writes against 22–23,
-19.6–20.6 etcd puts against 19.1–20.0, and 1.4–2.3 times the claim-controller
-reconciles, the more the longer claims wait for a warm Sandbox. `--disable-claim-events` removes one Event write per claim and
-changes no latency.
+Per claim, both controllers write about the same: 21–24 apiserver writes and
+18–21 etcd puts, upstream 3–9% above the fork, plus 1.4–2.3 times the
+claim-controller reconciles, the more the longer claims wait for a warm Sandbox
+(it retries every 100 ms while a candidate has no Pod IP). Where a claim's
+writes go, measured at 200 claims against a pool of 40:
+
+| writes per claim | count | what |
+|---|---|---|
+| Events | 4.0 | the scheduler's `Scheduled`, the claim controller's `SandboxAdopted`, virtual-kubelet's `ProviderCreateSuccess` and `ProviderDeleteSuccess` |
+| SandboxClaim | 4.1 | the observability annotation, the assigned-sandbox annotation, status, the first-ready annotation |
+| Sandbox | 4.5 | the adoption, and the replacement member's status transitions |
+| Pod | 3.4 | create, binding, virtual-kubelet's status push |
+| creates and deletes | 5.0 | the claim and the Sandbox created, the claim, its Sandbox and its Pod deleted |
+
+Four of them are optional and change no latency: upstream's
+`--disable-claim-events` and `--disable-claim-observability-annotations` drop
+one write each, and vk-sandbox's `--disable-pod-events` drops the two
+virtual-kubelet events. The claim controller's two-phase adoption (the
+annotation before the Sandbox patch) and the status transitions are the model's
+own cost; the L3 path has none of it.
 
 ## Data plane
 
