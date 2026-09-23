@@ -141,7 +141,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   before this scoping carry no namespace and are not listed.
   Fork children are recorded in the key's namespace under their own claim id
   (a sandboxd with cocoonstack/sandbox#230); an older node records them
-  without a namespace, where they surface in `--e2b-namespace`.
+  without a namespace, so they surface in the `default` namespace.
 - **Checked against the real SDKs.** JS 2.50.0, JS 2.51.0 and Python 2.51.0
   ran create, exec, files, list, pause, connect from a fresh process, exec
   after the resume, the second key's refusals, the default lane and a refused
