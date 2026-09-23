@@ -31,14 +31,11 @@ type NewSandbox struct {
 	Network         map[string]json.RawMessage `json:"network,omitempty"`
 	VolumeMounts    []json.RawMessage          `json:"volumeMounts,omitempty"`
 	AutoPauseMemory *bool                      `json:"autoPauseMemory,omitempty"`
-	AutoResume      *AutoResume                `json:"autoResume,omitempty"`
-	MCP             map[string]json.RawMessage `json:"mcp,omitempty"`
-	IAM             map[string]json.RawMessage `json:"iam,omitempty"`
-}
-
-// AutoResume is NewSandboxV2's autoResume object.
-type AutoResume struct {
-	Enabled bool `json:"enabled"`
+	AutoResume      *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"autoResume,omitempty"`
+	MCP map[string]json.RawMessage `json:"mcp,omitempty"`
+	IAM map[string]json.RawMessage `json:"iam,omitempty"`
 }
 
 // Sandbox is the POST /sandboxes response (spec: Sandbox). templateID,
@@ -93,11 +90,11 @@ type SandboxPauseRequest struct {
 	Memory *bool `json:"memory,omitempty"`
 }
 
-// ConnectSandbox is the POST /sandboxes/{id}/connect body — the SDK's resume.
-// Timeout is required by the schema but does not change the node-owned lease.
+// ConnectSandbox is the POST /sandboxes/{id}/connect body — the SDK's resume;
+// Timeout extends the lease to that many seconds from now, never shortens it.
 type ConnectSandbox struct {
-	Timeout int32 `json:"timeout"`
-	Memory  *bool `json:"memory,omitempty"`
+	Timeout *int32 `json:"timeout,omitempty"`
+	Memory  *bool  `json:"memory,omitempty"`
 }
 
 // SandboxForkRequest is the POST /sandboxes/{id}/fork body.

@@ -3,6 +3,7 @@ package e2bcompat
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
@@ -21,31 +22,6 @@ func TestV2CreateAndConnectAreRouted(t *testing.T) {
 	}
 	if w := do(t, h, http.MethodPost, "/v2/sandboxes/sb-abc/connect", `{"timeout":300}`, testKey); w.Code != http.StatusOK {
 		t.Fatalf("v2 connect status = %d, want 200: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestCreateRefusesV2OptionsItCannotHonor(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		body string
-		want int
-	}{
-		{"network rules", `{"templateID":"t","network":{"denyOut":["10.0.0.0/8"]}}`, http.StatusBadRequest},
-		{"volume mounts", `{"templateID":"t","volumeMounts":[{"name":"v","path":"/data"}]}`, http.StatusBadRequest},
-		{"auto pause memory", `{"templateID":"t","autoPauseMemory":true}`, http.StatusBadRequest},
-		{"auto resume", `{"templateID":"t","autoResume":{"enabled":true}}`, http.StatusBadRequest},
-		{"mcp", `{"templateID":"t","mcp":{"a":{}}}`, http.StatusBadRequest},
-		{"iam tokens", `{"templateID":"t","iam":{"tokens":{"x":{"audience":"a","tokenType":"t"}}}}`, http.StatusBadRequest},
-		{"auto resume off", `{"templateID":"t","autoResume":{"enabled":false}}`, http.StatusCreated},
-		{"empty network", `{"templateID":"t","network":{}}`, http.StatusCreated},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}}
-			h := newTestServer(t, store)
-			if w := do(t, h, http.MethodPost, "/v2/sandboxes", tc.body, testKey); w.Code != tc.want {
-				t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
-			}
-		})
 	}
 }
 
@@ -133,6 +109,94 @@ func TestSnapshotsAreScopedToTheKeysNamespace(t *testing.T) {
 	}
 	if w := do(t, h, http.MethodDelete, "/templates/ck_1", "", "key-a"); w.Code != http.StatusNoContent || store.deletedSnapshotNode != "node-a" || store.deletedSnapshotID != "ck_1" {
 		t.Fatalf("key-a deleting its checkpoint: status %d, deleted %q on %q", w.Code, store.deletedSnapshotID, store.deletedSnapshotNode)
+	}
+}
+
+func TestSnapshotDeleteReportsANodeThatDidNotAnswer(t *testing.T) {
+	inv := scale.NewStaticInventorySource()
+	inv.Put(&scale.NodeInventory{Node: "node-a"})
+	inv.Put(&scale.NodeInventory{Node: "node-b"})
+	store := &fakeStore{snaps: []scale.Snapshot{{ID: "ck_1", Name: "sandboxes/mine", Node: "node-a"}}, snapshotsDownNode: "node-b"}
+	h := newTestServer(t, store, func(o *Options) { o.Inventory = inv })
+
+	if w := do(t, h, http.MethodDelete, "/templates/ck_missing", "", testKey); w.Code != http.StatusInternalServerError {
+		t.Fatalf("delete with a node down: status %d, want 500 rather than not found: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, h, http.MethodDelete, "/templates/ck_1", "", testKey); w.Code != http.StatusNoContent || store.deletedSnapshotID != "ck_1" {
+		t.Fatalf("delete of a listed checkpoint: status %d, deleted %q, want 204 and ck_1", w.Code, store.deletedSnapshotID)
+	}
+	store.snapshotsDownNode = ""
+	if w := do(t, h, http.MethodDelete, "/templates/ck_missing", "", testKey); w.Code != http.StatusNotFound {
+		t.Fatalf("delete with every node answering: status %d, want 404", w.Code)
+	}
+}
+
+func TestSnapshotListFiltersBySandboxAndName(t *testing.T) {
+	inv := scale.NewStaticInventorySource()
+	inv.Put(&scale.NodeInventory{Node: "node-a"})
+	store := &fakeStore{snaps: []scale.Snapshot{
+		{ID: "ck_1", Name: "sandboxes/first", SandboxID: "sb_abc", Node: "node-a"},
+		{ID: "ck_2", Name: "sandboxes/second", SandboxID: "sb_abc", Node: "node-a"},
+		{ID: "ck_3", Name: "sandboxes/first", SandboxID: "sb_other", Node: "node-a"},
+	}}
+	h := newTestServer(t, store, func(o *Options) { o.Inventory = inv })
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"", []string{"ck_1", "ck_2", "ck_3"}},
+		{"?sandboxID=sb-abc", []string{"ck_1", "ck_2"}},
+		{"?name=first", []string{"ck_1", "ck_3"}},
+		{"?sandboxID=sb-abc&name=first", []string{"ck_1"}},
+	} {
+		w := do(t, h, http.MethodGet, "/snapshots"+tc.query, "", testKey)
+		var listed []SnapshotInfo
+		if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d, decode %v", tc.query, w.Code, err)
+		}
+		ids := make([]string, 0, len(listed))
+		for _, snap := range listed {
+			ids = append(ids, snap.SnapshotID)
+		}
+		if !slices.Equal(ids, tc.want) {
+			t.Errorf("%s lists %v, want %v", tc.query, ids, tc.want)
+		}
+	}
+}
+
+func TestListHonorsStateAndTemplateAndRefusesMetadata(t *testing.T) {
+	running, paused := liveSandbox("a", "sb_a", "node-a", "img"), pausedSandbox("b", "sb_b", "node-a", "other")
+	store := &fakeStore{items: []sandboxv1beta1.Sandbox{running, paused}}
+	h := newTestServer(t, store)
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"", []string{"sb-a", "sb-b"}},
+		{"?state=paused", []string{"sb-b"}},
+		{"?state=running,paused", []string{"sb-a", "sb-b"}},
+		{"?state=running&state=paused", []string{"sb-a", "sb-b"}},
+		{"?template=other", []string{"sb-b"}},
+		{"?startedAfter=2000-01-01T00:00:00Z", []string{"sb-a", "sb-b"}},
+		{"?startedAfter=2999-01-01T00:00:00Z", []string{}},
+	} {
+		w := do(t, h, http.MethodGet, "/v2/sandboxes"+tc.query, "", testKey)
+		var listed []SandboxDetail
+		if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d, decode %v: %s", tc.query, w.Code, err, w.Body.String())
+		}
+		ids := make([]string, 0, len(listed))
+		for _, d := range listed {
+			ids = append(ids, d.SandboxID)
+		}
+		if !slices.Equal(ids, tc.want) {
+			t.Errorf("%s lists %v, want %v", tc.query, ids, tc.want)
+		}
+	}
+	for _, query := range []string{"?metadata=owner%3Dme", "?state=sleeping", "?startedAfter=yesterday"} {
+		if w := do(t, h, http.MethodGet, "/v2/sandboxes"+query, "", testKey); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400: %s", query, w.Code, w.Body.String())
+		}
 	}
 }
 

@@ -112,8 +112,8 @@ type SandboxLifecycle interface {
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
 	// Stats reports one sandbox's resource usage.
 	Stats(ctx context.Context, node, id string) (SandboxStats, error)
-	// AccessToken reports the sandbox's own bearer token, which guards its data plane.
-	AccessToken(ctx context.Context, node, id string) (string, error)
+	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.
+	Read(ctx context.Context, node, id string) (SandboxRecord, error)
 	// Renew resets the sandbox's lease to ttlSeconds from now and reports the
 	// deadline the node granted; 0 asks for the node default.
 	Renew(ctx context.Context, node, id string, ttlSeconds int) (time.Time, error)
@@ -137,6 +137,13 @@ type Snapshot struct {
 	// Node is the node holding the checkpoint. Checkpoints are node-local, so
 	// a caller needs it to branch from or delete this snapshot later.
 	Node string
+}
+
+// SandboxRecord is one live claim as its owning node holds it.
+type SandboxRecord struct {
+	Token    string
+	Paused   bool
+	Deadline time.Time
 }
 
 // SandboxStats is one sandbox's resource usage. CPUCount and MemTotalBytes are

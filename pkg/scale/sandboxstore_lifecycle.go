@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
+
+// maxCheckpointName is sandboxd's name budget (types.NameRe).
+const maxCheckpointName = 63
 
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
@@ -130,16 +134,16 @@ func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (Sandbo
 	}, nil
 }
 
-func (s *scatterGatherStore) AccessToken(ctx context.Context, node, id string) (string, error) {
-	cl, err := s.nodeClient(ctx, node, "access token", id)
+func (s *scatterGatherStore) Read(ctx context.Context, node, id string) (SandboxRecord, error) {
+	cl, err := s.nodeClient(ctx, node, "read", id)
 	if err != nil {
-		return "", err
+		return SandboxRecord{}, err
 	}
 	row, err := cl.Sandbox(ctx, id)
 	if err != nil {
-		return "", nodeVerbError(err, "access token", id, node)
+		return SandboxRecord{}, nodeVerbError(err, "read", id, node)
 	}
-	return row.Token, nil
+	return SandboxRecord{Token: row.Token, Paused: row.Hibernated, Deadline: row.Deadline}, nil
 }
 
 // nodeClient resolves a node's advertised sandboxd address and returns a client
@@ -159,6 +163,20 @@ func (s *scatterGatherStore) nodeClient(ctx context.Context, node, verb, id stri
 		return nil, fmt.Errorf("scale: node %q advertises no sandboxd address for %s of %q", node, verb, id)
 	}
 	return s.sandboxdFactory(addr, s.sandboxdToken), nil
+}
+
+// CheckpointName stamps name with its namespace, the only per-checkpoint field a node keeps, within the node's name budget.
+func CheckpointName(namespace, name string) (string, error) {
+	stamped := namespace + "/" + name
+	if len(stamped) > maxCheckpointName {
+		return "", k8serrors.NewBadRequest(fmt.Sprintf("snapshot name %q: at most %d characters in namespace %q", name, maxCheckpointName-len(namespace)-1, namespace))
+	}
+	return stamped, nil
+}
+
+// CheckpointNameIn strips the namespace stamp, reporting whether the checkpoint belongs to namespace.
+func CheckpointNameIn(namespace, stamped string) (string, bool) {
+	return strings.CutPrefix(stamped, namespace+"/")
 }
 
 func nodeVerbError(err error, verb, id, node string) error {

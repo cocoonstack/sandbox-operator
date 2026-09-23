@@ -26,6 +26,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,8 +59,8 @@ var (
 
 // Options configures the compat server.
 type Options struct {
-	// Namespace is the Kubernetes namespace claims are made in. e2b has no
-	// namespace concept, so every compat claim lands in this one.
+	// Namespace is where a key that names no namespace claims, and where
+	// anonymous claims land.
 	Namespace string
 	// Domain is echoed as the sandbox `domain`, from which the SDK derives the
 	// envd host as "{port}-{sandboxID}.{domain}". It is required: a sandbox
@@ -260,6 +262,11 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 
 // listSandboxes reports the live sandboxes in the caller's namespace.
 func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
+	filter, err := listFilterOf(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
 		s.opts.Log.Error(err, "e2b list: store list failed")
@@ -268,7 +275,9 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]SandboxDetail, 0, len(list.Items))
 	for i := range list.Items {
-		out = append(out, s.detailFor(&list.Items[i]))
+		if d := s.detailFor(&list.Items[i]); filter.keeps(d) {
+			out = append(out, d)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -403,6 +412,52 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 		EnvdVersion: s.opts.EnvdVersion,
 		Domain:      s.opts.Domain,
 	}
+}
+
+// listFilter is the GET /v2/sandboxes query the read view can answer; metadata is not stored, so it is refused.
+type listFilter struct {
+	states       []string
+	template     string
+	startedAfter time.Time
+}
+
+func listFilterOf(q url.Values) (listFilter, error) {
+	if q.Has("metadata") {
+		return listFilter{}, errors.New("metadata filters are not supported: metadata is not stored")
+	}
+	f := listFilter{template: q.Get("template")}
+	for _, v := range q["state"] {
+		for state := range strings.SplitSeq(v, ",") {
+			if state != StateRunning && state != StatePaused {
+				return listFilter{}, fmt.Errorf("unknown state %q", state)
+			}
+			f.states = append(f.states, state)
+		}
+	}
+	if v := q.Get("startedAfter"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return listFilter{}, fmt.Errorf("startedAfter: %w", err)
+		}
+		f.startedAfter = t
+	}
+	return f, nil
+}
+
+func (f listFilter) keeps(d SandboxDetail) bool {
+	if len(f.states) > 0 && !slices.Contains(f.states, d.State) {
+		return false
+	}
+	if f.template != "" && d.TemplateID != f.template {
+		return false
+	}
+	if !f.startedAfter.IsZero() {
+		started, err := time.Parse(time.RFC3339, d.StartedAt)
+		if err != nil || !started.After(f.startedAfter) {
+			return false
+		}
+	}
+	return true
 }
 
 // templateOf reports the pool template a sandbox was claimed from: the label the

@@ -136,8 +136,34 @@ func TestConnectReturnsTheSandboxAccessToken(t *testing.T) {
 	if got.EnvdAccessToken != "sandbox-secret" {
 		t.Errorf("envdAccessToken = %q, want the token the owning node holds", got.EnvdAccessToken)
 	}
-	if store.tokenNode != "node-a" || store.tokenID != "sb_abc" {
-		t.Errorf("AccessToken(%q, %q), want (node-a, sb_abc)", store.tokenNode, store.tokenID)
+	if store.readNode != "node-a" || store.readID != "sb_abc" {
+		t.Errorf("Read(%q, %q), want (node-a, sb_abc)", store.readNode, store.readID)
+	}
+}
+
+func TestConnectExtendsALeaseShorterThanItsTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		left     time.Duration
+		body     string
+		wantTTL  int
+		wantCall bool
+	}{
+		{"20 s left, timeout 300", 20 * time.Second, `{"timeout":300}`, 300, true},
+		{"20 s left, timeout omitted", 20 * time.Second, `{}`, DefaultTimeoutSeconds, true},
+		{"an hour left, timeout 300", time.Hour, `{"timeout":300}`, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &lifecycleStore{deadline: time.Now().Add(tc.left)}
+			store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+			if w := do(t, h, http.MethodPost, "/v2/sandboxes/sb-abc/connect", tc.body, testKey); w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			}
+			if called := store.renewedID != ""; called != tc.wantCall || store.renewedTTL != tc.wantTTL {
+				t.Errorf("renew called %v for %d s, want %v for %d s", called, store.renewedTTL, tc.wantCall, tc.wantTTL)
+			}
+		})
 	}
 }
 
@@ -221,6 +247,17 @@ func TestSnapshotReturns201WithID(t *testing.T) {
 	}
 	if store.snapshotName != "sandboxes/before-migration" {
 		t.Errorf("name routed = %q, want it stamped with the key's namespace", store.snapshotName)
+	}
+}
+
+func TestSnapshotNameMustFitTheNodeBudgetWithItsStamp(t *testing.T) {
+	store := &lifecycleStore{}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/snapshots", `{"name":"`+strings.Repeat("x", 54)+`"}`, testKey)
+	if w.Code != http.StatusBadRequest || store.snapshotName != "" {
+		t.Fatalf("status = %d, routed %q; want 400 and no snapshot: %s", w.Code, store.snapshotName, w.Body.String())
 	}
 }
 
@@ -315,16 +352,17 @@ type lifecycleStore struct {
 	renewedTTL             int
 	renewDeadline          time.Time
 	token                  string
-	tokenNode, tokenID     string
+	deadline               time.Time
+	readNode, readID       string
 	err                    error
 	statsErr               error
 
 	nodePaused bool
 }
 
-func (f *lifecycleStore) AccessToken(_ context.Context, node, id string) (string, error) {
-	f.tokenNode, f.tokenID = node, id
-	return f.token, nil
+func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.SandboxRecord, error) {
+	f.readNode, f.readID = node, id
+	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused, Deadline: f.deadline}, f.statsErr
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
