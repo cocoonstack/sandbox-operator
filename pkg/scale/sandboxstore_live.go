@@ -63,8 +63,10 @@ func EntryFromSummary(row sandboxd.SandboxSummary) InventoryEntry {
 	}
 }
 
-func listRows(ctx context.Context, cl SandboxdClient) ([]sandboxd.SandboxSummary, error) {
-	return cl.Sandboxes(ctx)
+func rowsByClaimRef(ref string) nodeRows {
+	return func(ctx context.Context, cl SandboxdClient) ([]sandboxd.SandboxSummary, error) {
+		return cl.SandboxesByClaimRef(ctx, ref)
+	}
 }
 
 func rowByID(id string) nodeRows {

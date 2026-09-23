@@ -44,7 +44,7 @@ type SandboxStore interface {
 	// List assembles a SandboxList by fanning out to node inventories.
 	List(ctx context.Context, opts ListOptions) (*sandboxv1beta1.SandboxList, error)
 	// Get resolves one sandbox from the cache-fed node inventories, or from its
-	// node when this replica made the claim and the node has not republished.
+	// node when the node has not republished.
 	Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error)
 	// Watch merges per-node inventory streams into a single sandbox watch.
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)

@@ -135,6 +135,21 @@ func TestSandboxesDecodesTheClaimTime(t *testing.T) {
 	assert.True(t, rows[1].ClaimedAt.IsZero(), "a node that publishes no claimed_at leaves it zero")
 }
 
+func TestSandboxesByClaimRefAsksForOneName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/sandboxes", r.URL.Path)
+		assert.Equal(t, "claim_ref=team-a%2Fdemo", r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sandboxes":[{"id":"sb_1","key":{"template":"base:24.04"},"claim_ref":"team-a/demo"}]}`))
+	}))
+	defer srv.Close()
+
+	rows, err := New(srv.URL, "root-token").SandboxesByClaimRef(t.Context(), "team-a/demo")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "team-a/demo", rows[0].ClaimRef)
+}
+
 func TestSandboxReadsOneRow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "the per-id read is a root-token operator surface")

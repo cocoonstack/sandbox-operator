@@ -20,8 +20,7 @@
 //
 //   - Lists are eventually consistent. Sandbox objects are synthesized from
 //     per-node NodeInventory, which nodes republish on a ~30s cadence; a Get by
-//     name asks the node only on the apiserver replica that served the create.
-//     waitVisible below covers a Get that reaches another replica.
+//     name or claim id asks the nodes, so only List and Watch lag a create.
 //   - Latency is not uniform. resume takes cocoon's mmap restore fast path and
 //     fork clones a node-local snapshot, but pause and snapshot write the
 //     guest's memory out and therefore cost time proportional to its size.
@@ -53,14 +52,7 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-const (
-	// visibilityTimeout bounds the wait for the read view to publish a sandbox.
-	// It is generous relative to the ~30s inventory cadence so a single slow
-	// publish does not fail the walk-through.
-	visibilityTimeout = 90 * time.Second
-
-	claimIDAnnotation = scale.ClaimIDAnnotation
-)
+const claimIDAnnotation = scale.ClaimIDAnnotation
 
 type options struct {
 	kubeconfig string
@@ -182,9 +174,9 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	}
 	stepf("create", "Sandbox %s/%s", o.namespace, name)
 
-	live, err := waitVisible(ctx, c, o.namespace, name)
-	if err != nil {
-		return "", err
+	live := &sandboxv1beta1.Sandbox{}
+	if err := c.Get(ctx, client.ObjectKey{Namespace: o.namespace, Name: name}, live); err != nil {
+		return "", fmt.Errorf("get Sandbox: %w", err)
 	}
 	stepf("get", "node=%s claimID=%s", live.Status.NodeName, live.Annotations[claimIDAnnotation])
 
@@ -248,26 +240,6 @@ func deleteCheckpoints(ctx context.Context, e *e2bClient, ids ...string) error {
 		stepf("snapshot", "deleted checkpoint %s", ck)
 	}
 	return nil
-}
-
-// waitVisible polls until Get resolves the sandbox: at once on the replica that
-// served the create, at the node's next publish on another.
-func waitVisible(ctx context.Context, c client.Client, ns, name string) (*sandboxv1beta1.Sandbox, error) {
-	var sb sandboxv1beta1.Sandbox
-	err := pollVisible(ctx, fmt.Sprintf("sandbox %s/%s", ns, name), func() (bool, error) {
-		err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &sb)
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		if err != nil {
-			return false, fmt.Errorf("get Sandbox: %w", err)
-		}
-		return true, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &sb, nil
 }
 
 // post invokes an action subresource. These are POST-only verbs (the
@@ -342,8 +314,10 @@ func runE2B(ctx context.Context, o options, k8sCheckpoint string) error {
 	}
 	stepf("list", "%d sandbox(es)", len(listed))
 
-	if err := e.waitVisible(ctx, id); err != nil {
+	if code, err := e.status(ctx, http.MethodGet, "/sandboxes/"+id, nil); err != nil {
 		return err
+	} else if code != http.StatusOK {
+		return fmt.Errorf("get returned %d, want 200", code)
 	}
 	stepf("get", "%s is in the read view", id)
 
@@ -457,18 +431,6 @@ func (e *e2bClient) health(ctx context.Context) error {
 	return nil
 }
 
-// waitVisible polls until the read view publishes the sandbox — the same
-// eventual consistency the Kubernetes surface has, for the same reason.
-func (e *e2bClient) waitVisible(ctx context.Context, id string) error {
-	return pollVisible(ctx, "sandbox "+id, func() (bool, error) {
-		code, err := e.status(ctx, http.MethodGet, "/sandboxes/"+id, nil)
-		if err != nil {
-			return false, err
-		}
-		return code == http.StatusOK, nil
-	})
-}
-
 func (e *e2bClient) request(ctx context.Context, method, path string, body any) (*http.Request, error) {
 	var rdr io.Reader
 	if body != nil {
@@ -530,28 +492,6 @@ func (e *e2bClient) status(ctx context.Context, method, path string, body any) (
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, nil
-}
-
-// pollVisible retries probe on a 3s tick until the subject is visible or visibilityTimeout elapses.
-func pollVisible(ctx context.Context, subject string, probe func() (bool, error)) error {
-	deadline := time.Now().Add(visibilityTimeout)
-	for {
-		visible, err := probe()
-		if err != nil {
-			return err
-		}
-		if visible {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%s not visible within %s", subject, visibilityTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
-	}
 }
 
 func section(name string) { fmt.Printf("\n=== %s ===\n", name) }

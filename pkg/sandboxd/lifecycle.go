@@ -180,10 +180,19 @@ func (c *Client) Sandbox(ctx context.Context, id string) (SandboxSummary, error)
 
 // Sandboxes performs GET /v1/sandboxes, this node's live claims.
 func (c *Client) Sandboxes(ctx context.Context) ([]SandboxSummary, error) {
+	return c.listSandboxes(ctx, "/v1/sandboxes")
+}
+
+// SandboxesByClaimRef performs GET /v1/sandboxes?claim_ref=, this node's live claims recorded under ref.
+func (c *Client) SandboxesByClaimRef(ctx context.Context, ref string) ([]SandboxSummary, error) {
+	return c.listSandboxes(ctx, "/v1/sandboxes?claim_ref="+url.QueryEscape(ref))
+}
+
+func (c *Client) listSandboxes(ctx context.Context, path string) ([]SandboxSummary, error) {
 	var out struct {
 		Sandboxes []SandboxSummary `json:"sandboxes"`
 	}
-	err := c.getJSON(ctx, "/v1/sandboxes", &out)
+	err := c.getJSON(ctx, path, &out)
 	return out.Sandboxes, err
 }
 

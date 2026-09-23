@@ -258,12 +258,9 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	return list, nil
 }
 
-// Get resolves which node's published inventory holds namespace/name and
-// returns that entry synthesized as a Sandbox: the hinted node first, then a
-// fleet sweep that cancels on the first hit. A sandbox this replica claimed is
-// read from its node before that node republishes.
+// Get resolves namespace/name from the inventories, then from the nodes by the claim ref it was claimed under.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.resolve(ctx, "get", nameKey(namespace, name), listRows, false, func(inv *NodeInventory, i int) bool {
+	found, err := s.resolve(ctx, "get", nameKey(namespace, name), rowsByClaimRef(namespacedName(namespace, name)), func(inv *NodeInventory, i int) bool {
 		ens, ename := splitNamespacedName(inv.Entries[i].Name)
 		return ens == namespace && ename == name
 	})
@@ -282,7 +279,7 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 // caller's spelling of the claim id and keys the owning-node index; match owns
 // which node-local id it accepts.
 func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.resolve(ctx, "claim-id get", claimKey(namespace, id), rowByID(id), true, func(inv *NodeInventory, i int) bool {
+	found, err := s.resolve(ctx, "claim-id get", claimKey(namespace, id), rowByID(id), func(inv *NodeInventory, i int) bool {
 		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
 			return false
 		}
@@ -328,7 +325,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			// Name the claim by the k8s object so the node's operator index echoes
 			// it back and the aggregated read path (List/Get) resolves this sandbox
 			// by "<namespace>/<name>".
-			ClaimRef: namespace + "/" + name,
+			ClaimRef: namespacedName(namespace, name),
 		})
 		if claimErr == nil {
 			s.index.remember(nameKey(namespace, name), best.node)
@@ -377,9 +374,8 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 }
 
 // resolve looks in the indexed node's inventory, then asks that node itself,
-// then sweeps every inventory, and last, when fleet is set, asks every node.
-// Nil, nil means no match.
-func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows nodeRows, fleet bool, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
+// then sweeps every inventory, and last asks every node. Nil, nil means no match.
+func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows nodeRows, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
 		if sb := s.matchOnNode(ctx, op, node, match); sb != nil {
 			return sb, nil
@@ -391,7 +387,7 @@ func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows n
 	found, err := FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, node string) *sandboxv1beta1.Sandbox {
 		return s.matchOnNode(gctx, op, node, match)
 	})
-	if found == nil && err == nil && fleet && s.sandboxdFactory != nil {
+	if found == nil && err == nil && s.sandboxdFactory != nil {
 		found, err = FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, node string) *sandboxv1beta1.Sandbox {
 			return s.liveOnNode(gctx, op, node, rows, match)
 		})
@@ -970,6 +966,8 @@ func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + e.Template + "|" + deadlineValue(e) + "|" + claimedAtValue(e)))
 	return strconv.FormatUint(h.Sum64(), 10)
 }
+
+func namespacedName(namespace, name string) string { return namespace + "/" + name }
 
 func splitNamespacedName(s string) (namespace, name string) {
 	if before, after, ok := strings.Cut(s, "/"); ok {

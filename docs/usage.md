@@ -64,21 +64,13 @@ subresource: the node APIs have no dry-run transaction.
 ### Lists are eventually consistent
 
 `List` and `Watch` are assembled from `NodeInventory`, which nodes republish on
-a ~30 s cadence, so a list right after a create may not show it yet. A `Get` by
-name that reaches the apiserver replica which served the create asks the node
-the claim went to, so it answers at once; one that reaches another replica
-answers `NotFound` until the node publishes. Lookups by claim id — the e2b
-surface and the envd proxy — ask the nodes from any replica. Polling covers
-the by-name case; it is what
-[`examples/lifecycle`](https://github.com/cocoonstack/sandbox-operator/blob/master/examples/lifecycle/example.go)
-does:
-
-```go
-err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &sb)
-if apierrors.IsNotFound(err) {
-    // not published yet; retry
-}
-```
+a ~30 s cadence, so a list right after a create may not show it yet. Reads of
+one sandbox do not wait for that publish, on any apiserver replica: a `Get` by
+name asks the nodes for the claim recorded under `<namespace>/<name>`, and a
+lookup by claim id — the e2b surface and the envd proxy — asks them for that
+id. A deleted sandbox stays readable until its node publishes. Fork children
+and checkpoint branches carry no claim ref: by claim id they answer at once,
+by name only after their node publishes.
 
 `watch` is served by re-deriving that view and diffing it, so it inherits the
 same lag. Label selectors work against the axes the store stamps:
