@@ -67,9 +67,9 @@ type InventoryEntry struct {
 // of that node's live sandboxes, server-side-applied on a slow cadence and
 // scatter-gathered by the aggregated sandbox-apiserver. It is deliberately
 // spec-less (pure reported summary, no desired state) and cluster-scoped with
-// metadata.name equal to the node name. It lives in this CRD extensions group —
-// NOT in the aggregated agents.x-k8s.io group, whose entire v1beta1 the
-// APIService hands to the aggregated server (which serves only `sandboxes`).
+// metadata.name equal to the node name. It lives in this repository's own
+// group, not in agents.x-k8s.io, whose entire v1beta1 the APIService hands to
+// the aggregated server (which serves only `sandboxes`).
 type NodeInventory struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

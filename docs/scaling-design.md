@@ -24,7 +24,7 @@ The staging is four layers. L0 is a property of the node providers. L1 is the
 CRD claim path, served by **upstream's agent-sandbox controller** — this
 repository no longer implements it. L2 and L3 are what this repository ships:
 the node-local claim gateway, and the aggregated apiserver with its warm-pool
-driver and `NodeInventory` publisher.
+driver and the `NodeInventory` contract that vk-sandbox publishes into.
 
 ```mermaid
 flowchart LR

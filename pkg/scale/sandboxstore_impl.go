@@ -94,18 +94,10 @@ var (
 func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
 
 // InventorySource enumerates the per-node NodeInventory objects that back the
-// aggregated store. It is deliberately granular — a node enumeration plus a
-// per-node fetch — rather than one cluster-wide read, so:
-//
-//   - List fans out per node with bounded concurrency and a single partitioned
-//     node degrades to eventual consistency (its sandboxes are briefly absent)
-//     instead of failing the whole list, and
-//   - Get can route to the single owning node (the README "route Get to the
-//     owning node, not the summary" contract).
-//
-// In production ListNodes/NodeInventory are served from a cache-fed client
-// listing NodeInventory objects at ResourceVersion=0 (O(nodes), never a hot-path
-// LIST off etcd); tests inject StaticInventorySource.
+// aggregated store. It is a node enumeration plus a per-node fetch rather than
+// one cluster-wide read, so a partitioned node drops out of a List instead of
+// failing it and a Get reads its owning node alone. Production serves it from
+// the informer-fed ClientInventorySource; tests inject StaticInventorySource.
 type InventorySource interface {
 	// ListNodes returns the nodes that publish inventory. O(nodes), cache-fed.
 	ListNodes(ctx context.Context) ([]string, error)

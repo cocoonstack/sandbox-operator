@@ -1,7 +1,7 @@
 //go:build l3bench
 
-// Command l3bench proves the L3 aggregated-apiserver acceptance criteria from the
-// README "Scaling design" chapter:
+// Command l3bench proves the L3 aggregated-apiserver acceptance criteria of
+// docs/scaling-design.md:
 //
 //   - kubectl_get_works: sandboxes.agents.x-k8s.io is served by a real
 //     genericapiserver.GenericAPIServer with a scatter-gather rest.Storage (no

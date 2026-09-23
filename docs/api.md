@@ -59,8 +59,8 @@ _Appears in:_
 | `template` _string_ | template is the pool template (base image) the sandbox was claimed from.<br />It is the only place the aggregated read path can recover it: no<br />per-sandbox object holds the pod spec. |  |  |
 | `claimRef` _string_ | claimRef is the "<namespace>/<name>" of the SandboxClaim the sandbox is<br />bound to, if any. |  |  |
 | `addr` _string_ | addr is the sandbox "host:port" address, if published. |  |  |
-| `deadline` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#time-v1-meta)_ | deadline is the node-granted lease expiry, if published. |  |  |
-| `claimedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#time-v1-meta)_ | claimedAt is when the node first granted the claim, if published; a renew<br />or a wake moves deadline, never this. |  |  |
+| `deadline` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | deadline is the node-granted lease expiry, if published. |  |  |
+| `claimedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | claimedAt is when the node first granted the claim, if published; a renew<br />or a wake moves deadline, never this. |  |  |
 
 
 #### NodeInventory
@@ -71,9 +71,9 @@ NodeInventory is the single O(nodes) etcd object per node: the durable summary
 of that node's live sandboxes, server-side-applied on a slow cadence and
 scatter-gathered by the aggregated sandbox-apiserver. It is deliberately
 spec-less (pure reported summary, no desired state) and cluster-scoped with
-metadata.name equal to the node name. It lives in this CRD extensions group —
-NOT in the aggregated agents.x-k8s.io group, whose entire v1beta1 the
-APIService hands to the aggregated server (which serves only `sandboxes`).
+metadata.name equal to the node name. It lives in this repository's own
+group, not in agents.x-k8s.io, whose entire v1beta1 the APIService hands to
+the aggregated server (which serves only `sandboxes`).
 
 
 
@@ -86,7 +86,7 @@ _Appears in:_
 | `kind` _string_ | `NodeInventory` | | |
 | `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
 | `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `node` _string_ | node is the owning node name; it matches metadata.name. |  |  |
 | `entries` _[InventoryEntry](#inventoryentry) array_ | entries summarizes the node's live sandboxes. |  |  |
 | `address` _string_ | address is the node's sandboxd advertise address ("host:port"); the<br />aggregated apiserver routes a claim to this node's sandboxd through it. |  |  |
@@ -109,7 +109,7 @@ NodeInventoryList contains a list of NodeInventory.
 | `kind` _string_ | `NodeInventoryList` | | |
 | `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
 | `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
-| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `items` _[NodeInventory](#nodeinventory) array_ |  |  |  |
 
 
@@ -258,6 +258,6 @@ SandboxSnapshotResult is the reply to a snapshot.
 | `snapshotID` _string_ | snapshotID is the checkpoint's node-local id. |  |  |
 | `name` _string_ | name echoes the requested label, when one was given. |  |  |
 | `nodeName` _string_ | nodeName is the node holding the checkpoint. Checkpoints are node-local,<br />so branching from or deleting one requires knowing its node. |  |  |
-| `creationTimestamp` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#time-v1-meta)_ | creationTimestamp is when the node captured the checkpoint. |  |  |
+| `creationTimestamp` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | creationTimestamp is when the node captured the checkpoint. |  |  |
 
 

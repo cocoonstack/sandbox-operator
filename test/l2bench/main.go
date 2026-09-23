@@ -1,7 +1,7 @@
 //go:build l2bench
 
-// Command l2bench proves the L2 node-local claim gateway acceptance criteria from
-// the README "Scaling design" chapter:
+// Command l2bench proves the L2 node-local claim gateway acceptance criteria of
+// docs/scaling-design.md:
 //
 //   - claim p50 is sub-millisecond on the sandboxd tier (the gateway's own
 //     overhead is not a bottleneck), and

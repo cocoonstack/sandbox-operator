@@ -91,7 +91,7 @@ Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
 The end-to-end `create → Ready` is dominated by the Kubernetes round-trip
 (admission → reconcile → schedule → status propagation), sub-second at this
 scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms** and
-the `vk-sandbox` gateway overhead **~0.04 ms** (`test/l2bench`).
+the L2 claim gateway's own overhead **~0.04 ms** (`test/l2bench`).
 
 This run predates the upstream import: the Pod that reached the `vk-sandbox`
 node was produced by the forked controller plus the Pod mutator, both since
