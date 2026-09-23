@@ -23,7 +23,7 @@
 // standing in for a cache-fed NodeInventory client. So it measures the aggregation
 // contract and the object-count invariant, not real microVM state.
 //
-//	Run: GOTOOLCHAIN=go1.26.3 go run -tags l3bench ./test/l3bench \
+//	Run: go run -tags l3bench ./test/l3bench \
 //	       -out /path/to/l3-aggregation.json
 package main
 

@@ -20,12 +20,8 @@ helm upgrade --install sandbox-operator ./helm \
   --namespace sandbox-system \
   --create-namespace \
   --set apiserver.image.tag=<version> \
-  --set envdProxy.image.tag=<version> \
-  --set envdProxy.domain=sandbox.example.com
+  --set envdProxy.image.tag=<version>
 ```
-
-Wildcard DNS for `*.{domain}` must resolve to the `sandbox-envd-proxy` Service:
-the SDK addresses every sandbox as `{port}-{sandboxID}.{domain}`.
 
 cert-manager must be installed first. Without it, set `certManager.enabled=false`
 and supply both a serving-cert Secret named in `certManager.servingCertSecret`
@@ -41,6 +37,9 @@ helm upgrade --install sandbox-operator ./helm \
   --set apiserver.e2b.domain=sandbox.example.com \
   --set apiserver.e2b.apiKeySecret.name=e2b-api-keys
 ```
+
+Wildcard DNS for `*.{domain}` must resolve to the `sandbox-envd-proxy` Service:
+the SDK addresses every sandbox as `{port}-{sandboxID}.{domain}`.
 
 ## Upgrade and uninstall
 
@@ -73,7 +72,7 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `apiserver.replicaCount` | Apiserver replicas | `2` |
 | `apiserver.securePort` | Port the aggregated API is served on | `6443` |
 | `apiserver.warmPoolDriver` | Run the in-process SandboxWarmPool driver | `true` |
-| `apiserver.sandboxdToken.secretName` | Secret holding the sandboxd api_token; empty leaves the write path closed | `""` |
+| `apiserver.sandboxdToken.secretName` | Secret holding the sandboxd api_token; empty sends node-local calls without one | `""` |
 | `apiserver.sandboxdToken.key` | Key within that Secret | `token` |
 | `apiserver.e2b.enabled` | Serve the e2b-compatible REST surface | `false` |
 | `apiserver.e2b.domain` | Base domain sandbox hosts derive from; required once enabled | `""` |

@@ -113,8 +113,9 @@ account, or from `KUBECONFIG` when run outside a cluster.
 | `--sandboxd-token` | — | Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer `--sandboxd-token-file` for a Secret mount. |
 | `--sandboxd-token-file` | — | Path to a file (Secret mount) holding the sandboxd api_token; overrides `--sandboxd-token` when set. |
 
-With both empty the write path stays disabled and fails closed: reads still
-work, `Create`/`Delete` do not.
+With both empty, node-local calls carry no token and a sandboxd that requires
+one refuses them: reads of published inventory still work, `Create`/`Delete`
+and the lifecycle verbs do not.
 
 ### Warm-pool driver
 
@@ -186,7 +187,7 @@ mapping are in [envd-proxy](envd-proxy.md).
 | `apiserver.replicaCount` | `2` | Apiserver replicas |
 | `apiserver.securePort` | `6443` | `--secure-port` |
 | `apiserver.warmPoolDriver` | `true` | `--enable-warm-pool-driver` |
-| `apiserver.sandboxdToken.secretName` | `""` | Secret holding the fleet sandboxd `api_token`, mounted for `--sandboxd-token-file`. Empty leaves the `Create`/`Delete` write path closed |
+| `apiserver.sandboxdToken.secretName` | `""` | Secret holding the fleet sandboxd `api_token`, mounted for `--sandboxd-token-file`. Empty sends node-local calls without a token |
 | `apiserver.sandboxdToken.key` | `token` | Key within that Secret |
 | `apiserver.e2b.enabled` | `false` | `--enable-e2b-api` |
 | `apiserver.e2b.domain` | `""` | `--e2b-domain`; required once enabled |

@@ -1,5 +1,7 @@
 processor:
-  ignoreTypes: []
+  # The lifecycle bodies are served in agents.x-k8s.io/v1beta1, not this package's group; docs/lifecycle.md documents them.
+  ignoreTypes:
+    - "\\.(Sandbox(Pause|Resume|Fork|Snapshot)(Options|Result)|ForkedSandbox)$"
   ignoreFields: []
 render:
   kubernetesVersion: "1.37"
