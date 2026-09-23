@@ -224,7 +224,7 @@ hardware harness. The portable standard-kubelet backend uses ordinary Pod exec.
 ## Reproduce
 
 The harnesses that remain in this repository are build-tagged, one tag per
-directory, and write their evidence as JSON:
+directory; `l3bench` writes its evidence as JSON:
 
 ```bash
 # L3: aggregation contract and the O(pools+nodes) object-count invariant
