@@ -95,9 +95,6 @@ var (
 	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
 )
 
-// IsNoWarmCapacity reports whether err means Claim found no warm node.
-func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
-
 // InventorySource enumerates the per-node NodeInventory objects that back the
 // aggregated store. It is a node enumeration plus a per-node fetch rather than
 // one cluster-wide read, so a partitioned node drops out of a List instead of
@@ -112,13 +109,6 @@ type InventorySource interface {
 	// NodeCapacity returns one node's advertise address and warm pools without
 	// decoding its entry list, which the claim and routing paths never read.
 	NodeCapacity(ctx context.Context, node string) (address string, pools []PoolCapacity, err error)
-}
-
-// warmCandidate is one node advertising warm capacity for a requested pool.
-type warmCandidate struct {
-	node string
-	addr string
-	warm int
 }
 
 // StoreOption configures a scatterGatherStore.
@@ -175,31 +165,6 @@ func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
 	}
 }
 
-// NewSandboxdHTTPClient returns one HTTP client for the whole fleet. A per-call
-// client would fall back to http.DefaultTransport, whose MaxIdleConnsPerHost of
-// 2 forces a fresh TCP handshake on every concurrent claim past the second to
-// the same node.
-func NewSandboxdHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: sandboxdRequestTimeout,
-		Transport: &http.Transport{
-			MaxIdleConns:        sandboxdMaxIdleConns,
-			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
-			IdleConnTimeout:     sandboxdIdleConnTimeout,
-		},
-	}
-}
-
-// SandboxdBaseURL renders a node advertise address as a sandboxd base URL: a
-// bare "host:port" is given the http scheme, an address that already carries
-// one is used verbatim.
-func SandboxdBaseURL(addr string) string {
-	if strings.Contains(addr, "://") {
-		return addr
-	}
-	return "http://" + addr
-}
-
 // NewSandboxdClientFactory returns the production SandboxdClientFactory: an HTTP
 // sandboxd client per node advertise address, over the shared client.
 func NewSandboxdClientFactory() SandboxdClientFactory {
@@ -210,6 +175,13 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 }
 
 type inventoryMatch func(inv *NodeInventory, i int) bool
+
+// warmCandidate is one node advertising warm capacity for a requested pool.
+type warmCandidate struct {
+	node string
+	addr string
+	warm int
+}
 
 var _ SandboxStore = (*scatterGatherStore)(nil)
 
@@ -555,34 +527,6 @@ func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, l
 	return out
 }
 
-// AddressIPs strips the port from a "host:port" address, yielding the pod IP
-// list a synthesized Sandbox status carries. Shared with the aggregated
-// apiserver so both stamp identical PodIPs.
-func AddressIPs(addr string) []string {
-	if addr == "" {
-		return nil
-	}
-	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
-		return []string{host}
-	}
-	return []string{addr}
-}
-
-// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
-// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
-// whichever node looked best in that snapshot; sampling spreads the burst while
-// still biasing toward warm capacity. A stale pick costs one gossip redirect.
-func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
-	//nolint:gosec // load spreading, not a security decision
-	i := rand.IntN(len(candidates))
-	//nolint:gosec // load spreading, not a security decision
-	j := rand.IntN(len(candidates))
-	if candidates[j].warm > candidates[i].warm {
-		return candidates[j], j
-	}
-	return candidates[i], i
-}
-
 // NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
 // L0 node-scoped cache — NOT a cluster-wide LIST. A lost NodeInventory object is
 // rebuilt from this on the next publish.
@@ -800,6 +744,47 @@ func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (
 	return addr, pools, nil
 }
 
+// IsNoWarmCapacity reports whether err means Claim found no warm node.
+func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
+
+// NewSandboxdHTTPClient returns one HTTP client for the whole fleet. A per-call
+// client would fall back to http.DefaultTransport, whose MaxIdleConnsPerHost of
+// 2 forces a fresh TCP handshake on every concurrent claim past the second to
+// the same node.
+func NewSandboxdHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: sandboxdRequestTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        sandboxdMaxIdleConns,
+			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
+			IdleConnTimeout:     sandboxdIdleConnTimeout,
+		},
+	}
+}
+
+// SandboxdBaseURL renders a node advertise address as a sandboxd base URL: a
+// bare "host:port" is given the http scheme, an address that already carries
+// one is used verbatim.
+func SandboxdBaseURL(addr string) string {
+	if strings.Contains(addr, "://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
+// AddressIPs strips the port from a "host:port" address, yielding the pod IP
+// list a synthesized Sandbox status carries. Shared with the aggregated
+// apiserver so both stamp identical PodIPs.
+func AddressIPs(addr string) []string {
+	if addr == "" {
+		return nil
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
+		return []string{host}
+	}
+	return []string{addr}
+}
+
 // FirstHit runs find on every node src lists, concurrency at a time, and
 // returns the first non-zero result, canceling the rest.
 func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrency int, find func(ctx context.Context, node string) T) (T, error) {
@@ -866,6 +851,21 @@ func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 	return pc.Template == key.Template &&
 		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&
 		cmp.Or(pc.Size, SizeClassSmall) == cmp.Or(key.Size, SizeClassSmall)
+}
+
+// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
+// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
+// whichever node looked best in that snapshot; sampling spreads the burst while
+// still biasing toward warm capacity. A stale pick costs one gossip redirect.
+func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
+	//nolint:gosec // load spreading, not a security decision
+	i := rand.IntN(len(candidates))
+	//nolint:gosec // load spreading, not a security decision
+	j := rand.IntN(len(candidates))
+	if candidates[j].warm > candidates[i].warm {
+		return candidates[j], j
+	}
+	return candidates[i], i
 }
 
 // parseSelectors turns the string selectors on ListOptions into matchers. Empty

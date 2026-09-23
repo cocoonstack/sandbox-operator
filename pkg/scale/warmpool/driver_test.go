@@ -171,7 +171,6 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 	}
 	sum := 0
 	for addr, specs := range setter.byAddr {
-
 		if len(specs) != 1 {
 			t.Fatalf("node %s got %d specs, want 1 aggregated (no duplicate key): %+v", addr, len(specs), specs)
 		}
@@ -356,9 +355,8 @@ func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sa
 	info := &sandboxd.NodeInfo{}
 	for _, p := range pools {
 		info.Pools = append(info.Pools, sandboxd.NodePool{
-			Key:  sandboxd.PoolKey{Template: p.Template, Net: p.Net, Size: p.Size},
-			Warm: n.parent.warm[n.addr],
-
+			Key:    sandboxd.PoolKey{Template: p.Template, Net: p.Net, Size: p.Size},
+			Warm:   n.parent.warm[n.addr],
 			Target: p.Warm,
 		})
 	}
