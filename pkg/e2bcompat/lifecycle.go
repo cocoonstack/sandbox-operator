@@ -371,7 +371,7 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool
 			return false, errSandboxNotFound
 		}
 	}
-	return sb.Labels[scale.PhaseLabel] == phaseHibernated, nil
+	return sb.Labels[scale.PhaseLabel] == scale.PhaseHibernated, nil
 }
 
 func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg string) {

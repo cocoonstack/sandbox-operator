@@ -52,6 +52,10 @@ kubectl apply -f helm/crds/
 helm upgrade sandbox-operator ./helm --namespace sandbox-system --reuse-values
 ```
 
+An older `nodeinventories` CRD silently prunes entry fields it does not know
+(`claimedAt` is one), so until the CRD is applied every node publishes like an
+older node and the read view falls back accordingly.
+
 `NodeInventory` moved from `extensions.agents.x-k8s.io` to
 `sandbox.cocoonstack.io`. A fleet coming from the old group runs a vk-sandbox
 that publishes into the new one on every node first, then deletes the old CRD;

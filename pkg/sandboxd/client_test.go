@@ -119,6 +119,21 @@ func TestInfo(t *testing.T) {
 	assert.Equal(t, 1, info.Hibernated)
 }
 
+func TestSandboxesDecodesTheClaimTime(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/sandboxes", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sandboxes":[{"id":"sb_1","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z","claimed_at":"2030-01-02T03:04:05Z"},{"id":"sb_2","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z"}]}`))
+	}))
+	defer srv.Close()
+
+	rows, err := New(srv.URL, "root-token").Sandboxes(t.Context())
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC), rows[0].ClaimedAt)
+	assert.True(t, rows[1].ClaimedAt.IsZero(), "a node that publishes no claimed_at leaves it zero")
+}
+
 func TestSetPoolsReplacesTheNodeTargetsAndDecodesTheEcho(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPut, r.Method)

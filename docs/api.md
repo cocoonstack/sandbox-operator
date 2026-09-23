@@ -60,6 +60,7 @@ _Appears in:_
 | `claimRef` _string_ | claimRef is the "<namespace>/<name>" of the SandboxClaim the sandbox is<br />bound to, if any. |  |  |
 | `addr` _string_ | addr is the sandbox "host:port" address, if published. |  |  |
 | `deadline` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#time-v1-meta)_ | deadline is the node-granted lease expiry, if published. |  |  |
+| `claimedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#time-v1-meta)_ | claimedAt is when the node first granted the claim, if published; a renew<br />or a wake moves deadline, never this. |  |  |
 
 
 #### NodeInventory

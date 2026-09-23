@@ -104,11 +104,12 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 - **Metrics are schema-complete, not measurement-complete.** `cpuCount`,
   `memUsed`, and `memTotal` come from the owning node when available;
   `cpuUsedPct`, `memCache`, `diskUsed`, and `diskTotal` are reported as zero.
-- **List/detail schema fields are compatibility values.** A synthesized Sandbox
-  carries no creation time, so `startedAt` is the time of the read; `endAt` is
-  the node-granted deadline when the owning node published one, and
-  `startedAt + --e2b-default-timeout` otherwise. `cpuCount`, `memoryMB`, and
-  `diskSizeMB` are reported as zero on these responses.
+- **List/detail schema fields are compatibility values.** `startedAt` is the
+  claim time the owning node publishes; a node that does not publish it makes
+  `startedAt` the time of the read. `endAt` is the node-granted deadline when
+  the owning node published one, and `startedAt + --e2b-default-timeout`
+  otherwise. `cpuCount`, `memoryMB`, and `diskSizeMB` are reported as zero on
+  these responses.
 - **`envdAccessToken` is minted once, at claim time.** `POST /sandboxes` and
   `POST /sandboxes/{id}/fork` carry the token the node just issued. Nothing
   here can re-derive it: node inventory deliberately carries no per-sandbox

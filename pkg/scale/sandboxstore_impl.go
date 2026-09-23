@@ -41,7 +41,9 @@ const (
 	// NodeLabel carries the owning node of a synthesized Sandbox.
 	NodeLabel = "sandbox.cocoonstack.io/node"
 	// PhaseLabel carries the entry phase of a synthesized Sandbox.
-	PhaseLabel = "sandbox.cocoonstack.io/phase"
+	PhaseLabel      = "sandbox.cocoonstack.io/phase"
+	PhaseRunning    = "Running"
+	PhaseHibernated = "Hibernated"
 	// ClaimLabel carries the claim name a synthesized Sandbox is bound to.
 	ClaimLabel = "sandbox.cocoonstack.io/claim"
 	// TemplateLabel carries the pool template a synthesized Sandbox was claimed
@@ -879,6 +881,9 @@ func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 			}},
 		},
 	}
+	if e.ClaimedAt != nil {
+		sb.CreationTimestamp = *e.ClaimedAt
+	}
 	return sb
 }
 
@@ -923,6 +928,13 @@ func deadlineValue(e InventoryEntry) string {
 	return e.Deadline.UTC().Format(time.RFC3339)
 }
 
+func claimedAtValue(e InventoryEntry) string {
+	if e.ClaimedAt == nil {
+		return ""
+	}
+	return strconv.FormatInt(e.ClaimedAt.Unix(), 10)
+}
+
 func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
 	return fields.Set{
 		"metadata.name":      sb.Name,
@@ -932,7 +944,7 @@ func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
 }
 
 func readyStatus(phase string) metav1.ConditionStatus {
-	if strings.EqualFold(phase, "Running") || strings.EqualFold(phase, "Ready") {
+	if strings.EqualFold(phase, PhaseRunning) || strings.EqualFold(phase, "Ready") {
 		return metav1.ConditionTrue
 	}
 	return metav1.ConditionFalse
@@ -943,7 +955,7 @@ func readyStatus(phase string) metav1.ConditionStatus {
 // unchanged one. It is opaque, as the API contract requires.
 func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + e.Template + "|" + deadlineValue(e)))
+	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + e.Template + "|" + deadlineValue(e) + "|" + claimedAtValue(e)))
 	return strconv.FormatUint(h.Sum64(), 10)
 }
 

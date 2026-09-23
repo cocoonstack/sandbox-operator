@@ -51,9 +51,6 @@ const (
 	// to envd. It is minted once at claim time and never re-derivable here, so
 	// a client that presents it on connect gets it echoed back.
 	accessTokenHeader = "X-Access-Token" //nolint:gosec // a header name, not a credential
-	// phaseHibernated is the phase label value a node publishes for a paused
-	// sandbox (vk-sandbox inventory publisher).
-	phaseHibernated = "Hibernated"
 )
 
 var (
@@ -373,7 +370,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 		started = time.Now()
 	}
 	state := StateRunning
-	if sb.Labels[scale.PhaseLabel] == phaseHibernated {
+	if sb.Labels[scale.PhaseLabel] == scale.PhaseHibernated {
 		state = StatePaused
 	}
 	endAt := started.Add(time.Duration(s.opts.DefaultTimeoutSeconds) * time.Second)

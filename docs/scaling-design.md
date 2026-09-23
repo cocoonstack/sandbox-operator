@@ -167,7 +167,7 @@ type NodeInventory struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
     Node    string           `json:"node"`
-    Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline}
+    Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline, claimedAt}
     Address string           `json:"address"` // the node's sandboxd advertise address
     Pools   []PoolCapacity   `json:"pools"`   // per-pool warm capacity
 }
