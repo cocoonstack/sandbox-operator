@@ -49,7 +49,7 @@ func (s *scatterGatherStore) liveOnNode(ctx context.Context, op, node string, ro
 func EntryFromSummary(row sandboxd.SandboxSummary) InventoryEntry {
 	name := cmp.Or(row.ClaimRef, row.ID)
 	phase := PhaseRunning
-	if row.Hibernated || row.Archived {
+	if isPaused(row) {
 		phase = PhaseHibernated
 	}
 	return InventoryEntry{
@@ -62,6 +62,8 @@ func EntryFromSummary(row sandboxd.SandboxSummary) InventoryEntry {
 		ClaimedAt: optionalTime(row.ClaimedAt),
 	}
 }
+
+func isPaused(row sandboxd.SandboxSummary) bool { return row.Hibernated || row.Archived }
 
 func rowsByClaimRef(ref string) nodeRows {
 	return func(ctx context.Context, cl SandboxdClient) ([]sandboxd.SandboxSummary, error) {
