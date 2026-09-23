@@ -57,6 +57,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func main() {
+	ctrl.SetLogger(klog.NewKlogr())
 	ctx := ctrl.SetupSignalHandler()
 	o := &options{Addr: ":8443", Namespace: "default"}
 	fs := pflag.NewFlagSet("sandbox-envd-proxy", pflag.ExitOnError)
