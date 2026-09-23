@@ -293,7 +293,7 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.detailFor(sb))
 }
 
-// deleteSandbox releases the claim back to its owning node's warm pool.
+// deleteSandbox releases the claim, which destroys its microVM on the owning node.
 func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)

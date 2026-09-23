@@ -332,10 +332,8 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
 }
 
-// Release returns the claimed microVM id to node's pool via that node's sandboxd,
-// resolving the sandboxd address from the node's NodeInventory. It fails closed if
-// claim routing is not configured. Callers must only reach this on owner-authorized
-// teardown (the delete-authorization contract); it never destroys a VM on pod state.
+// Release destroys the claimed microVM through the node's advertised sandboxd and
+// fails closed when claim routing is not configured.
 func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error {
 	if id == "" {
 		return fmt.Errorf("scale: release requires a claim id")

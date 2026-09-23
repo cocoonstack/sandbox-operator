@@ -71,7 +71,7 @@ type SandboxStore interface {
 	// When no node has a warm microVM for the pool it returns an error for which
 	// IsNoWarmCapacity is true, so the caller can surface a retryable 503.
 	Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error)
-	// Release returns the claimed microVM id to its owning node's pool. It is
+	// Release destroys the claimed microVM on its owning node. It is
 	// owner-authorized teardown only (the Sandbox resource itself being deleted);
 	// it never destroys a VM on pod state alone. The node's sandboxd address is
 	// resolved from its NodeInventory.
