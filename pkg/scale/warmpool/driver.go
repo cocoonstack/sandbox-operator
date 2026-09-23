@@ -48,8 +48,6 @@ const (
 	// maxNodeConcurrency bounds the per-node PUT /v1/pools fan-out per tick.
 	maxNodeConcurrency = 16
 
-	// The sandboxd client has no HTTP timeout; unbounded, one silent node
-	// wedges the global reconcile forever.
 	setPoolsTimeout = 10 * time.Second
 )
 

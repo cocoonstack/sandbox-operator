@@ -12,7 +12,7 @@ const (
 	SizeClassMedium = "medium"
 	SizeClassLarge  = "large"
 
-	// NetDefault is the mode used when none is annotated: the NIC-less Firecracker lane.
+	// NetDefault is the mode used when none is annotated: the NIC-less lane.
 	NetDefault = "none"
 	// NetEgress is the egress-capable network lane.
 	NetEgress = "egress"

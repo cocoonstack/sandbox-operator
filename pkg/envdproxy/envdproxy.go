@@ -134,8 +134,6 @@ func (s *Server) proxy(rt route) *httputil.ReverseProxy {
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetXForwarded()
 			pr.Out.URL.Scheme = "http"
-			// the derived host is unique per sandbox and port, which is what
-			// keeps the HTTP/2 connection pool from crossing sandboxes
 			pr.Out.URL.Host = s.sandboxHost(rt)
 			pr.Out.Host = pr.Out.URL.Host
 			pr.Out.Header.Del(accessTokenHeader)

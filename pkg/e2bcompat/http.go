@@ -15,12 +15,9 @@ const (
 	namePrefix = "e2b-"
 )
 
-// writeJSON writes v as the response body with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// The body is already committed by WriteHeader, so an encode failure can
-	// only be logged by the caller's transport; there is no status left to set.
 	_ = json.NewEncoder(w).Encode(v)
 }
 

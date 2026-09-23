@@ -28,28 +28,18 @@ import (
 )
 
 const (
-	// readHeaderTimeout bounds how long a client may take to send its headers,
-	// so a stalled connection cannot pin a handler.
 	readHeaderTimeout = 10 * time.Second
 	// shutdownTimeout bounds the graceful drain. Data-plane streams are long by
 	// design, so this is a floor on restart latency, not a wait for idleness.
 	shutdownTimeout = 10 * time.Second
 )
 
-// options configures the proxy process.
 type options struct {
-	// Addr is the public listener. TLS is served on it when both CertFile and
-	// KeyFile are set; otherwise it serves h2c behind an edge that already
-	// terminated TLS.
-	Addr string
-	// Domain must match the apiserver's --e2b-domain: both spell a sandbox host
-	// as "{port}-{sandboxID}.{domain}".
-	Domain string
-	// Namespace filters inventory lookups; empty matches every namespace.
-	Namespace string
-	CertFile  string
-	KeyFile   string
-	// GuestHTTP2 forwards to the guest over cleartext HTTP/2.
+	Addr       string
+	Domain     string
+	Namespace  string
+	CertFile   string
+	KeyFile    string
 	GuestHTTP2 bool
 }
 

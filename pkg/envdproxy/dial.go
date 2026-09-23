@@ -123,8 +123,7 @@ func newGuestTransport(dial guestDialer) *guestTransport {
 		}
 		return dial(ctx, t)
 	}
-	// envd serves h2c, so the HTTP/2 half must offer unencrypted HTTP/2 alone:
-	// with HTTP/1 also set a plaintext transport cannot negotiate and picks it.
+	// With HTTP/1 also set, a plaintext transport cannot negotiate HTTP/2 and picks HTTP/1.
 	var h2 http.Protocols
 	h2.SetUnencryptedHTTP2(true)
 	return &guestTransport{

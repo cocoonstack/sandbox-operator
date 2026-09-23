@@ -55,12 +55,10 @@ const (
 	// synthesized Sandbox. Unlike the label keys above it is an annotation — an
 	// opaque node-local handle, not a selector axis: the aggregated apiserver reads
 	// it on Delete to release exactly the microVM this Sandbox stands for (releasing
-	// by k8s name would target the wrong claim). This is the single definition of
-	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
+	// by k8s name would target the wrong claim).
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339) of a
 	// Sandbox: stamped from inventory on reads and from the claim on Create.
-	// apiserver.DeadlineAnnotation aliases it.
 	DeadlineAnnotation = "sandbox.cocoonstack.io/deadline"
 	// NetAnnotation selects the pool network mode. Create and the warm-pool
 	// driver must read the same key or a claim never matches provisioned warm

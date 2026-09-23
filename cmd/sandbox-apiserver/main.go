@@ -35,11 +35,8 @@ import (
 )
 
 const (
-	// e2bReadHeaderTimeout bounds how long a client may take to send its request
-	// headers on the e2b surface, so a stalled connection cannot pin a handler.
 	e2bReadHeaderTimeout = 10 * time.Second
-	// e2bShutdownTimeout bounds the graceful drain of in-flight e2b requests.
-	e2bShutdownTimeout = 10 * time.Second
+	e2bShutdownTimeout   = 10 * time.Second
 )
 
 // options are the standard aggregated-apiserver options: secure serving plus
@@ -52,22 +49,12 @@ type options struct {
 	Authorization  *genericoptions.DelegatingAuthorizationOptions
 	Features       *genericoptions.FeatureOptions
 
-	// SandboxdToken is the uniform fleet-wide sandboxd api_token presented on the
-	// node-local claim/release verbs. SandboxdTokenFile, when set, is read at
-	// startup (a Secret mount) and takes precedence. When both are empty the
-	// Create/Delete write path stays disabled (fails closed).
 	SandboxdToken     string
 	SandboxdTokenFile string
 
-	// WarmPoolDriver enables the in-process SandboxWarmPool → sandboxd pool
-	// reconcile loop (the control-plane surface for warm capacity). Pool-level,
-	// O(pools+nodes); never per-sandbox. WarmPoolInterval is its resync cadence.
 	WarmPoolDriver   bool
 	WarmPoolInterval time.Duration
 
-	// E2B* configure the optional e2b-compatible REST surface, which lets an
-	// unmodified e2b SDK drive the same warm pools. It is off by default and
-	// serves on its own address, so the aggregated API is never affected.
 	E2BAPI            bool
 	E2BAddr           string
 	E2BNamespace      string

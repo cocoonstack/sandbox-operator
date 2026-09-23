@@ -28,12 +28,9 @@ import (
 // from node inventory, and Delete reads it to release exactly the node-local
 // microVM that was handed over.
 const (
-	// ClaimIDAnnotation carries the sandboxd claim id of a claimed sandbox. It is
-	// defined in package scale (whose store stamps it on synthesized reads); this
-	// alias keeps apiserver call sites writing and reading the identical key.
+	// ClaimIDAnnotation carries the sandboxd claim id of a claimed sandbox.
 	ClaimIDAnnotation = scale.ClaimIDAnnotation
-	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339); the
-	// same scale-defined key the synthesized read path stamps from inventory.
+	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339).
 	DeadlineAnnotation = scale.DeadlineAnnotation
 	// AddressAnnotation carries the delivered sandbox connection address.
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
