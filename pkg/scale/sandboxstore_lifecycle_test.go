@@ -43,6 +43,20 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	assert.False(t, k8serrors.IsNotFound(err), "a transport failure is not NotFound: %v", err)
 }
 
+func TestAccessTokenReadsTheClaimOnItsNode(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777"))
+	f := &recordingFactory{rows: map[string][]sandboxd.SandboxSummary{"n1:7777": {{ID: "sb_live", Token: "secret"}}}}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	token, err := store.AccessToken(t.Context(), "n1", "sb_live")
+	require.NoError(t, err)
+	assert.Equal(t, "secret", token)
+
+	_, err = store.AccessToken(t.Context(), "n1", "sb_gone")
+	assert.True(t, k8serrors.IsNotFound(err), "a sandboxd 404 must surface as NotFound, got %v", err)
+}
+
 func TestLifecycleVerbsKeepANodeRejectionsStatus(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))

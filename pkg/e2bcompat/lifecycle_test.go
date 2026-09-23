@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -121,17 +120,12 @@ func TestConnectPausedIs201AndResumes(t *testing.T) {
 	}
 }
 
-func TestConnectEchoesThePresentedAccessToken(t *testing.T) {
-	store := &lifecycleStore{}
+func TestConnectReturnsTheSandboxAccessToken(t *testing.T) {
+	store := &lifecycleStore{token: "sandbox-secret"}
 	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
-	r := httptest.NewRequest(http.MethodPost, "/sandboxes/sb-abc/connect", strings.NewReader(`{"timeout":30}`))
-	r.Header.Set(apiKeyHeader, testKey)
-	r.Header.Set(accessTokenHeader, "sandbox-secret")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
@@ -140,22 +134,10 @@ func TestConnectEchoesThePresentedAccessToken(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if got.EnvdAccessToken != "sandbox-secret" {
-		t.Errorf("envdAccessToken = %q, want the token the client presented", got.EnvdAccessToken)
+		t.Errorf("envdAccessToken = %q, want the token the owning node holds", got.EnvdAccessToken)
 	}
-}
-
-func TestConnectWithoutAnAccessTokenReportsItEmpty(t *testing.T) {
-	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
-	h := newTestServer(t, store)
-
-	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
-	var got Sandbox
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got.EnvdAccessToken != "" {
-		t.Errorf("envdAccessToken = %q; the token is minted once at claim time and cannot be re-derived here", got.EnvdAccessToken)
+	if store.tokenNode != "node-a" || store.tokenID != "sb_abc" {
+		t.Errorf("AccessToken(%q, %q), want (node-a, sb_abc)", store.tokenNode, store.tokenID)
 	}
 }
 
@@ -332,10 +314,17 @@ type lifecycleStore struct {
 	renewedID              string
 	renewedTTL             int
 	renewDeadline          time.Time
+	token                  string
+	tokenNode, tokenID     string
 	err                    error
 	statsErr               error
 
 	nodePaused bool
+}
+
+func (f *lifecycleStore) AccessToken(_ context.Context, node, id string) (string, error) {
+	f.tokenNode, f.tokenID = node, id
+	return f.token, nil
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {

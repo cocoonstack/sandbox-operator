@@ -74,6 +74,8 @@ type SandboxSummary struct {
 	Archived       bool      `json:"archived,omitempty"`
 	FromCheckpoint string    `json:"from_checkpoint,omitempty"`
 	ClaimRef       string    `json:"claim_ref,omitempty"`
+	// Token is the claim's own bearer token; only the by-id read reports it.
+	Token string `json:"token,omitempty"`
 }
 
 // SandboxStats is one sandbox's resource usage. CPUCount and MemTotalBytes are

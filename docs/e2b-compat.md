@@ -66,7 +66,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | `POST /sandboxes/{id}/timeout` | `store.Renew` | Moves the owning node's lease to `timeout` seconds from now. `204` once the node has renewed, `500` when it refuses. |
 | `POST /sandboxes/{id}/refreshes` | `store.Renew` | The SDK keepalive. Renews for the body's `duration` when it carries one, otherwise `--e2b-default-timeout`. |
 | `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
-| `POST /sandboxes/{id}/connect`, `POST /v2/sandboxes/{id}/connect` | `store.Resume` when paused | The SDK's resume operation. Returns `200` when already running or `201` after restoring a paused sandbox. Its `timeout` field does not change the node-owned lease; `memory: false` (the SDK's `onResume: 'reboot'`) is refused with `400`, since a paused sandbox here resumes from its memory snapshot. |
+| `POST /sandboxes/{id}/connect`, `POST /v2/sandboxes/{id}/connect` | `store.Resume` when paused | The SDK's resume operation. Returns `200` when already running or `201` after restoring a paused sandbox, carrying the sandbox's `envdAccessToken` read from the owning node. Its `timeout` field does not change the node-owned lease; `memory: false` (the SDK's `onResume: 'reboot'`) is refused with `400`, since a paused sandbox here resumes from its memory snapshot. |
 | `POST /sandboxes/{id}/fork` | `store.Fork` | Creates `count` children (`1` by default), each with its own id and requested claim-time TTL. A paused source returns `409`; resume it first. |
 | `POST /sandboxes/{id}/snapshots` | `store.Snapshot` | Captures a checkpoint while the source keeps running; `201` with its `snapshotID`. |
 | `GET /snapshots` | `store.Snapshots` across nodes | Lists the key's checkpoints: create stamps the namespace on the checkpoint name (`<namespace>/<name>`), listing keeps only that prefix and strips it. One unreachable node is skipped rather than blanking the whole result. |
@@ -109,17 +109,13 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   the owning node published one, and `startedAt + --e2b-default-timeout`
   otherwise. `cpuCount`, `memoryMB`, and `diskSizeMB` are reported as zero on
   these responses.
-- **`envdAccessToken` is minted once, at claim time.** `POST /sandboxes` and
-  `POST /sandboxes/{id}/fork` carry the token the node just issued. Nothing
-  here can re-derive it: node inventory deliberately carries no per-sandbox
-  secret, and the node's read paths never return a token. A client that wants
-  to reconnect must keep the one it was given.
-
-  `POST /sandboxes/{id}/connect` echoes back the token presented in the
-  request's `X-Access-Token` header, so an SDK that kept it gets a complete
-  sandbox object; with no header the field is empty and the data plane will
-  reject that client's calls. `GET /sandboxes` and `GET /sandboxes/{id}` always
-  report it empty.
+- **`envdAccessToken` is minted once, at claim time, by the owning node.**
+  `POST /sandboxes` and `POST /sandboxes/{id}/fork` carry the token the node
+  just issued, and `POST /sandboxes/{id}/connect` reads it back from the owning
+  node (one node round trip), so a process that never saw the sandbox before
+  can connect and use the data plane. Node inventory deliberately carries no
+  per-sandbox secret, so `GET /sandboxes` and `GET /sandboxes/{id}` report it
+  empty.
 - **`templateID` on read paths comes from node inventory.** The owning node
   publishes the pool template with each entry; a node that does not yet publish
   it makes `GET /sandboxes` and `GET /sandboxes/{id}` report an empty

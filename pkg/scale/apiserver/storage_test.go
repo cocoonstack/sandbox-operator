@@ -276,6 +276,8 @@ func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, 
 	return scale.SandboxStats{}, nil
 }
 
+func (f *fakeStore) AccessToken(context.Context, string, string) (string, error) { return "", nil }
+
 func nsCtx(t *testing.T, ns string) context.Context {
 	return genericapirequest.WithNamespace(t.Context(), ns)
 }

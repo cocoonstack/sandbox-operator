@@ -48,10 +48,6 @@ const (
 	DefaultTimeoutSeconds = 300
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
-	// accessTokenHeader is the per-sandbox data-plane credential the SDK sends
-	// to envd. It is minted once at claim time and never re-derivable here, so
-	// a client that presents it on connect gets it echoed back.
-	accessTokenHeader = "X-Access-Token" //nolint:gosec // a header name, not a credential
 )
 
 var (

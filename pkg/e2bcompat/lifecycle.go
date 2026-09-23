@@ -85,6 +85,11 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, err, id, "connect")
 		return
 	}
+	token, err := s.store.AccessToken(r.Context(), sb.Status.NodeName, claimIDOf(sb))
+	if err != nil {
+		s.writeVerbError(w, err, id, "connect: access token", "failed to connect the sandbox")
+		return
+	}
 	status := http.StatusOK
 	if paused {
 		if err := s.store.Resume(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
@@ -93,15 +98,12 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 		status = http.StatusCreated
 	}
-	// The token is minted once at claim time and node inventory carries no
-	// per-sandbox secret to re-derive it from, so this echoes back the one the
-	// client kept and leaves the field empty when it kept none.
 	writeJSON(w, status, Sandbox{
 		TemplateID:      templateOf(sb),
 		SandboxID:       PublicID(claimIDOf(sb)),
 		ClientID:        sb.Status.NodeName,
 		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: r.Header.Get(accessTokenHeader),
+		EnvdAccessToken: token,
 		Domain:          s.opts.Domain,
 	})
 }

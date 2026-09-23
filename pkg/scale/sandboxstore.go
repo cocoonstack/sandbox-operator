@@ -112,6 +112,8 @@ type SandboxLifecycle interface {
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
 	// Stats reports one sandbox's resource usage.
 	Stats(ctx context.Context, node, id string) (SandboxStats, error)
+	// AccessToken reports the sandbox's own bearer token, which guards its data plane.
+	AccessToken(ctx context.Context, node, id string) (string, error)
 	// Renew resets the sandbox's lease to ttlSeconds from now and reports the
 	// deadline the node granted; 0 asks for the node default.
 	Renew(ctx context.Context, node, id string, ttlSeconds int) (time.Time, error)

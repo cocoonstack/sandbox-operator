@@ -564,6 +564,8 @@ func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, 
 	return scale.SandboxStats{}, nil
 }
 
+func (f *fakeStore) AccessToken(context.Context, string, string) (string, error) { return "", nil }
+
 func getDetail(t *testing.T, sb sandboxv1beta1.Sandbox) SandboxDetail {
 	t.Helper()
 	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
