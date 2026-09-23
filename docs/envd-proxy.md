@@ -157,10 +157,10 @@ stripping. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
 
 | Status | Meaning |
 |---|---|
-| `400` | The host and headers name no sandbox, the port is outside 1-65535, or the node has no such guest port. |
+| `400` | The host and headers name no sandbox, or the port is outside 1-65535. |
 | `401` | No `X-Access-Token`, or the node rejected the one presented. |
 | `404` | An `envd` internal path. |
-| `502` | Sandbox unknown, paused past recovery, or its node unreachable. |
+| `502` | Sandbox unknown, paused past recovery, nothing listening on the guest port, or its node unreachable. |
 
 `502` is deliberately the answer for an unknown id as well as an unreachable
 node: a caller must not be able to probe which sandbox ids exist, which node
