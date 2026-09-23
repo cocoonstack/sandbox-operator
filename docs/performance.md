@@ -176,12 +176,24 @@ writes go, measured at 200 claims against a pool of 40:
 | Pod | 3.4 | create, binding, virtual-kubelet's status push |
 | creates and deletes | 5.0 | the claim and the Sandbox created, the claim, its Sandbox and its Pod deleted |
 
-Four of them are optional and change no latency: upstream's
-`--disable-claim-events` and `--disable-claim-observability-annotations` drop
-one write each, and vk-sandbox's `--disable-pod-events` drops the two
-virtual-kubelet events. The claim controller's two-phase adoption (the
-annotation before the Sandbox patch) and the status transitions are the model's
-own cost; the L3 path has none of it.
+Five of them are optional: upstream's `--disable-claim-events` and
+`--disable-claim-observability-annotations` drop one write each, and
+vk-sandbox's `--disable-pod-events` drops the virtual-kubelet events. Measured
+with all three on, arms interleaved, 200 claims against a pool of 40 that kept
+up (every claim a warm hit):
+
+| flags | apiserver writes per claim | etcd puts per claim | claim-controller reconciles | claim p50 |
+|---|---|---|---|---|
+| none | 25.9–26.1 | 22.1–22.4 | 6.1–6.6 | 36–75 ms |
+| all three | 21.0–21.1 | 17.1–17.6 | 6.1–6.7 | 31–58 ms |
+
+−5 writes and −5 puts per claim (−19% and −23%), −1 of each per pool member,
+reconciles unchanged; the p50 differences are within the round's noise. With
+the pool keeping up, the claim controller reconciles about six times per
+claim, the same as the retired fork; the 2× above came from its 100 ms Pod-IP
+retry while the pool was drained. The claim controller's two-phase adoption
+(the annotation before the Sandbox patch) and the status transitions are the
+model's own cost; the L3 path has none of it.
 
 ## Data plane
 
