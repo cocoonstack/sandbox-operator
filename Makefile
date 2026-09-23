@@ -112,10 +112,14 @@ vet: ## Run go vet on every target OS, then type-check the tagged harnesses
 		go vet -tags $$t ./test/$$t || exit 1; \
 	done
 
-lint: golangci-lint ## Run golangci-lint on every target OS
+lint: golangci-lint ## Run golangci-lint on every target OS, tagged harnesses included
 	@for goos in $(GOOSES); do \
 		echo "==> golangci-lint GOOS=$$goos"; \
 		GOOS=$$goos $(GOLANGCILINT) run ./... || exit 1; \
+		for t in $(TAGGED_HARNESSES); do \
+			echo "==> golangci-lint GOOS=$$goos -tags $$t ./test/$$t"; \
+			GOOS=$$goos $(GOLANGCILINT) run --build-tags $$t ./test/$$t || exit 1; \
+		done; \
 	done
 
 fmt: gofumpt goimports ## Format code with gofumpt and goimports
