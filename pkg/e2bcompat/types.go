@@ -1,5 +1,7 @@
 package e2bcompat
 
+import "encoding/json"
+
 // Field names and JSON casing are fixed by the e2b OpenAPI contract the SDKs unmarshal.
 
 // Sandbox states reported to the SDK (spec: SandboxState).
@@ -25,6 +27,15 @@ type NewSandbox struct {
 	// AllowInternetAccess selects the warm pool's network lane: true picks the
 	// egress-capable pool, false/nil the isolated one.
 	AllowInternetAccess *bool `json:"allow_internet_access,omitempty"`
+	// The NewSandboxV2 fields below name guarantees this backend cannot give, so a request that sets one is refused.
+	Network         map[string]json.RawMessage `json:"network,omitempty"`
+	VolumeMounts    []json.RawMessage          `json:"volumeMounts,omitempty"`
+	AutoPauseMemory *bool                      `json:"autoPauseMemory,omitempty"`
+	AutoResume      *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"autoResume,omitempty"`
+	MCP map[string]json.RawMessage `json:"mcp,omitempty"`
+	IAM map[string]json.RawMessage `json:"iam,omitempty"`
 }
 
 // Sandbox is the POST /sandboxes response (spec: Sandbox). templateID,
@@ -79,10 +90,11 @@ type SandboxPauseRequest struct {
 	Memory *bool `json:"memory,omitempty"`
 }
 
-// ConnectSandbox is the POST /sandboxes/{id}/connect body — the SDK's resume.
-// Timeout is required by the schema but does not change the node-owned lease.
+// ConnectSandbox is the POST /sandboxes/{id}/connect body — the SDK's resume;
+// Timeout extends the lease to that many seconds from now, never shortens it.
 type ConnectSandbox struct {
-	Timeout int32 `json:"timeout"`
+	Timeout *int32 `json:"timeout,omitempty"`
+	Memory  *bool  `json:"memory,omitempty"`
 }
 
 // SandboxForkRequest is the POST /sandboxes/{id}/fork body.

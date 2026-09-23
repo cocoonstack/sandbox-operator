@@ -137,11 +137,11 @@ pools. An empty sandboxd token leaves it fail-closed: it logs and sets no pools.
 |---|---|---|
 | `--enable-e2b-api` | `false` | Serve the e2b-compatible REST surface, so an unmodified e2b SDK can claim from the same warm pools (point E2B_API_URL at it). |
 | `--e2b-bind-address` | `:8080` | Address the e2b-compatible surface listens on. |
-| `--e2b-namespace` | `default` | Namespace e2b claims are made in; e2b has no namespace concept, so every compat claim lands here. |
+| `--e2b-namespace` | `default` | Namespace a key that names none claims in, and where anonymous claims land; e2b has no namespace concept. |
 | `--e2b-domain` | — | Base domain the SDK derives the in-sandbox envd host from, as `{port}-{sandboxID}.{domain}`. Required with `--enable-e2b-api`: without it a created sandbox has no reachable data plane. |
 | `--e2b-envd-version` | `0.4.0` when empty | envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one. |
 | `--e2b-default-timeout` | `300` when `0` | Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for. |
-| `--e2b-api-key-file` | — | Path to a file (Secret mount) of accepted e2b API keys, one per line, presented by the SDK as X-API-KEY. |
+| `--e2b-api-key-file` | — | Path to a file (Secret mount) of accepted e2b API keys, one per line as `key` or `key namespace`, presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, `--e2b-namespace` when none is given. |
 | `--e2b-allow-anonymous` | `false` | Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port. |
 
 Startup fails when `--enable-e2b-api` is set with neither a key file nor
@@ -202,7 +202,7 @@ mapping are in [envd-proxy](envd-proxy.md).
 | `envdProxy.image.pullPolicy` | `IfNotPresent` | |
 | `envdProxy.replicaCount` | `2` | Proxy replicas |
 | `envdProxy.domain` | `""` | `--domain`; falls back to `apiserver.e2b.domain` |
-| `envdProxy.namespace` | `""` (falls back to `apiserver.e2b.namespace`) | `--namespace` |
+| `envdProxy.namespace` | `""` (every namespace) | `--namespace`; the proxy is not an access boundary, and a key's sandboxes live in the key's namespace |
 | `envdProxy.port` | `8443` | `--bind-address` |
 | `envdProxy.tlsSecretName` | `""` | Wildcard certificate for `*.{domain}`; empty serves cleartext h2c |
 | `envdProxy.resources` | 100m / 128Mi requests, 512Mi limit | Proxy resources |

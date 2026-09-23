@@ -21,10 +21,13 @@ package e2bcompat
 
 import (
 	"cmp"
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,10 +50,6 @@ const (
 	DefaultTimeoutSeconds = 300
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
-	// accessTokenHeader is the per-sandbox data-plane credential the SDK sends
-	// to envd. It is minted once at claim time and never re-derivable here, so
-	// a client that presents it on connect gets it echoed back.
-	accessTokenHeader = "X-Access-Token" //nolint:gosec // a header name, not a credential
 )
 
 var (
@@ -60,8 +59,8 @@ var (
 
 // Options configures the compat server.
 type Options struct {
-	// Namespace is the Kubernetes namespace claims are made in. e2b has no
-	// namespace concept, so every compat claim lands in this one.
+	// Namespace is where a key that names no namespace claims, and where
+	// anonymous claims land.
 	Namespace string
 	// Domain is echoed as the sandbox `domain`, from which the SDK derives the
 	// envd host as "{port}-{sandboxID}.{domain}". It is required: a sandbox
@@ -78,9 +77,9 @@ type Options struct {
 	// DefaultTimeoutSeconds overrides DefaultTimeoutSeconds for a create that
 	// names no timeout, and is the lease a refresh grants.
 	DefaultTimeoutSeconds int
-	// APIKeys, when non-empty, is the set of accepted X-API-KEY values. Empty
-	// disables authentication and is refused unless AllowAnonymous is set, so a
-	// misconfigured deployment cannot silently serve an open claim endpoint.
+	// APIKeys, when non-empty, is the set of accepted X-API-KEY values, each
+	// "key" or "key namespace" (Namespace when none is given); a key sees
+	// nothing outside its namespace. Empty is refused unless AllowAnonymous.
 	APIKeys []string //nolint:gosec // the field holds API keys by design
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
@@ -96,12 +95,14 @@ type Options struct {
 	Log logr.Logger
 }
 
+type namespaceKey struct{}
+
 // Server translates e2b REST calls onto a scale.SandboxStore.
 type Server struct {
 	store    scale.SandboxStore
 	resolver scale.ClaimIDResolver
 	opts     Options
-	keys     map[string]struct{}
+	keys     map[string]string
 }
 
 // NewServer builds a compat server. It fails when no API key is configured and
@@ -120,10 +121,16 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	opts.EnvdVersion = cmp.Or(opts.EnvdVersion, DefaultEnvdVersion)
 	opts.DefaultTimeoutSeconds = cmp.Or(opts.DefaultTimeoutSeconds, DefaultTimeoutSeconds)
 	opts.SizeClass = cmp.Or(opts.SizeClass, scale.SizeClassSmall)
-	keys := make(map[string]struct{}, len(opts.APIKeys))
-	for _, k := range opts.APIKeys {
-		if k = strings.TrimSpace(k); k != "" {
-			keys[k] = struct{}{}
+	keys := make(map[string]string, len(opts.APIKeys))
+	for _, entry := range opts.APIKeys {
+		switch fields := strings.Fields(entry); len(fields) {
+		case 0:
+		case 1:
+			keys[fields[0]] = opts.Namespace
+		case 2:
+			keys[fields[0]] = fields[1]
+		default:
+			return nil, fmt.Errorf("e2bcompat: api key entry %q: want \"key\" or \"key namespace\"", entry)
 		}
 	}
 	if len(keys) == 0 && !opts.AllowAnonymous {
@@ -146,6 +153,7 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	mux.Handle("POST /sandboxes", s.auth(http.HandlerFunc(s.createSandbox)))
+	mux.Handle("POST /v2/sandboxes", s.auth(http.HandlerFunc(s.createSandbox)))
 	mux.Handle("GET /sandboxes", s.auth(http.HandlerFunc(s.listSandboxes)))
 	mux.Handle("GET /v2/sandboxes", s.auth(http.HandlerFunc(s.listSandboxes)))
 	mux.Handle("GET /sandboxes/{sandboxID}", s.auth(http.HandlerFunc(s.getSandbox)))
@@ -155,6 +163,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /sandboxes/{sandboxID}/pause", s.auth(http.HandlerFunc(s.pauseSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
+	mux.Handle("POST /v2/sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/fork", s.auth(http.HandlerFunc(s.forkSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/snapshots", s.auth(http.HandlerFunc(s.createSnapshot)))
 	mux.Handle("GET /snapshots", s.auth(http.HandlerFunc(s.listSnapshots)))
@@ -166,32 +175,41 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// auth enforces the X-API-KEY header unless anonymous access is allowed. The
-// comparison is constant-time so a valid key cannot be recovered by timing.
+// auth enforces the X-API-KEY header unless anonymous access is allowed and
+// scopes the request to the key's namespace.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(s.keys) > 0 {
-			presented := r.Header.Get(apiKeyHeader)
-			if !s.validKey(presented) {
+			ns, ok := s.namespaceForKey(r.Header.Get(apiKeyHeader))
+			if !ok {
 				writeError(w, http.StatusUnauthorized, "invalid API key")
 				return
 			}
+			r = r.WithContext(context.WithValue(r.Context(), namespaceKey{}, ns))
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (s *Server) validKey(presented string) bool {
+func (s *Server) namespaceForKey(presented string) (string, bool) {
 	if presented == "" {
-		return false
+		return "", false
 	}
-	ok := false
-	for k := range s.keys {
+	ns, ok := "", false
+	for k, keyNS := range s.keys {
 		if subtle.ConstantTimeCompare([]byte(k), []byte(presented)) == 1 {
-			ok = true
+			ns, ok = keyNS, true
 		}
 	}
-	return ok
+	return ns, ok
+}
+
+// namespace is the caller's scope: the key's namespace, or the configured one without keys.
+func (s *Server) namespace(r *http.Request) string {
+	if ns, ok := r.Context().Value(namespaceKey{}).(string); ok {
+		return ns
+	}
+	return s.opts.Namespace
 }
 
 // createSandbox claims a warm microVM for the requested template. It is the
@@ -220,7 +238,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		Net:      netFor(req.AllowInternetAccess),
 		Size:     s.opts.SizeClass,
 	}
-	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool, s.timeoutSeconds(req.Timeout))
+	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, s.timeoutSeconds(req.Timeout))
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf(
@@ -242,9 +260,14 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listSandboxes reports the live sandboxes in the compat namespace.
+// listSandboxes reports the live sandboxes in the caller's namespace.
 func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
-	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.opts.Namespace})
+	filter, err := listFilterOf(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
 		s.opts.Log.Error(err, "e2b list: store list failed")
 		writeError(w, http.StatusInternalServerError, "failed to list sandboxes")
@@ -252,7 +275,9 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]SandboxDetail, 0, len(list.Items))
 	for i := range list.Items {
-		out = append(out, s.detailFor(&list.Items[i]))
+		if d := s.detailFor(&list.Items[i]); filter.keeps(d) {
+			out = append(out, d)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -345,7 +370,7 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 	if strings.TrimSpace(id) == "" {
 		return nil, errSandboxNotFound
 	}
-	sb, err := s.resolver.GetByClaimID(r.Context(), s.opts.Namespace, ClaimID(id), func(claimID string) bool {
+	sb, err := s.resolver.GetByClaimID(r.Context(), s.namespace(r), ClaimID(id), func(claimID string) bool {
 		return MatchesID(claimID, id)
 	})
 	if err != nil {
@@ -389,6 +414,52 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 }
 
+// listFilter is the GET /v2/sandboxes query the read view can answer; metadata is not stored, so it is refused.
+type listFilter struct {
+	states       []string
+	template     string
+	startedAfter time.Time
+}
+
+func listFilterOf(q url.Values) (listFilter, error) {
+	if q.Get("metadata") != "" {
+		return listFilter{}, errors.New("metadata filters are not supported: metadata is not stored")
+	}
+	f := listFilter{template: q.Get("template")}
+	for _, v := range q["state"] {
+		for state := range strings.SplitSeq(v, ",") {
+			if state != StateRunning && state != StatePaused {
+				return listFilter{}, fmt.Errorf("unknown state %q", state)
+			}
+			f.states = append(f.states, state)
+		}
+	}
+	if v := q.Get("startedAfter"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return listFilter{}, fmt.Errorf("startedAfter: %w", err)
+		}
+		f.startedAfter = t
+	}
+	return f, nil
+}
+
+func (f listFilter) keeps(d SandboxDetail) bool {
+	if len(f.states) > 0 && !slices.Contains(f.states, d.State) {
+		return false
+	}
+	if f.template != "" && d.TemplateID != f.template {
+		return false
+	}
+	if !f.startedAfter.IsZero() {
+		started, err := time.Parse(time.RFC3339, d.StartedAt)
+		if err != nil || started.Before(f.startedAfter.Truncate(time.Second)) {
+			return false
+		}
+	}
+	return true
+}
+
 // templateOf reports the pool template a sandbox was claimed from: the label the
 // store stamps, which is the only place it survives (a synthesized Sandbox holds
 // no pod spec).
@@ -415,6 +486,18 @@ func unsupportedCreateOption(req NewSandbox) (string, bool) {
 		return "envVars is not supported; set the environment inside the sandbox after it starts", true
 	case req.AutoPause != nil && *req.AutoPause:
 		return "autoPause is not supported; pause explicitly, or let the lease expire", true
+	case len(req.Network) > 0:
+		return "network rules are not supported; allow_internet_access picks the pool's lane and nothing else is enforced", true
+	case len(req.VolumeMounts) > 0:
+		return "volumeMounts are not supported", true
+	case req.AutoPauseMemory != nil:
+		return "autoPauseMemory is not supported; a pause always keeps memory", true
+	case req.AutoResume != nil && req.AutoResume.Enabled:
+		return "autoResume is not supported; resume explicitly with connect", true
+	case len(req.MCP) > 0:
+		return "mcp is not supported", true
+	case len(req.IAM) > 0:
+		return "iam is not supported", true
 	}
 	return "", false
 }

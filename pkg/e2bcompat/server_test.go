@@ -140,6 +140,12 @@ func TestCreateRefusesGuaranteesThisBackendCannotGive(t *testing.T) {
 		{"secure false", `{"templateID":"t","secure":false}`},
 		{"envVars", `{"templateID":"t","envVars":{"A":"1"}}`},
 		{"autoPause", `{"templateID":"t","autoPause":true}`},
+		{"network rules", `{"templateID":"t","network":{"denyOut":["10.0.0.0/8"]}}`},
+		{"volume mounts", `{"templateID":"t","volumeMounts":[{"name":"v","path":"/data"}]}`},
+		{"auto pause memory", `{"templateID":"t","autoPauseMemory":true}`},
+		{"auto resume", `{"templateID":"t","autoResume":{"enabled":true}}`},
+		{"mcp", `{"templateID":"t","mcp":{"a":{}}}`},
+		{"iam tokens", `{"templateID":"t","iam":{"tokens":{"x":{"audience":"a","tokenType":"t"}}}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &fakeStore{}
@@ -160,6 +166,8 @@ func TestCreateAcceptsTheHonorableForms(t *testing.T) {
 		{"empty envVars", `{"templateID":"t","envVars":{}}`},
 		{"autoPause false", `{"templateID":"t","autoPause":false}`},
 		{"metadata is accepted and dropped", `{"templateID":"t","metadata":{"a":"b"}}`},
+		{"auto resume off", `{"templateID":"t","autoResume":{"enabled":false}}`},
+		{"empty network", `{"templateID":"t","network":{}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newTestServer(t, &fakeStore{})
@@ -484,26 +492,37 @@ type fakeStore struct {
 	releasedID   string
 	releaseErr   error
 	listErr      error
+
+	snaps               []scale.Snapshot
+	snapshotsDownNode   string
+	deletedSnapshotNode string
+	deletedSnapshotID   string
 }
 
-func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
+func (f *fakeStore) List(_ context.Context, opts scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return &sandboxv1beta1.SandboxList{Items: f.items}, nil
+	var items []sandboxv1beta1.Sandbox
+	for _, sb := range f.items {
+		if opts.Namespace == "" || sb.Namespace == opts.Namespace {
+			items = append(items, sb)
+		}
+	}
+	return &sandboxv1beta1.SandboxList{Items: items}, nil
 }
 
 func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
 	return nil, nil
 }
 
-func (f *fakeStore) GetByClaimID(_ context.Context, _, id string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
+func (f *fakeStore) GetByClaimID(_ context.Context, ns, id string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
 	f.lookedUpID = id
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	for i := range f.items {
-		if match(f.items[i].Annotations[scale.ClaimIDAnnotation]) {
+		if (ns == "" || f.items[i].Namespace == ns) && match(f.items[i].Annotations[scale.ClaimIDAnnotation]) {
 			return &f.items[i], nil
 		}
 	}
@@ -543,12 +562,24 @@ func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Sna
 	return scale.Snapshot{}, nil
 }
 
-func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
+func (f *fakeStore) Snapshots(_ context.Context, node string) ([]scale.Snapshot, error) {
+	if node == f.snapshotsDownNode {
+		return nil, errors.New("connection refused")
+	}
+	return f.snaps, nil
+}
 
-func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
+func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
+	f.deletedSnapshotNode, f.deletedSnapshotID = node, id
+	return nil
+}
 
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
+}
+
+func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {
+	return scale.SandboxRecord{Deadline: time.Now().Add(time.Hour)}, nil
 }
 
 func getDetail(t *testing.T, sb sandboxv1beta1.Sandbox) SandboxDetail {

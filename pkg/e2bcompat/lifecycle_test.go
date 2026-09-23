@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -121,17 +120,12 @@ func TestConnectPausedIs201AndResumes(t *testing.T) {
 	}
 }
 
-func TestConnectEchoesThePresentedAccessToken(t *testing.T) {
-	store := &lifecycleStore{}
+func TestConnectReturnsTheSandboxAccessToken(t *testing.T) {
+	store := &lifecycleStore{token: "sandbox-secret"}
 	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
-	r := httptest.NewRequest(http.MethodPost, "/sandboxes/sb-abc/connect", strings.NewReader(`{"timeout":30}`))
-	r.Header.Set(apiKeyHeader, testKey)
-	r.Header.Set(accessTokenHeader, "sandbox-secret")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
@@ -140,22 +134,62 @@ func TestConnectEchoesThePresentedAccessToken(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if got.EnvdAccessToken != "sandbox-secret" {
-		t.Errorf("envdAccessToken = %q, want the token the client presented", got.EnvdAccessToken)
+		t.Errorf("envdAccessToken = %q, want the token the owning node holds", got.EnvdAccessToken)
+	}
+	if store.readNode != "node-a" || store.readID != "sb_abc" {
+		t.Errorf("Read(%q, %q), want (node-a, sb_abc)", store.readNode, store.readID)
 	}
 }
 
-func TestConnectWithoutAnAccessTokenReportsItEmpty(t *testing.T) {
-	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
-	h := newTestServer(t, store)
-
-	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
-	var got Sandbox
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
+func TestConnectRestoresAPausedClaimThenJudgesTheLeaseItsWakeGranted(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		wakeDeadline time.Duration
+		wantRenew    bool
+	}{
+		{"hibernated: the lease continues, 20 s left", 0, true},
+		{"archived: the wake grants an hour", time.Hour, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &lifecycleStore{nodePaused: true, deadline: time.Now().Add(20 * time.Second)}
+			if tc.wakeDeadline != 0 {
+				store.wakeDeadline = time.Now().Add(tc.wakeDeadline)
+			}
+			store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+			if w := do(t, h, http.MethodPost, "/v2/sandboxes/sb-abc/connect", `{"timeout":300}`, testKey); w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+			}
+			if store.resumedID != "sb_abc" || (store.renewedID != "") != tc.wantRenew {
+				t.Errorf("resumed %q, renewed %q; want a resume and renew=%v", store.resumedID, store.renewedID, tc.wantRenew)
+			}
+		})
 	}
-	if got.EnvdAccessToken != "" {
-		t.Errorf("envdAccessToken = %q; the token is minted once at claim time and cannot be re-derived here", got.EnvdAccessToken)
+}
+
+func TestConnectExtendsALeaseShorterThanItsTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		left     time.Duration
+		body     string
+		wantTTL  int
+		wantCall bool
+	}{
+		{"20 s left, timeout 300", 20 * time.Second, `{"timeout":300}`, 300, true},
+		{"20 s left, timeout omitted", 20 * time.Second, `{}`, DefaultTimeoutSeconds, true},
+		{"an hour left, timeout 300", time.Hour, `{"timeout":300}`, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &lifecycleStore{deadline: time.Now().Add(tc.left)}
+			store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+			if w := do(t, h, http.MethodPost, "/v2/sandboxes/sb-abc/connect", tc.body, testKey); w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			}
+			if called := store.renewedID != ""; called != tc.wantCall || store.renewedTTL != tc.wantTTL {
+				t.Errorf("renew called %v for %d s, want %v for %d s", called, store.renewedTTL, tc.wantCall, tc.wantTTL)
+			}
+		})
 	}
 }
 
@@ -237,8 +271,19 @@ func TestSnapshotReturns201WithID(t *testing.T) {
 	if len(got.Names) != 1 || got.Names[0] != "before-migration" {
 		t.Errorf("names = %v, want the requested label echoed", got.Names)
 	}
-	if store.snapshotName != "before-migration" {
-		t.Errorf("name routed = %q, want it passed through", store.snapshotName)
+	if store.snapshotName != "sandboxes/before-migration" {
+		t.Errorf("name routed = %q, want it stamped with the key's namespace", store.snapshotName)
+	}
+}
+
+func TestSnapshotNameMustFitTheNodeBudgetWithItsStamp(t *testing.T) {
+	store := &lifecycleStore{}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/snapshots", `{"name":"`+strings.Repeat("x", 54)+`"}`, testKey)
+	if w.Code != http.StatusBadRequest || store.snapshotName != "" {
+		t.Fatalf("status = %d, routed %q; want 400 and no snapshot: %s", w.Code, store.snapshotName, w.Body.String())
 	}
 }
 
@@ -332,10 +377,18 @@ type lifecycleStore struct {
 	renewedID              string
 	renewedTTL             int
 	renewDeadline          time.Time
+	token                  string
+	deadline, wakeDeadline time.Time
+	readNode, readID       string
 	err                    error
 	statsErr               error
 
 	nodePaused bool
+}
+
+func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.SandboxRecord, error) {
+	f.readNode, f.readID = node, id
+	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused, Deadline: f.deadline}, f.statsErr
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
@@ -349,6 +402,10 @@ func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
 
 func (f *lifecycleStore) Resume(_ context.Context, node, id string) error {
 	f.resumedNode, f.resumedID = node, id
+	f.nodePaused = false
+	if !f.wakeDeadline.IsZero() {
+		f.deadline = f.wakeDeadline
+	}
 	return f.err
 }
 

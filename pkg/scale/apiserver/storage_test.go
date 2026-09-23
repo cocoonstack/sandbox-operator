@@ -276,6 +276,10 @@ func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, 
 	return scale.SandboxStats{}, nil
 }
 
+func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {
+	return scale.SandboxRecord{}, nil
+}
+
 func nsCtx(t *testing.T, ns string) context.Context {
 	return genericapirequest.WithNamespace(t.Context(), ns)
 }

@@ -24,7 +24,8 @@ apiserver:
     envdVersion: ""
     defaultTimeoutSeconds: 0
     port: 8080
-    # apiKeySecret holds the accepted X-API-KEY values, one per line. Required
+    # apiKeySecret holds the accepted X-API-KEY values, one per line as "key"
+    # or "key namespace" (a key sees only its namespace's sandboxes). Required
     # once enabled: the surface refuses to serve unauthenticated.
     apiKeySecret:
       name: ""
@@ -43,8 +44,10 @@ envdProxy:
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
-  # domain and namespace default to the apiserver.e2b values: the proxy
-  # resolves the sandboxes that surface claims, under the same host scheme.
+  # domain defaults to apiserver.e2b.domain: the proxy resolves the sandboxes
+  # that surface claims, under the same host scheme. namespace narrows its
+  # inventory lookups; empty resolves across every namespace, which keyed
+  # namespaces need.
   domain: ""
   namespace: ""
   port: 8443

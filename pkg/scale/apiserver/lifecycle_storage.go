@@ -147,13 +147,17 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 			if !ok {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("expected SandboxSnapshotOptions, got %T", obj))
 			}
-			snap, err := st.Snapshot(ctx, sb.Status.NodeName, claimID(sb), opts.Name)
+			name, err := scale.CheckpointName(sb.Namespace, opts.Name)
+			if err != nil {
+				return nil, err
+			}
+			snap, err := st.Snapshot(ctx, sb.Status.NodeName, claimID(sb), name)
 			if err != nil {
 				return nil, verbError("snapshot", sb, err)
 			}
 			return &cocoonv1beta1.SandboxSnapshotResult{
 				SnapshotID:        snap.ID,
-				Name:              snap.Name,
+				Name:              opts.Name,
 				NodeName:          snap.Node,
 				CreationTimestamp: metav1.NewTime(snap.CreatedAt),
 			}, nil

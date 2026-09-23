@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -70,34 +69,46 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
+	if req.Memory != nil && !*req.Memory {
+		writeError(w, http.StatusBadRequest, "memory=false is not supported; a paused sandbox resumes from its memory snapshot")
+		return
+	}
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
 		s.writeLookupError(w, err, id, "connect")
 		return
 	}
-	paused, err := s.isPaused(r.Context(), sb)
+	node, claimID := sb.Status.NodeName, claimIDOf(sb)
+	rec, err := s.store.Read(r.Context(), node, claimID)
 	if err != nil {
-		s.writeLookupError(w, err, id, "connect")
+		s.writeVerbError(w, err, id, "connect: read", "failed to connect the sandbox")
 		return
 	}
 	status := http.StatusOK
-	if paused {
-		if err := s.store.Resume(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
+	if rec.Paused {
+		if err = s.store.Resume(r.Context(), node, claimID); err != nil {
 			s.writeVerbError(w, err, id, "connect: resume", "failed to resume the sandbox")
 			return
 		}
 		status = http.StatusCreated
+		if rec, err = s.store.Read(r.Context(), node, claimID); err != nil {
+			s.writeVerbError(w, err, id, "connect: read", "failed to connect the sandbox")
+			return
+		}
 	}
-	// The token is minted once at claim time and node inventory carries no
-	// per-sandbox secret to re-derive it from, so this echoes back the one the
-	// client kept and leaves the field empty when it kept none.
+	if ttl := s.timeoutSeconds(req.Timeout); time.Now().Add(time.Duration(ttl) * time.Second).After(rec.Deadline) {
+		if _, err := s.store.Renew(r.Context(), node, claimID, ttl); err != nil {
+			s.writeVerbError(w, err, id, "connect: renew", "failed to connect the sandbox")
+			return
+		}
+	}
 	writeJSON(w, status, Sandbox{
 		TemplateID:      templateOf(sb),
-		SandboxID:       PublicID(claimIDOf(sb)),
-		ClientID:        sb.Status.NodeName,
+		SandboxID:       PublicID(claimID),
+		ClientID:        node,
 		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: r.Header.Get(accessTokenHeader),
+		EnvdAccessToken: rec.Token,
 		Domain:          s.opts.Domain,
 	})
 }
@@ -174,83 +185,97 @@ func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, err, id, "snapshot")
 		return
 	}
-	snap, err := s.store.Snapshot(r.Context(), sb.Status.NodeName, claimIDOf(sb), req.Name)
+	name, err := scale.CheckpointName(s.namespace(r), req.Name)
 	if err != nil {
 		s.writeVerbError(w, err, id, "snapshot", "failed to snapshot the sandbox")
 		return
 	}
+	snap, err := s.store.Snapshot(r.Context(), sb.Status.NodeName, claimIDOf(sb), name)
+	if err != nil {
+		s.writeVerbError(w, err, id, "snapshot", "failed to snapshot the sandbox")
+		return
+	}
+	snap.Name = req.Name
 	writeJSON(w, http.StatusCreated, snapshotInfo(snap))
 }
 
-// listSnapshots reports the checkpoints across the fleet's nodes.
+// listSnapshots reports the caller's checkpoints, narrowed by the sandboxID and name filters.
 func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
-	nodes, err := s.nodesWithSandboxes(r)
+	snaps, _, err := s.snapshotsOf(r)
 	if err != nil {
-		s.opts.Log.Error(err, "e2b list snapshots: resolve nodes failed")
+		s.opts.Log.Error(err, "e2b list snapshots failed")
 		writeError(w, http.StatusInternalServerError, "failed to list snapshots")
 		return
 	}
-	perNode := make([][]SnapshotInfo, len(nodes))
+	sandboxID, name := r.URL.Query().Get("sandboxID"), r.URL.Query().Get("name")
+	out := make([]SnapshotInfo, 0, len(snaps))
+	for _, snap := range snaps {
+		if (sandboxID != "" && !MatchesID(snap.SandboxID, sandboxID)) || (name != "" && snap.Name != name) {
+			continue
+		}
+		out = append(out, snapshotInfo(snap))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// deleteSnapshot also serves DELETE /templates/{templateID}: e2b addresses
+// snapshots as templates on delete.
+func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	snapshotID := r.PathValue("snapshotID")
+	snaps, complete, err := s.snapshotsOf(r)
+	if err != nil {
+		s.opts.Log.Error(err, "e2b delete snapshot: listing failed", "snapshotID", snapshotID)
+		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
+		return
+	}
+	i := slices.IndexFunc(snaps, func(snap scale.Snapshot) bool { return snap.ID == snapshotID })
+	switch {
+	case i < 0 && !complete:
+		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot: a node did not answer")
+		return
+	case i < 0:
+		writeError(w, http.StatusNotFound, "snapshot not found")
+		return
+	}
+	if err := s.store.DeleteSnapshot(r.Context(), snaps[i].Node, snapshotID); err != nil {
+		s.opts.Log.Error(err, "e2b delete snapshot failed", "node", snaps[i].Node, "snapshotID", snapshotID)
+		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// snapshotsOf lists the caller's checkpoints across the nodes with the
+// namespace stamp stripped; complete is false when a node did not answer.
+func (s *Server) snapshotsOf(r *http.Request) (snaps []scale.Snapshot, complete bool, err error) {
+	nodes, err := s.nodesWithSandboxes(r)
+	if err != nil {
+		return nil, false, err
+	}
+	ns := s.namespace(r)
+	perNode := make([][]scale.Snapshot, len(nodes))
+	answered := make([]bool, len(nodes))
 	var g errgroup.Group
 	g.SetLimit(maxNodeConcurrency)
 	for i, node := range nodes {
 		g.Go(func() error {
 			snaps, err := s.store.Snapshots(r.Context(), node)
 			if err != nil {
-				// One unreachable node must not blank the whole listing.
-				s.opts.Log.Error(err, "e2b list snapshots: node failed", "node", node)
+				s.opts.Log.Error(err, "e2b snapshots: node failed", "node", node)
 				return nil
 			}
+			answered[i] = true
 			for _, snap := range snaps {
-				perNode[i] = append(perNode[i], snapshotInfo(snap))
+				if name, ok := scale.CheckpointNameIn(ns, snap.Name); ok {
+					snap.Name = name
+					perNode[i] = append(perNode[i], snap)
+				}
 			}
 			return nil
 		})
 	}
 	_ = g.Wait()
-	out := slices.Concat(perNode...)
-	if out == nil {
-		out = []SnapshotInfo{}
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// deleteSnapshot removes a checkpoint. e2b addresses snapshots as templates on
-// delete, so this serves DELETE /templates/{templateID} too.
-func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
-	snapshotID := r.PathValue("snapshotID")
-	nodes, err := s.nodesWithSandboxes(r)
-	if err != nil {
-		s.opts.Log.Error(err, "e2b delete snapshot: resolve nodes failed")
-		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
-		return
-	}
-	// Checkpoints are node-local and the id does not name its node, so the
-	// delete is offered to each node; a node that does not hold it reports
-	// success (delete is idempotent), which keeps this safe to fan out.
-	var (
-		g  errgroup.Group
-		ok atomic.Bool
-	)
-	g.SetLimit(maxNodeConcurrency)
-	for _, node := range nodes {
-		g.Go(func() error {
-			if err := s.store.DeleteSnapshot(r.Context(), node, snapshotID); err != nil {
-				s.opts.Log.Error(err, "e2b delete snapshot: node failed", "node", node, "snapshotID", snapshotID)
-				return nil
-			}
-			ok.Store(true)
-			return nil
-		})
-	}
-	_ = g.Wait()
-	// Every node failing is an outage, not an idempotent delete of something
-	// already gone, so the caller must not read it as success.
-	if len(nodes) > 0 && !ok.Load() {
-		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot on any node")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return slices.Concat(perNode...), !slices.Contains(answered, false), nil
 }
 
 // sandboxMetrics reports one sandbox's resource usage. e2b's schema requires
@@ -348,19 +373,10 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 	return s.opts.Inventory.ListNodes(r.Context())
 }
 
-// isPaused reports whether the sandbox is hibernated, asking its owning node
-// rather than trusting the synthesized read view.
-//
-// The label on a listed sandbox comes from NodeInventory, which the node
-// republishes on a ~30 s cadence, so it lags a pause by up to that long. e2b's
-// contract needs a strong answer here — the SDK reads 409 as "already paused"
-// and returns false — and a stale Running label turns that into a second 204,
-// telling the caller it paused a sandbox that was already down. The per-sandbox
-// node read is authoritative and costs one round trip to a node we are about to
-// call anyway.
-//
-// A node that cannot be reached falls back to the cached label: degrading to the
-// eventually-consistent answer is better than failing the request outright.
+// isPaused asks the owning node: the listed phase comes from NodeInventory,
+// which lags a pause by up to its publish cadence, and a stale Running would
+// turn e2b's 409 "already paused" into a second 204. An unreachable node falls
+// back to the cached label.
 func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool, error) {
 	if node, id := sb.Status.NodeName, claimIDOf(sb); node != "" && id != "" {
 		st, err := s.store.Stats(ctx, node, id)

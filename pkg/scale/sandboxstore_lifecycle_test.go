@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,40 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	err := store.Pause(ctx, "n1", "sb_live")
 	require.Error(t, err)
 	assert.False(t, k8serrors.IsNotFound(err), "a transport failure is not NotFound: %v", err)
+}
+
+func TestReadReportsTheClaimAsItsNodeHoldsIt(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777"))
+	deadline := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	f := &recordingFactory{rows: map[string][]sandboxd.SandboxSummary{"n1:7777": {{ID: "sb_live", Token: "secret", Hibernated: true, Deadline: deadline}}}}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	rec, err := store.Read(t.Context(), "n1", "sb_live")
+	require.NoError(t, err)
+	assert.Equal(t, SandboxRecord{Token: "secret", Paused: true, Deadline: deadline}, rec)
+
+	f.rows["n1:7777"] = []sandboxd.SandboxSummary{{ID: "sb_live", Archived: true}}
+	rec, err = store.Read(t.Context(), "n1", "sb_live")
+	require.NoError(t, err)
+	assert.True(t, rec.Paused, "an archived claim is paused: Resume restores it")
+
+	_, err = store.Read(t.Context(), "n1", "sb_gone")
+	assert.True(t, k8serrors.IsNotFound(err), "a sandboxd 404 must surface as NotFound, got %v", err)
+}
+
+func TestCheckpointNamesCarryTheNamespaceWithinTheNodeBudget(t *testing.T) {
+	stamped, err := CheckpointName("team-a", "before")
+	require.NoError(t, err)
+	assert.Equal(t, "team-a/before", stamped)
+	name, ok := CheckpointNameIn("team-a", stamped)
+	assert.True(t, ok)
+	assert.Equal(t, "before", name)
+	_, ok = CheckpointNameIn("team-b", stamped)
+	assert.False(t, ok)
+
+	_, err = CheckpointName("team-a", strings.Repeat("x", 57))
+	assert.True(t, k8serrors.IsBadRequest(err), "a stamped name past 63 characters must be a 400, got %v", err)
 }
 
 func TestLifecycleVerbsKeepANodeRejectionsStatus(t *testing.T) {

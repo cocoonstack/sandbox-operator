@@ -113,7 +113,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.E2BAddr, "e2b-bind-address", o.E2BAddr,
 		"Address the e2b-compatible surface listens on.")
 	fs.StringVar(&o.E2BNamespace, "e2b-namespace", o.E2BNamespace,
-		"Namespace e2b claims are made in; e2b has no namespace concept, so every compat claim lands here.")
+		"Namespace a key that names none claims in, and where anonymous claims land; e2b has no namespace concept.")
 	fs.StringVar(&o.E2BDomain, "e2b-domain", o.E2BDomain,
 		"Base domain the SDK derives the in-sandbox envd host from, as {port}-{sandboxID}.{domain}. Required with --enable-e2b-api: without it a created sandbox has no reachable data plane.")
 	fs.StringVar(&o.E2BEnvdVersion, "e2b-envd-version", o.E2BEnvdVersion,
@@ -121,13 +121,13 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.IntVar(&o.E2BTimeoutSeconds, "e2b-default-timeout", o.E2BTimeoutSeconds,
 		"Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for.")
 	fs.StringVar(&o.E2BAPIKeyFile, "e2b-api-key-file", o.E2BAPIKeyFile,
-		"Path to a file (Secret mount) of accepted e2b API keys, one per line, presented by the SDK as X-API-KEY.")
+		"Path to a file (Secret mount) of accepted e2b API keys, one per line as \"key\" or \"key namespace\", presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, --e2b-namespace when none is given.")
 	fs.BoolVar(&o.E2BAllowAnonymous, "e2b-allow-anonymous", o.E2BAllowAnonymous,
 		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
 }
 
-// e2bAPIKeys reads the accepted e2b API keys from the key file, one per line.
-// Blank lines and #-comments are ignored.
+// e2bAPIKeys reads the accepted e2b API keys from the key file, one per line as
+// "key" or "key namespace". Blank lines and #-comments are ignored.
 func (o *options) e2bAPIKeys() ([]string, error) {
 	if o.E2BAPIKeyFile == "" {
 		return nil, nil

@@ -38,6 +38,10 @@ fork limit; `ttlSeconds` is each child's own lease — children never inherit th
 parent's. `snapshot` replies with `SandboxSnapshotResult{snapshotID, name,
 nodeName, creationTimestamp}`.
 
+A checkpoint's name is stamped with the sandbox's namespace (`<namespace>/<name>`)
+so the e2b surface can scope it to a key; the stamped name must fit sandboxd's
+63-character checkpoint name, or the call fails with `400`.
+
 A verb against a sandbox the read view cannot resolve is a `404`; a sandbox
 whose inventory entry names no owning node or carries no claim id is a `500`,
 because acting by Kubernetes name would target the wrong microVM.

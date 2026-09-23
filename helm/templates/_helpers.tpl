@@ -33,7 +33,7 @@ app.kubernetes.io/name: sandbox-envd-proxy
 {{- default .Values.apiserver.e2b.domain .Values.envdProxy.domain -}}
 {{- end }}
 
-{{/* The proxy resolves sandboxes where the e2b surface claims them, so it follows the e2b namespace unless overridden. */}}
+{{/* The proxy is not an access boundary and a key's sandboxes live in the key's namespace, so it resolves across every namespace unless narrowed. */}}
 {{- define "sandbox-operator.envdProxy.namespace" -}}
-{{- default .Values.apiserver.e2b.namespace .Values.envdProxy.namespace -}}
+{{- .Values.envdProxy.namespace -}}
 {{- end }}
