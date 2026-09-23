@@ -155,7 +155,7 @@ surface are in [e2b compatibility](e2b-compat.md).
 
 The binary also takes the standard aggregated-apiserver option sets from
 `k8s.io/apiserver` — secure serving, delegated authentication and
-authorization, feature gates. `--help` prints all of them. The ones a
+authorization, and profiling. `--help` prints all of them. The ones a
 deployment sets are `--secure-port` (default `6443`), `--tls-cert-file` /
 `--tls-private-key-file` (or `--cert-dir`, which self-signs when the pair is
 absent), and `--authentication-kubeconfig` / `--authorization-kubeconfig` when
