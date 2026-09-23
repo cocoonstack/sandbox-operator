@@ -315,9 +315,10 @@ type recordingFactory struct {
 	releaseErr  error
 	verbErr     error
 
-	rows     map[string][]sandboxd.SandboxSummary
-	rowReads []string
-	silent   string
+	rows      map[string][]sandboxd.SandboxSummary
+	rowReads  []string
+	silent    string
+	ignoreRef bool
 }
 
 func (f *recordingFactory) factory() SandboxdClientFactory {
@@ -393,9 +394,19 @@ func (c *recordingClient) Sandbox(ctx context.Context, id string) (sandboxd.Sand
 	return sandboxd.SandboxSummary{}, &sandboxd.HTTPError{StatusCode: http.StatusNotFound}
 }
 
-func (c *recordingClient) Sandboxes(context.Context) ([]sandboxd.SandboxSummary, error) {
+func (c *recordingClient) SandboxesByClaimRef(ctx context.Context, ref string) ([]sandboxd.SandboxSummary, error) {
+	if c.addr == c.f.silent {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	c.f.rowReads = append(c.f.rowReads, c.addr)
-	return c.f.rows[c.addr], nil
+	var out []sandboxd.SandboxSummary
+	for _, row := range c.f.rows[c.addr] {
+		if c.f.ignoreRef || row.ClaimRef == ref {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }

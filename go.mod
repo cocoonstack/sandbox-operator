@@ -97,7 +97,7 @@ require (
 )
 
 require (
-	github.com/cocoonstack/sandbox/sdk/go v0.1.14-0.20260922165206-781d7a414114
+	github.com/cocoonstack/sandbox/sdk/go v0.1.14-0.20260923070732-4800131a603a
 	github.com/go-logr/logr v1.4.4
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.10

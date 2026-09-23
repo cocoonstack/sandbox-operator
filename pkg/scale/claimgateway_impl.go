@@ -64,9 +64,9 @@ type SandboxdClient interface {
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
 	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
 
-	// Sandbox and Sandboxes read the node's own index, which a published inventory lags.
+	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.
 	Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error)
-	Sandboxes(ctx context.Context) ([]sandboxd.SandboxSummary, error)
+	SandboxesByClaimRef(ctx context.Context, ref string) ([]sandboxd.SandboxSummary, error)
 }
 
 // Authorizer checks a claim inline before delivery.

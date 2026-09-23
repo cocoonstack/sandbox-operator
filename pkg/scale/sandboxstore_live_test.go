@@ -40,10 +40,12 @@ func TestASilentNodeBoundsAMiss(t *testing.T) {
 	start := time.Now()
 	_, err := store.GetByClaimID(t.Context(), "ns", "sb_gone", func(id string) bool { return id == "sb_gone" })
 	require.True(t, k8serrors.IsNotFound(err), "a node that never answers is a miss: %v", err)
-	assert.Less(t, time.Since(start), liveLookupTimeout+time.Second, "a silent node must not hold a miss past the per-node bound")
+	_, err = store.Get(t.Context(), "ns", "gone")
+	require.True(t, k8serrors.IsNotFound(err), "a node that never answers is a miss by name too: %v", err)
+	assert.Less(t, time.Since(start), 2*liveLookupTimeout+time.Second, "a silent node must not hold a miss past the per-node bound")
 }
 
-func TestGetAsksOnlyTheClaimingNode(t *testing.T) {
+func TestGetAsksTheClaimingNodeFirst(t *testing.T) {
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_1", Token: "tok"}}
 	store, src := unpublishedStore(f)
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
@@ -61,11 +63,44 @@ func TestGetAsksOnlyTheClaimingNode(t *testing.T) {
 	assert.Equal(t, "n1", got.Status.NodeName)
 	assert.Equal(t, []string{"n1:7777"}, f.rowReads, "only the node that served the claim is asked")
 	assert.Zero(t, src.lists.Load(), "a hit on the claiming node must not sweep the fleet's inventories")
+}
+
+func TestGetFindsWhatAnotherReplicaClaimed(t *testing.T) {
+	claimed := time.Date(2026, 9, 23, 2, 47, 45, 0, time.UTC)
+	f := &recordingFactory{rows: map[string][]sandboxd.SandboxSummary{
+		"n2:7777": {{ID: "sb_2", ClaimRef: "ns/s2", Key: sandboxd.PoolKey{Template: "img"}, ClaimedAt: claimed}},
+	}}
+	store, _ := unpublishedStore(f)
+
+	got, err := store.Get(t.Context(), "ns", "s2")
+	require.NoError(t, err)
+	assert.Equal(t, "n2", got.Status.NodeName)
+	assert.Equal(t, "sb_2", got.Annotations[ClaimIDAnnotation])
+	assert.Equal(t, metav1.NewTime(claimed), got.CreationTimestamp)
 
 	f.rowReads = nil
 	_, err = store.Get(t.Context(), "ns", "s2")
-	require.True(t, k8serrors.IsNotFound(err), "a name no claim here produced is not looked up on the nodes: %v", err)
-	assert.Empty(t, f.rowReads)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"n2:7777"}, f.rowReads, "a resolved name is asked of its node alone")
+
+	f.rowReads = nil
+	_, err = store.Get(t.Context(), "other", "s2")
+	require.True(t, k8serrors.IsNotFound(err), "the same name in another namespace is another claim ref: %v", err)
+	assert.ElementsMatch(t, []string{"n1:7777", "n2:7777"}, f.rowReads, "a miss asks every node once")
+}
+
+func TestGetMatchesTheNameWhenANodeIgnoresTheFilter(t *testing.T) {
+	f := &recordingFactory{ignoreRef: true, rows: map[string][]sandboxd.SandboxSummary{
+		"n1:7777": {{ID: "sb_1", ClaimRef: "ns/s1"}, {ID: "sb_2", ClaimRef: "ns/s2"}},
+	}}
+	store, _ := unpublishedStore(f)
+
+	got, err := store.Get(t.Context(), "ns", "s2")
+	require.NoError(t, err)
+	assert.Equal(t, "sb_2", got.Annotations[ClaimIDAnnotation], "a node that returns its whole index must not hand back another claim")
+
+	_, err = store.Get(t.Context(), "other", "s2")
+	require.True(t, k8serrors.IsNotFound(err), "the namespace is part of the name: %v", err)
 }
 
 func TestLiveReadsNeedClaimRouting(t *testing.T) {
@@ -75,7 +110,9 @@ func TestLiveReadsNeedClaimRouting(t *testing.T) {
 
 	_, err := store.GetByClaimID(t.Context(), "ns", "sb_1", func(id string) bool { return id == "sb_1" })
 	assert.True(t, k8serrors.IsNotFound(err), "without a fleet token the store only reads published inventory: %v", err)
-	assert.Equal(t, int32(1), src.lists.Load(), "without a fleet token no second, node-asking sweep runs")
+	_, err = store.Get(t.Context(), "ns", "s1")
+	assert.True(t, k8serrors.IsNotFound(err), "without a fleet token a name is read from published inventory only: %v", err)
+	assert.Equal(t, int32(2), src.lists.Load(), "without a fleet token no second, node-asking sweep runs")
 }
 
 func TestEntryFromSummaryIsWhatANodePublishes(t *testing.T) {
