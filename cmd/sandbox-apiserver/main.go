@@ -76,6 +76,7 @@ func newOptions() *options {
 		E2BNamespace:   "default",
 	}
 	o.SecureServing.BindPort = 6443
+	o.Features.EnablePriorityAndFairness = false
 	// Allow running without a remote kubeconfig (in-cluster service account).
 	o.Authentication.RemoteKubeConfigFileOptional = true
 	o.Authorization.RemoteKubeConfigFileOptional = true
@@ -153,6 +154,9 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 	cfg := genericapiserver.NewConfig(sandboxapiserver.Codecs)
 	cfg.EffectiveVersion = apiservercompatibility.DefaultBuildEffectiveVersion()
 	cfg.OpenAPIV3Config = sandboxapiserver.NewOpenAPIV3Config()
+	if err := o.Features.ApplyTo(cfg, nil, nil); err != nil {
+		return nil, fmt.Errorf("apply features: %w", err)
+	}
 	if err := o.SecureServing.ApplyTo(&cfg.SecureServing, &cfg.LoopbackClientConfig); err != nil {
 		return nil, fmt.Errorf("apply secure serving: %w", err)
 	}
