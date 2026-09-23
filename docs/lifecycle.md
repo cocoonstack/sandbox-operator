@@ -102,7 +102,7 @@ claim time and the submitted object is the only place `Create` can hear it:
   stamp the same annotation once the owning node publishes the deadline in
   its `NodeInventory`.
 
-## Two behaviors callers must handle
+## Behaviors callers must handle
 
 - **Lists are eventually consistent.** `Create` returns as soon as the
   node-local claim completes. `List` and `Watch` are served from
@@ -111,6 +111,12 @@ claim time and the submitted object is the only place `Create` can hear it:
   or by claim id (the e2b surface), ask the nodes and answer at once on any
   apiserver replica. A deleted sandbox stays readable until its node
   publishes, and a fork child is readable by name only after that publish.
+- **`Create` is a claim, not an upsert.** No Sandbox object is stored, so
+  `metadata.name` is never checked against the fleet: a repeated `Create` under
+  one name claims a second microVM, and the by-name verbs then reach whichever
+  of the two a node answers for first. A caller that may repeat a `Create` uses
+  `metadata.generateName`; the `claim-id` annotation on each response names the
+  microVM that call delivered.
 - **The published sandbox id is DNS-label safe.** The e2b SDK builds the
   in-sandbox host as `{port}-{sandboxID}.{domain}`, so the node's raw claim id
   (`sb_...`) is rendered as `sb-...` on the e2b surface.
