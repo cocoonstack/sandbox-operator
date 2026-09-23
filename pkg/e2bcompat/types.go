@@ -94,9 +94,7 @@ type SandboxPauseRequest struct {
 }
 
 // ConnectSandbox is the POST /sandboxes/{id}/connect body — the SDK's resume.
-// Timeout is required by the schema but does not change the node-owned lease;
-// memory=false asks for a reboot instead of a memory restore, which this
-// backend refuses.
+// Timeout is required by the schema but does not change the node-owned lease.
 type ConnectSandbox struct {
 	Timeout int32 `json:"timeout"`
 	Memory  *bool `json:"memory,omitempty"`

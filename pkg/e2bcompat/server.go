@@ -75,12 +75,9 @@ type Options struct {
 	// DefaultTimeoutSeconds overrides DefaultTimeoutSeconds for a create that
 	// names no timeout, and is the lease a refresh grants.
 	DefaultTimeoutSeconds int
-	// APIKeys, when non-empty, is the set of accepted X-API-KEY values, one per
-	// entry as "key" or "key namespace": a key's sandboxes and snapshots live in
-	// its namespace, Namespace when none is given, and a key sees nothing
-	// outside it. Empty disables authentication and is refused unless
-	// AllowAnonymous is set, so a misconfigured deployment cannot silently serve
-	// an open claim endpoint.
+	// APIKeys, when non-empty, is the set of accepted X-API-KEY values, each
+	// "key" or "key namespace" (Namespace when none is given); a key sees
+	// nothing outside its namespace. Empty is refused unless AllowAnonymous.
 	APIKeys []string //nolint:gosec // the field holds API keys by design
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
@@ -177,8 +174,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // auth enforces the X-API-KEY header unless anonymous access is allowed and
-// scopes the request to the key's namespace. The comparison is constant-time so
-// a valid key cannot be recovered by timing.
+// scopes the request to the key's namespace.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(s.keys) > 0 {

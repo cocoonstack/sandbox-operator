@@ -352,19 +352,10 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 	return s.opts.Inventory.ListNodes(r.Context())
 }
 
-// isPaused reports whether the sandbox is hibernated, asking its owning node
-// rather than trusting the synthesized read view.
-//
-// The label on a listed sandbox comes from NodeInventory, which the node
-// republishes on a ~30 s cadence, so it lags a pause by up to that long. e2b's
-// contract needs a strong answer here — the SDK reads 409 as "already paused"
-// and returns false — and a stale Running label turns that into a second 204,
-// telling the caller it paused a sandbox that was already down. The per-sandbox
-// node read is authoritative and costs one round trip to a node we are about to
-// call anyway.
-//
-// A node that cannot be reached falls back to the cached label: degrading to the
-// eventually-consistent answer is better than failing the request outright.
+// isPaused asks the owning node: the listed phase comes from NodeInventory,
+// which lags a pause by up to its publish cadence, and a stale Running would
+// turn e2b's 409 "already paused" into a second 204. An unreachable node falls
+// back to the cached label.
 func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool, error) {
 	if node, id := sb.Status.NodeName, claimIDOf(sb); node != "" && id != "" {
 		st, err := s.store.Stats(ctx, node, id)
