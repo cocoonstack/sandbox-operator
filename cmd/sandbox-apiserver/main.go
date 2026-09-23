@@ -31,6 +31,7 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
+	"github.com/cocoonstack/sandbox-operator/version"
 )
 
 const (
@@ -184,6 +185,7 @@ func run() error {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
+	klog.InfoS("starting sandbox-apiserver", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
 
 	// Route the warm-pool driver's controller-runtime logs into the apiserver's own stream.
 	ctrl.SetLogger(klog.NewKlogr())

@@ -1,6 +1,15 @@
 .PHONY: all build test lint vet fmt fmt-check deps generate api-docs clean coverage cloc help
 
 GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
+REPO_PATH := github.com/cocoonstack/sandbox-operator
+
+REVISION := $(shell git rev-parse HEAD || echo unknown)
+BUILTAT := $(shell date +%Y-%m-%dT%H:%M:%S)
+VERSION := $(shell git describe --tags $(shell git rev-list --tags --max-count=1) 2>/dev/null || echo dev)
+GO_LDFLAGS ?= -s -w \
+              -X $(REPO_PATH)/version.REVISION=$(REVISION) \
+              -X $(REPO_PATH)/version.BUILTAT=$(BUILTAT) \
+              -X $(REPO_PATH)/version.VERSION=$(VERSION)
 
 ## Shipped binaries under cmd/, and the build-tagged harnesses under test/ (one tag per directory)
 BINARIES := sandbox-apiserver sandbox-envd-proxy
@@ -78,7 +87,7 @@ api-docs: ## Regenerate docs/api.md from the API types
 build: ## Build every shipped binary into bin/
 	@for b in $(BINARIES); do \
 		echo "==> go build $$b"; \
-		CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/$$b ./cmd/$$b || exit 1; \
+		CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o bin/$$b ./cmd/$$b || exit 1; \
 	done
 
 # --- Testing ---

@@ -26,6 +26,9 @@ jobs:
       - name: Extract VERSION
         run: echo "VERSION=$(git describe --tags --always)" >> $GITHUB_ENV
 
+      - name: Set build timestamp
+        run: echo "BUILTAT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4.4.0
 
@@ -58,6 +61,8 @@ jobs:
           build-args: |
             BINARY=${{ matrix.image }}
             VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+            BUILTAT=${{ env.BUILTAT }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

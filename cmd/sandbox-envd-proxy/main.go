@@ -24,6 +24,7 @@ import (
 
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	"github.com/cocoonstack/sandbox-operator/version"
 )
 
 const (
@@ -84,6 +85,7 @@ func run(ctx context.Context, o *options) error {
 	if (o.CertFile == "") != (o.KeyFile == "") {
 		return errors.New("--tls-cert-file and --tls-private-key-file must be set together")
 	}
+	klog.InfoS("starting sandbox-envd-proxy", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)

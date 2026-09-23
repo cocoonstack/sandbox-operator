@@ -54,6 +54,7 @@ import (
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
+	"github.com/cocoonstack/sandbox-operator/version"
 	sdk "github.com/cocoonstack/sandbox/sdk/go"
 )
 
@@ -75,9 +76,6 @@ const (
 )
 
 var (
-	// version is stamped at build time (-ldflags "-X main.version=...").
-	version = "dev"
-
 	// sdkClient is shared; per-sandbox handles come from Attach, with no lookup round-trip.
 	sdkClient *sdk.Client
 
@@ -217,7 +215,7 @@ func main() {
 	}
 	o.validateMode()
 
-	buildInfo.WithLabelValues(version).Set(1)
+	buildInfo.WithLabelValues(version.VERSION).Set(1)
 	for _, r := range failReasons {
 		createFailed.WithLabelValues(r).Add(0) // pre-init so panels render 0 not "No data"
 	}
@@ -269,7 +267,7 @@ func main() {
 
 	if o.waveSize > 0 {
 		fmt.Printf("sandbox-sdk-loadgen %s: CYCLE mode ns=%s target=%d wave=%d pause=%s create-concurrency=%d delete-concurrency=%d loop=%v image=%s\n",
-			version, o.namespace, o.target, o.waveSize, o.wavePause, o.concurrency, o.deleteConcurrency, o.loop, o.image)
+			version.VERSION, o.namespace, o.target, o.waveSize, o.wavePause, o.concurrency, o.deleteConcurrency, o.loop, o.image)
 		runCycles(ctx, cl, &o)
 		if ctx.Err() != nil {
 			return
@@ -281,7 +279,7 @@ func main() {
 	}
 
 	fmt.Printf("sandbox-sdk-loadgen %s: ns=%s total=%d concurrency=%d cleanup=%v release-timeout=%s image=%s\n",
-		version, o.namespace, o.total, o.concurrency, o.cleanup, o.releaseTimeout, o.image)
+		version.VERSION, o.namespace, o.total, o.concurrency, o.cleanup, o.releaseTimeout, o.image)
 
 	var seq int64
 	summary := createBatch(ctx, cl, &o, &seq, o.total)
