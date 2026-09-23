@@ -237,8 +237,8 @@ func TestSnapshotReturns201WithID(t *testing.T) {
 	if len(got.Names) != 1 || got.Names[0] != "before-migration" {
 		t.Errorf("names = %v, want the requested label echoed", got.Names)
 	}
-	if store.snapshotName != "before-migration" {
-		t.Errorf("name routed = %q, want it passed through", store.snapshotName)
+	if store.snapshotName != "sandboxes/before-migration" {
+		t.Errorf("name routed = %q, want it stamped with the key's namespace", store.snapshotName)
 	}
 }
 

@@ -484,26 +484,36 @@ type fakeStore struct {
 	releasedID   string
 	releaseErr   error
 	listErr      error
+
+	snaps               []scale.Snapshot
+	deletedSnapshotNode string
+	deletedSnapshotID   string
 }
 
-func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
+func (f *fakeStore) List(_ context.Context, opts scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return &sandboxv1beta1.SandboxList{Items: f.items}, nil
+	var items []sandboxv1beta1.Sandbox
+	for _, sb := range f.items {
+		if opts.Namespace == "" || sb.Namespace == opts.Namespace {
+			items = append(items, sb)
+		}
+	}
+	return &sandboxv1beta1.SandboxList{Items: items}, nil
 }
 
 func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
 	return nil, nil
 }
 
-func (f *fakeStore) GetByClaimID(_ context.Context, _, id string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
+func (f *fakeStore) GetByClaimID(_ context.Context, ns, id string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
 	f.lookedUpID = id
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	for i := range f.items {
-		if match(f.items[i].Annotations[scale.ClaimIDAnnotation]) {
+		if (ns == "" || f.items[i].Namespace == ns) && match(f.items[i].Annotations[scale.ClaimIDAnnotation]) {
 			return &f.items[i], nil
 		}
 	}
@@ -543,9 +553,12 @@ func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Sna
 	return scale.Snapshot{}, nil
 }
 
-func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
+func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return f.snaps, nil }
 
-func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
+func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
+	f.deletedSnapshotNode, f.deletedSnapshotID = node, id
+	return nil
+}
 
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil

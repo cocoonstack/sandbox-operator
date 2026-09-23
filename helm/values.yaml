@@ -24,7 +24,8 @@ apiserver:
     envdVersion: ""
     defaultTimeoutSeconds: 0
     port: 8080
-    # apiKeySecret holds the accepted X-API-KEY values, one per line. Required
+    # apiKeySecret holds the accepted X-API-KEY values, one per line as "key"
+    # or "key namespace" (a key sees only its namespace's sandboxes). Required
     # once enabled: the surface refuses to serve unauthenticated.
     apiKeySecret:
       name: ""

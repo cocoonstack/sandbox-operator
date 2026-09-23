@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"sync/atomic"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -68,6 +68,10 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	var req ConnectSandbox
 	if !decodeOptionalBody(w, r, &req) {
+		return
+	}
+	if req.Memory != nil && !*req.Memory {
+		writeError(w, http.StatusBadRequest, "memory=false is not supported; a paused sandbox resumes from its memory snapshot")
 		return
 	}
 	id := r.PathValue("sandboxID")
@@ -174,83 +178,84 @@ func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, err, id, "snapshot")
 		return
 	}
-	snap, err := s.store.Snapshot(r.Context(), sb.Status.NodeName, claimIDOf(sb), req.Name)
+	snap, err := s.store.Snapshot(r.Context(), sb.Status.NodeName, claimIDOf(sb), s.namespace(r)+"/"+req.Name)
 	if err != nil {
 		s.writeVerbError(w, err, id, "snapshot", "failed to snapshot the sandbox")
 		return
 	}
+	snap.Name = req.Name
 	writeJSON(w, http.StatusCreated, snapshotInfo(snap))
 }
 
-// listSnapshots reports the checkpoints across the fleet's nodes.
+// listSnapshots reports the caller's checkpoints across the fleet's nodes.
 func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
-	nodes, err := s.nodesWithSandboxes(r)
+	snaps, err := s.snapshotsOf(r)
 	if err != nil {
-		s.opts.Log.Error(err, "e2b list snapshots: resolve nodes failed")
+		s.opts.Log.Error(err, "e2b list snapshots failed")
 		writeError(w, http.StatusInternalServerError, "failed to list snapshots")
 		return
 	}
-	perNode := make([][]SnapshotInfo, len(nodes))
+	out := make([]SnapshotInfo, 0, len(snaps))
+	for _, snap := range snaps {
+		out = append(out, snapshotInfo(snap))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// deleteSnapshot removes one of the caller's checkpoints on the node that
+// holds it. e2b addresses snapshots as templates on delete, so this serves
+// DELETE /templates/{templateID} too.
+func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	snapshotID := r.PathValue("snapshotID")
+	snaps, err := s.snapshotsOf(r)
+	if err != nil {
+		s.opts.Log.Error(err, "e2b delete snapshot: listing failed", "snapshotID", snapshotID)
+		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
+		return
+	}
+	i := slices.IndexFunc(snaps, func(snap scale.Snapshot) bool { return snap.ID == snapshotID })
+	if i < 0 {
+		writeError(w, http.StatusNotFound, "snapshot not found")
+		return
+	}
+	if err := s.store.DeleteSnapshot(r.Context(), snaps[i].Node, snapshotID); err != nil {
+		s.opts.Log.Error(err, "e2b delete snapshot failed", "node", snaps[i].Node, "snapshotID", snapshotID)
+		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// snapshotsOf lists the fleet's checkpoints recorded under the caller's
+// namespace, the prefix create stamps on their names, with that prefix removed.
+// One unreachable node is skipped, not fatal, so it cannot blank the listing.
+func (s *Server) snapshotsOf(r *http.Request) ([]scale.Snapshot, error) {
+	nodes, err := s.nodesWithSandboxes(r)
+	if err != nil {
+		return nil, err
+	}
+	prefix := s.namespace(r) + "/"
+	perNode := make([][]scale.Snapshot, len(nodes))
 	var g errgroup.Group
 	g.SetLimit(maxNodeConcurrency)
 	for i, node := range nodes {
 		g.Go(func() error {
 			snaps, err := s.store.Snapshots(r.Context(), node)
 			if err != nil {
-				// One unreachable node must not blank the whole listing.
-				s.opts.Log.Error(err, "e2b list snapshots: node failed", "node", node)
+				s.opts.Log.Error(err, "e2b snapshots: node failed", "node", node)
 				return nil
 			}
 			for _, snap := range snaps {
-				perNode[i] = append(perNode[i], snapshotInfo(snap))
+				if name, ok := strings.CutPrefix(snap.Name, prefix); ok {
+					snap.Name = name
+					perNode[i] = append(perNode[i], snap)
+				}
 			}
 			return nil
 		})
 	}
 	_ = g.Wait()
-	out := slices.Concat(perNode...)
-	if out == nil {
-		out = []SnapshotInfo{}
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// deleteSnapshot removes a checkpoint. e2b addresses snapshots as templates on
-// delete, so this serves DELETE /templates/{templateID} too.
-func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
-	snapshotID := r.PathValue("snapshotID")
-	nodes, err := s.nodesWithSandboxes(r)
-	if err != nil {
-		s.opts.Log.Error(err, "e2b delete snapshot: resolve nodes failed")
-		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
-		return
-	}
-	// Checkpoints are node-local and the id does not name its node, so the
-	// delete is offered to each node; a node that does not hold it reports
-	// success (delete is idempotent), which keeps this safe to fan out.
-	var (
-		g  errgroup.Group
-		ok atomic.Bool
-	)
-	g.SetLimit(maxNodeConcurrency)
-	for _, node := range nodes {
-		g.Go(func() error {
-			if err := s.store.DeleteSnapshot(r.Context(), node, snapshotID); err != nil {
-				s.opts.Log.Error(err, "e2b delete snapshot: node failed", "node", node, "snapshotID", snapshotID)
-				return nil
-			}
-			ok.Store(true)
-			return nil
-		})
-	}
-	_ = g.Wait()
-	// Every node failing is an outage, not an idempotent delete of something
-	// already gone, so the caller must not read it as success.
-	if len(nodes) > 0 && !ok.Load() {
-		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot on any node")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return slices.Concat(perNode...), nil
 }
 
 // sandboxMetrics reports one sandbox's resource usage. e2b's schema requires
