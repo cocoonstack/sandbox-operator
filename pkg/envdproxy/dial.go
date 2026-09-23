@@ -78,7 +78,7 @@ func dialGuest(dialer *net.Dialer) guestDialer {
 			_ = conn.Close()
 			return nil, nodeStatusError{status: resp.StatusCode}
 		}
-		// the handshake reader may already hold bytes the guest sent
+		// The handshake reader may already hold bytes the guest sent.
 		return &bufConn{Conn: conn, r: io.MultiReader(io.LimitReader(br, int64(br.Buffered())), conn)}, nil
 	}
 }

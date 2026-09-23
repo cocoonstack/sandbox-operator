@@ -138,7 +138,7 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 	if options != nil && len(options.DryRun) > 0 {
 		return nil, false, apierrors.NewBadRequest(dryRunUnsupported)
 	}
-	// owner-authorized teardown of the Sandbox resource only; pod state never reaches here
+	// Owner-authorized teardown of the Sandbox resource only; pod state never reaches here.
 	namespace := genericapirequest.NamespaceValue(ctx)
 	sb, err := r.store.Get(ctx, namespace, name)
 	if err != nil {
@@ -153,14 +153,13 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 
 	node := sb.Status.NodeName
 	if node == "" {
-		// reporting success here would leak the microVM to its TTL
+		// Reporting success here would leak the microVM to its TTL.
 		return nil, false, apierrors.NewInternalError(fmt.Errorf(
 			"cannot delete sandbox %s/%s: inventory entry names no owning node; refusing to report it released",
 			namespace, name))
 	}
 	claimID := sb.Annotations[ClaimIDAnnotation]
 	if claimID == "" {
-		// releasing by the k8s name would target the wrong claim (or none)
 		return nil, false, apierrors.NewInternalError(fmt.Errorf(
 			"cannot delete sandbox %s/%s: node %q inventory carries no %s (sandboxd claim id); refusing to release by name",
 			namespace, name, node, ClaimIDAnnotation))

@@ -394,7 +394,7 @@ func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows n
 func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
 	inv, err := s.src.NodeInventory(ctx, node)
 	if err != nil {
-		// a sibling's hit cancels ctx; reads failing from that are not unavailable nodes
+		// A sibling's hit cancels ctx; reads failing from that are not unavailable nodes.
 		if ctx.Err() == nil {
 			s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
 				"node", node, "err", err.Error())
