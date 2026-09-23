@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -107,9 +108,7 @@ func (c *client) send(ctx context.Context, h2 bool, method, path, host, token st
 	if token != "" {
 		req.Header.Set("X-Access-Token", token)
 	}
-	for k, v := range extra {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, extra)
 	return (&http.Client{Transport: tr}).Do(req)
 }
 

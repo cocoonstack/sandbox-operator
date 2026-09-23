@@ -38,7 +38,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	restclient "k8s.io/client-go/rest"
@@ -100,8 +99,9 @@ func main() {
 	warmPools := make([]client.Object, 0, pools)
 	for p := range pools {
 		warmPools = append(warmPools, &extv1beta1.SandboxWarmPool{
-			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", p), Namespace: namespaceName(p % numNS)},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: new(int32(perNode))},
+			Name:      fmt.Sprintf("pool-%d", p),
+			Namespace: namespaceName(p % numNS),
+			Spec:      extv1beta1.SandboxWarmPoolSpec{Replicas: new(int32(perNode))},
 		})
 	}
 	scheme := runtime.NewScheme()
@@ -242,9 +242,9 @@ func main() {
 func newRESTClient(host string) *restclient.RESTClient {
 	cfg := &restclient.Config{Host: host}
 	cfg.APIPath = "/apis"
-	cfg.ContentConfig.GroupVersion = &sandboxv1beta1.GroupVersion
-	cfg.ContentConfig.NegotiatedSerializer = sandboxapiserver.Codecs.WithoutConversion()
-	cfg.ContentConfig.ContentType = "application/json"
+	cfg.GroupVersion = &sandboxv1beta1.GroupVersion
+	cfg.NegotiatedSerializer = sandboxapiserver.Codecs.WithoutConversion()
+	cfg.ContentType = "application/json"
 	rc, err := restclient.RESTClientFor(cfg)
 	must(err)
 	return rc
