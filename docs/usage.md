@@ -151,7 +151,7 @@ Pod on a microVM node.
 ## Examples
 
 [`examples/`](https://github.com/cocoonstack/sandbox-operator/tree/master/examples)
-holds one runnable file per path: `l3/` (warm capacity plus a claim through the
+holds one directory per path: `l3/` (warm capacity plus a claim through the
 aggregated apiserver), `sandboxd/` (the Pod path on a vk-sandbox node),
 `vk-cocoon/`, `standard-kubelet/`, and `lifecycle/` (a Go walk-through of every
 verb on both surfaces).
