@@ -59,6 +59,14 @@ var (
 	namespacesFlag = flag.Int("namespaces", 3, "number of namespaces to spread sandboxes across")
 )
 
+// sliceLiveSource is a node's own live sandbox state (the sandboxd inventory /
+// L0 node cache stand-in) — NOT a cluster-wide LIST.
+type sliceLiveSource []scale.InventoryEntry
+
+func (s sliceLiveSource) LiveSandboxes(context.Context) ([]scale.InventoryEntry, error) {
+	return []scale.InventoryEntry(s), nil
+}
+
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", args...)
 	os.Exit(1)
@@ -68,14 +76,6 @@ func must(err error) {
 	if err != nil {
 		fail("%v", err)
 	}
-}
-
-// sliceLiveSource is a node's own live sandbox state (the sandboxd inventory /
-// L0 node cache stand-in) — NOT a cluster-wide LIST.
-type sliceLiveSource []scale.InventoryEntry
-
-func (s sliceLiveSource) LiveSandboxes(context.Context) ([]scale.InventoryEntry, error) {
-	return []scale.InventoryEntry(s), nil
 }
 
 func namespaceName(i int) string { return fmt.Sprintf("l3bench-ns-%d", i) }

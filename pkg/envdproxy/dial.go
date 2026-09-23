@@ -34,16 +34,6 @@ type target struct {
 // targetKey addresses target in a request context.
 type targetKey struct{}
 
-// withTarget attaches the destination the transport dials for this request.
-func withTarget(ctx context.Context, t target) context.Context {
-	return context.WithValue(ctx, targetKey{}, t)
-}
-
-func targetFrom(ctx context.Context) (target, bool) {
-	t, ok := ctx.Value(targetKey{}).(target)
-	return t, ok
-}
-
 // guestDialer opens the connection a request's target names.
 type guestDialer func(ctx context.Context, t target) (net.Conn, error)
 
@@ -81,18 +71,6 @@ func dialGuest(dialer *net.Dialer) guestDialer {
 		// The handshake reader may already hold bytes the guest sent.
 		return &bufConn{Conn: conn, r: io.MultiReader(io.LimitReader(br, int64(br.Buffered())), conn)}, nil
 	}
-}
-
-func upgradeRequest(ctx context.Context, t target) (*http.Request, error) {
-	path := "/v1/sandboxes/" + url.PathEscape(t.owner.ClaimID) + "/ports/" + strconv.FormatUint(uint64(t.port), 10)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+t.owner.Address+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+t.token)
-	req.Header.Set("Upgrade", upgradeProto)
-	req.Header.Set("Connection", "Upgrade")
-	return req, nil
 }
 
 // nodeStatusError is a non-101 answer from the owning node.
@@ -146,3 +124,25 @@ type bufConn struct {
 }
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+// withTarget attaches the destination the transport dials for this request.
+func withTarget(ctx context.Context, t target) context.Context {
+	return context.WithValue(ctx, targetKey{}, t)
+}
+
+func targetFrom(ctx context.Context) (target, bool) {
+	t, ok := ctx.Value(targetKey{}).(target)
+	return t, ok
+}
+
+func upgradeRequest(ctx context.Context, t target) (*http.Request, error) {
+	path := "/v1/sandboxes/" + url.PathEscape(t.owner.ClaimID) + "/ports/" + strconv.FormatUint(uint64(t.port), 10)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+t.owner.Address+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+t.token)
+	req.Header.Set("Upgrade", upgradeProto)
+	req.Header.Set("Connection", "Upgrade")
+	return req, nil
+}

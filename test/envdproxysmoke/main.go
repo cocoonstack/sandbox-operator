@@ -31,6 +31,98 @@ import (
 
 const domain = "sandbox.smoke.invalid"
 
+// client drives the proxy the way an unmodified e2b SDK would.
+type client struct {
+	base  string
+	host  string
+	token string
+}
+
+func (c *client) get(ctx context.Context, h2 bool, path, host, token string, extra http.Header) (string, error) {
+	resp, err := c.send(ctx, h2, http.MethodPost, path, host, token, extra, "{}")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %s: %s", resp.Status, body)
+	}
+	return string(body), nil
+}
+
+func (c *client) post(ctx context.Context, path, host, token string, extra http.Header, body string) (string, error) {
+	resp, err := c.send(ctx, false, http.MethodPost, path, host, token, extra, body)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %s: %s", resp.Status, out)
+	}
+	return string(out), nil
+}
+
+func (c *client) wantStatus(ctx context.Context, path, host, token string, want int) error {
+	resp, err := c.send(ctx, false, http.MethodGet, path, host, token, nil, "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != want {
+		return fmt.Errorf("status %d, want %d", resp.StatusCode, want)
+	}
+	return nil
+}
+
+func (c *client) send(ctx context.Context, h2 bool, method, path, host, token string, extra http.Header, body string) (*http.Response, error) {
+	tr := &http.Transport{}
+	if h2 {
+		var protocols http.Protocols
+		protocols.SetUnencryptedHTTP2(true)
+		tr.Protocols = &protocols
+	}
+	var payload io.Reader
+	if body != "" {
+		payload = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, payload)
+	if err != nil {
+		return nil, err
+	}
+	req.Host = host
+	if token != "" {
+		req.Header.Set("X-Access-Token", token)
+	}
+	for k, v := range extra {
+		req.Header[k] = v
+	}
+	return (&http.Client{Transport: tr}).Do(req)
+}
+
+// staticResolver stands in for the inventory lookup: the hardware harness knows
+// the owning node already, and the k8s read path has its own tests.
+type staticResolver struct {
+	claimID  string
+	address  string
+	publicID string
+}
+
+func (r staticResolver) Owner(_ context.Context, sandboxID, _ string) (envdproxy.Owner, error) {
+	if sandboxID != r.publicID && sandboxID != r.claimID {
+		return envdproxy.Owner{}, envdproxy.ErrSandboxNotFound
+	}
+	return envdproxy.Owner{ClaimID: r.claimID, Address: r.address}, nil
+}
+
 func main() {
 	node := flag.String("node", "", "owning node's sandboxd address")
 	sandboxID := flag.String("sandbox", "", "node-local claim id")
@@ -246,96 +338,4 @@ func wantReport(body string, want ...string) error {
 		}
 	}
 	return nil
-}
-
-// client drives the proxy the way an unmodified e2b SDK would.
-type client struct {
-	base  string
-	host  string
-	token string
-}
-
-func (c *client) get(ctx context.Context, h2 bool, path, host, token string, extra http.Header) (string, error) {
-	resp, err := c.send(ctx, h2, http.MethodPost, path, host, token, extra, "{}")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %s: %s", resp.Status, body)
-	}
-	return string(body), nil
-}
-
-func (c *client) post(ctx context.Context, path, host, token string, extra http.Header, body string) (string, error) {
-	resp, err := c.send(ctx, false, http.MethodPost, path, host, token, extra, body)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %s: %s", resp.Status, out)
-	}
-	return string(out), nil
-}
-
-func (c *client) wantStatus(ctx context.Context, path, host, token string, want int) error {
-	resp, err := c.send(ctx, false, http.MethodGet, path, host, token, nil, "")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode != want {
-		return fmt.Errorf("status %d, want %d", resp.StatusCode, want)
-	}
-	return nil
-}
-
-func (c *client) send(ctx context.Context, h2 bool, method, path, host, token string, extra http.Header, body string) (*http.Response, error) {
-	tr := &http.Transport{}
-	if h2 {
-		var protocols http.Protocols
-		protocols.SetUnencryptedHTTP2(true)
-		tr.Protocols = &protocols
-	}
-	var payload io.Reader
-	if body != "" {
-		payload = strings.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, payload)
-	if err != nil {
-		return nil, err
-	}
-	req.Host = host
-	if token != "" {
-		req.Header.Set("X-Access-Token", token)
-	}
-	for k, v := range extra {
-		req.Header[k] = v
-	}
-	return (&http.Client{Transport: tr}).Do(req)
-}
-
-// staticResolver stands in for the inventory lookup: the hardware harness knows
-// the owning node already, and the k8s read path has its own tests.
-type staticResolver struct {
-	claimID  string
-	address  string
-	publicID string
-}
-
-func (r staticResolver) Owner(_ context.Context, sandboxID, _ string) (envdproxy.Owner, error) {
-	if sandboxID != r.publicID && sandboxID != r.claimID {
-		return envdproxy.Owner{}, envdproxy.ErrSandboxNotFound
-	}
-	return envdproxy.Owner{ClaimID: r.claimID, Address: r.address}, nil
 }
