@@ -113,8 +113,8 @@ type NodeInfo struct {
 // Client talks to a single sandboxd instance. It is safe for concurrent use.
 type Client struct {
 	baseURL string
-	// token is the node api_token (root or tenant) presented on the claim verb.
-	// Release authenticates with the sandbox's own token, passed per call.
+	// token is the node api_token (root or tenant) every other verb presents;
+	// Release and IsOwner authenticate with a token passed per call.
 	token string
 	hc    *http.Client
 }
@@ -199,10 +199,10 @@ func (c *Client) Info(ctx context.Context) (*NodeInfo, error) {
 	return &info, nil
 }
 
-// Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM. It
-// authenticates with the sandbox's own token. A 404 (unknown id or already gone)
-// is treated as success, matching the SDK. Callers must only reach this on
-// owner-authorized teardown — see the SandboxStore.Release contract.
+// Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM,
+// authenticated with the sandbox's own token or the node api_token. A 404
+// (unknown id or already gone) is success, matching the SDK. Callers must only
+// reach this on owner-authorized teardown — see the SandboxStore.Release contract.
 func (c *Client) Release(ctx context.Context, id, token string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: release requires a sandbox id")
