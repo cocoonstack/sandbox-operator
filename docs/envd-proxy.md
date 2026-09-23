@@ -150,8 +150,8 @@ go run -tags envdproxysmoke ./test/envdproxysmoke \
 unary) when the sandbox came from the `e2b-rt` flavor; `envdsmoke -hold` in the
 sandbox repo prepares that one. Default `-guest echo` expects `guestserver`,
 which reports back what the guest received and is what proves the credential
-stripping. Both harnesses, and `scripts/port-e2e.sh` for the node half alone,
-live in the sandbox repo under `e2e/cmd/`.
+stripping. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
+`scripts/port-e2e.sh` runs the node half alone.
 
 ## Failures
 
