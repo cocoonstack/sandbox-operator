@@ -90,7 +90,7 @@ prints what it did, so the output doubles as acceptance evidence:
 
 ## Lifetime
 
-Nothing is stored for a claimed sandbox, so the lease is fixed by the node at
+Nothing is stored for a claimed sandbox, so the lease is set by the node at
 claim time and the submitted object is the only place `Create` can hear it:
 
 - `spec.shutdownTime` wins, rounded up to whole seconds; the

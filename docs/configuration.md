@@ -113,9 +113,11 @@ account, or from `KUBECONFIG` when run outside a cluster.
 | `--sandboxd-token` | — | Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer `--sandboxd-token-file` for a Secret mount. |
 | `--sandboxd-token-file` | — | Path to a file (Secret mount) holding the sandboxd api_token; overrides `--sandboxd-token` when set. |
 
-With both empty, node-local calls carry no token and a sandboxd that requires
-one refuses them: reads of published inventory still work, `Create`/`Delete`
-and the lifecycle verbs do not.
+With both empty, node-local calls carry no token. A sandboxd with an
+`api_token` refuses them all, and even an open one refuses `Delete` and the
+lifecycle verbs, which act on a sandbox only under its own token or the node's
+`api_token`: reads of published inventory still work, and a `Create` against an
+open node holds its microVM until the lease expires.
 
 ### Warm-pool driver
 
