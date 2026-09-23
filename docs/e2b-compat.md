@@ -139,11 +139,9 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   the sandbox's namespace on a checkpoint the same way, so one made through
   kubectl is listed and deleted by that namespace's key; checkpoints created
   before this scoping carry no namespace and are not listed.
-  Fork children are recorded without a namespace until sandboxd learns
-  `claim_ref_prefix` (cocoonstack/sandbox#230) and this surface passes it, so
-  with keyed namespaces a fork child surfaces in `--e2b-namespace`, where a key
-  without a namespace can reach it; do not release keyed namespaces before
-  both land.
+  Fork children are recorded in the key's namespace under their own claim id
+  (a sandboxd with cocoonstack/sandbox#230); an older node records them
+  without a namespace, where they surface in `--e2b-namespace`.
 - **Checked against the real SDKs.** JS 2.50.0, JS 2.51.0 and Python 2.51.0
   ran create, exec, files, list, pause, connect from a fresh process, exec
   after the resume, the second key's refusals, the default lane and a refused

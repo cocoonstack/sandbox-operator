@@ -100,9 +100,9 @@ type SandboxLifecycle interface {
 	// running one.
 	Resume(ctx context.Context, node, id string) error
 	// Fork branches the sandbox into count children, each a fresh claim with
-	// its own id and lease. The parent is checkpointed in place and keeps
-	// running.
-	Fork(ctx context.Context, node, id string, count int, ttlSeconds int) ([]Assignment, error)
+	// its own id and lease, recorded in namespace under that id so they are
+	// addressable by name. The parent is checkpointed in place and keeps running.
+	Fork(ctx context.Context, namespace, node, id string, count int, ttlSeconds int) ([]Assignment, error)
 	// Snapshot captures the sandbox's state as a named checkpoint that later
 	// claims can branch from. The source keeps running.
 	Snapshot(ctx context.Context, node, id, name string) (Snapshot, error)

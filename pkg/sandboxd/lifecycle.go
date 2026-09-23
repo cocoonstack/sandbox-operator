@@ -22,6 +22,8 @@ type ForkSpec struct {
 	Token      string `json:"token,omitempty"`
 	Count      int    `json:"count"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	// ClaimRefPrefix records each child under prefix + its id.
+	ClaimRefPrefix string `json:"claim_ref_prefix,omitempty"`
 }
 
 // ForkResult carries one claim per child; children are fresh sandboxes with

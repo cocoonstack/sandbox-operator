@@ -120,7 +120,7 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 			if count < 0 {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("count must be >= 1, got %d", count))
 			}
-			children, err := st.Fork(ctx, sb.Status.NodeName, claimID(sb), count, int(opts.TTLSeconds))
+			children, err := st.Fork(ctx, sb.Namespace, sb.Status.NodeName, claimID(sb), count, int(opts.TTLSeconds))
 			if err != nil {
 				return nil, verbError("fork", sb, err)
 			}
@@ -130,6 +130,7 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 					SandboxID: c.SandboxName,
 					NodeName:  c.Node,
 					Address:   c.Address,
+					Token:     c.Token,
 				})
 			}
 			return out, nil

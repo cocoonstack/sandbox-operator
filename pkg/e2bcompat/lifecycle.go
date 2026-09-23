@@ -152,7 +152,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("sandbox %q is paused and cannot be forked; resume it first", id))
 		return
 	}
-	children, err := s.store.Fork(r.Context(), sb.Status.NodeName, claimIDOf(sb), int(count), s.timeoutSeconds(req.Timeout))
+	children, err := s.store.Fork(r.Context(), s.namespace(r), sb.Status.NodeName, claimIDOf(sb), int(count), s.timeoutSeconds(req.Timeout))
 	if err != nil {
 		s.writeVerbError(w, err, id, "fork", "failed to fork the sandbox")
 		return

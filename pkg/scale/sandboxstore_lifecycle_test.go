@@ -25,7 +25,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	ctx := t.Context()
 
 	_, statsErr := store.Stats(ctx, "n1", "sb_gone")
-	_, forkErr := store.Fork(ctx, "n1", "sb_gone", 1, 0)
+	_, forkErr := store.Fork(ctx, "ns", "n1", "sb_gone", 1, 0)
 	_, snapErr := store.Snapshot(ctx, "n1", "sb_gone", "")
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
@@ -78,13 +78,24 @@ func TestCheckpointNamesCarryTheNamespaceWithinTheNodeBudget(t *testing.T) {
 	assert.True(t, k8serrors.IsBadRequest(err), "a stamped name past 63 characters must be a 400, got %v", err)
 }
 
+func TestForkRecordsChildrenUnderTheNamespace(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777"))
+	f := &recordingFactory{}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	_, err := store.Fork(t.Context(), "team-a", "n1", "sb_live", 2, 60)
+	require.NoError(t, err)
+	assert.Equal(t, sandboxd.ForkSpec{Count: 2, TTLSeconds: 60, ClaimRefPrefix: "team-a/"}, f.forkSpec)
+}
+
 func TestLifecycleVerbsKeepANodeRejectionsStatus(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))
 	f := &recordingFactory{verbErr: &sandboxd.HTTPError{StatusCode: http.StatusBadRequest, Message: "count 9999 exceeds max_fork_count"}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
-	_, err := store.Fork(t.Context(), "n1", "sb_live", 9999, 0)
+	_, err := store.Fork(t.Context(), "ns", "n1", "sb_live", 9999, 0)
 	require.Error(t, err)
 	assert.True(t, k8serrors.IsBadRequest(err), "a node 400 must stay a 400, got %v", err)
 	assert.Contains(t, err.Error(), "max_fork_count", "the node's reason must reach the caller")

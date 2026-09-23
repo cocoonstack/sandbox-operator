@@ -65,6 +65,9 @@ type ForkedSandbox struct {
 	// address is the child's connection address, when the node published one.
 	// +optional
 	Address string `json:"address,omitempty"`
+	// token is the child's own bearer token, which guards its data plane.
+	// +optional
+	Token string `json:"token,omitempty"`
 }
 
 // +kubebuilder:object:root=true

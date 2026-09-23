@@ -554,7 +554,7 @@ func (f *fakeStore) Renew(context.Context, string, string, int) (time.Time, erro
 	return time.Time{}, nil
 }
 
-func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
+func (f *fakeStore) Fork(context.Context, string, string, string, int, int) ([]scale.Assignment, error) {
 	return nil, nil
 }
 

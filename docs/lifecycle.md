@@ -31,9 +31,11 @@ kubectl create --raw \
   -f - <<<'{"apiVersion":"agents.x-k8s.io/v1beta1","kind":"SandboxSnapshotOptions","name":"before-migration"}'
 ```
 
-`fork` replies with `SandboxForkResult`: one `{sandboxID, nodeName, address}`
-per child, in request order. A fork is node-local, so every child lands on the
-source's node. `count` defaults to 1 and is bounded by the node's configured
+`fork` replies with `SandboxForkResult`: one `{sandboxID, nodeName, address,
+token}` per child, in request order; `token` is the child's own data-plane
+credential. A fork is node-local, so every child lands on the source's node,
+recorded in the parent's namespace under its own claim id (a sandboxd with
+cocoonstack/sandbox#230; an older node records children without a namespace). `count` defaults to 1 and is bounded by the node's configured
 fork limit; `ttlSeconds` is each child's own lease — children never inherit the
 parent's. `snapshot` replies with `SandboxSnapshotResult{snapshotID, name,
 nodeName, creationTimestamp}`.
@@ -110,7 +112,8 @@ claim time and the submitted object is the only place `Create` can hear it:
   after a create may not show it yet. `Get` and the lifecycle verbs, by name
   or by claim id (the e2b surface), ask the nodes and answer at once on any
   apiserver replica. A deleted sandbox stays readable until its node
-  publishes, and a fork child is readable by name only after that publish.
+  publishes; a fork child is named by its claim id in the parent's namespace
+  and readable at once.
 - **`Create` is a claim, not an upsert.** No Sandbox object is stored, so
   `metadata.name` is never checked against the fleet: a repeated `Create` under
   one name claims a second microVM, and the by-name verbs then reach whichever
