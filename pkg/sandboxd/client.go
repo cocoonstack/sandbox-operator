@@ -1,6 +1,6 @@
 // Package sandboxd is a small HTTP client for the node-local sandboxd warm-pool
 // daemon (the sandbox repo's docs/sandboxd-api.md). It uses only the standard
-// library. The L2 ClaimGateway fronts one of these clients per node: Claim
+// library. The aggregated store fronts one of these clients per node: Claim
 // transfers ownership of an already-running microVM in sub-millisecond time, and
 // Release destroys a sandbox's VM on owner-authorized teardown.
 package sandboxd
@@ -22,8 +22,8 @@ import (
 // ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
 // at max_claims, the calling tenant is at its own max_claims, or the node is
 // draining), or when a 200 carries only a peer redirect rather than a delivered
-// sandbox. In every case this node handed over no VM, so the L2 gateway maps this
-// to its ErrNoNodeCapacity sentinel and falls back to the L1 Kubernetes path.
+// sandbox. In every case this node handed over no VM, so the store tries another
+// node or reports no warm capacity.
 var ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
 
 // HTTPError carries a non-2xx sandboxd status that is not otherwise typed (e.g.
@@ -59,8 +59,8 @@ type ClaimSpec struct {
 	Net        string `json:"net,omitempty"`
 	Size       string `json:"size,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
-	// NoRedirect is set by an SDK retrying at a redirect target; the gateway does
-	// not chase redirects (it falls back to L1 instead), so it stays false.
+	// NoRedirect is set by an SDK retrying at a redirect target; this client does
+	// not chase redirects (a redirect-only reply is a capacity miss), so it stays false.
 	NoRedirect bool `json:"no_redirect,omitempty"`
 	// ClaimRef is the k8s "<namespace>/<name>" of the Sandbox this claim is
 	// created for. sandboxd records it on the claim and echoes it in its
@@ -203,7 +203,7 @@ func (c *Client) Info(ctx context.Context) (*NodeInfo, error) {
 // Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM. It
 // authenticates with the sandbox's own token. A 404 (unknown id or already gone)
 // is treated as success, matching the SDK. Callers must only reach this on
-// owner-authorized teardown — see the ClaimGateway.Release contract.
+// owner-authorized teardown — see the SandboxStore.Release contract.
 func (c *Client) Release(ctx context.Context, id, token string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: release requires a sandbox id")

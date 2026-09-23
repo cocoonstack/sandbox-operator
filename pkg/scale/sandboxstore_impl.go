@@ -69,6 +69,11 @@ const (
 	// TokenAnnotation carries the per-sandbox ownership token handed back on Create.
 	TokenAnnotation = "sandbox.cocoonstack.io/token"
 
+	// Selector keys are the pod annotations the vk-sandbox provider reads its claim axes from.
+	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
+	SelectorNetKey      = "sandbox.cocoonstack.io/net"
+	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
+
 	// Connection pooling for the node-local claim path. Idle conns per host are
 	// sized to the per-node claim fan-out so a burst reuses connections instead
 	// of handshaking; the timeout bounds a wedged sandboxd.
@@ -128,6 +133,30 @@ func WithLogger(log logr.Logger) StoreOption {
 // deltas. Defaults to one second.
 func WithWatchPollInterval(d time.Duration) StoreOption {
 	return func(s *scatterGatherStore) { s.watchPoll = d }
+}
+
+// SandboxdClient is the subset of the sandboxd HTTP client the store needs,
+// kept as an interface so tests inject a fake without a live node. *sandboxd.Client
+// satisfies it.
+type SandboxdClient interface {
+	Claim(ctx context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error)
+	Release(ctx context.Context, id, token string) error
+
+	// The lifecycle verbs address an already-delivered sandbox by id. They all
+	// take sandboxd's operator path, authorized by the fleet api_token the
+	// client already carries, so the control plane needs no per-sandbox secret.
+	Hibernate(ctx context.Context, id string) error
+	Wake(ctx context.Context, id string) error
+	Renew(ctx context.Context, id string, spec sandboxd.RenewSpec) (time.Time, error)
+	Fork(ctx context.Context, id string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error)
+	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
+	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
+	DeleteCheckpoint(ctx context.Context, checkpointID string) error
+	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
+
+	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.
+	Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error)
+	SandboxesByClaimRef(ctx context.Context, ref string) ([]sandboxd.SandboxSummary, error)
 }
 
 // SandboxdClientFactory builds a sandboxd client for one node's advertise address

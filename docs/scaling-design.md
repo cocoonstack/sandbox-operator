@@ -22,9 +22,9 @@ scatter-gathering live node state, with *zero* etcd storage). Our thesis:
 
 The staging is four layers. L0 is a property of the node providers. L1 is the
 CRD claim path, served by **upstream's agent-sandbox controller** — this
-repository no longer implements it. L2 and L3 are what this repository ships:
-the node-local claim gateway, and the aggregated apiserver with its warm-pool
-driver and the `NodeInventory` contract that vk-sandbox publishes into.
+repository no longer implements it. L2 is designed here and not built. L3 is
+what this repository ships: the aggregated apiserver with its warm-pool driver
+and the `NodeInventory` contract that vk-sandbox publishes into.
 
 ```mermaid
 flowchart LR
@@ -34,7 +34,7 @@ flowchart LR
     subgraph L1["L1 — ownership transfer (upstream controller)"]
         L1a["SandboxClaim adopts a warm Sandbox<br/>PVC→PV binding semantics"]
     end
-    subgraph L2["L2 — node-local claim gateway (this repo)"]
+    subgraph L2["L2 — node-local claim gateway (designed)"]
         L2a["gateway → sandboxd<br/>sub-ms delivery<br/>async Bound record"]
     end
     subgraph L3["L3 — aggregated apiserver (this repo)"]
@@ -81,48 +81,24 @@ measured against the fork's controllers and their `test/scalebench` and
 kept, labelled, in [performance.md](performance.md)
 as the historical record, and they are not claims about upstream's controller.
 
-### L2 — node-local claim gateway (implemented core; deployment hardening pending)
+### L2 — node-local claim gateway (designed, not built)
 
-L1 still round-trips the apiserver. L2 takes the claim off the central path
-entirely for the runtimes that have a node-local warm pool (`sandboxd`), while
-keeping the `SandboxClaim` object as the durable record.
+L1 still round-trips the apiserver. L2 would take the claim off the central
+path entirely for the runtimes that have a node-local warm pool (`sandboxd`),
+while keeping the `SandboxClaim` object as the durable record: a per-node
+gateway in front of `sandboxd` hands over an already-running microVM in
+**0.2–0.7 ms** and returns connection info immediately, and the `SandboxClaim`
+is marked `Bound` **asynchronously** — the record follows the action, exactly
+as kubelet static Pods record to the apiserver after the container is already
+running. An orphan reconciler adopts a delivery whose record was lost and never
+destroys a VM; authorization stays central through a `SubjectAccessReview`
+before delivery, and a node with no warm VM answers with an explicit fallback
+signal for the L1 path.
 
-**Mechanism.** The `ClaimGateway` in `pkg/scale` is intended to run on each
-virtual-kubelet node in front of `sandboxd`. A claim request reaches the node
-gateway directly; `sandboxd` hands over an already-running microVM in
-**0.2–0.7 ms** and returns connection info immediately. The `SandboxClaim` is
-marked `Bound` **asynchronously** — the record follows the action, exactly as
-kubelet static Pods record to the apiserver after the container is already
-running. The repository contains the concrete gateway and the
-`OrphanReconciler` that heals a lost record; packaging it as a supported
-DaemonSet remains roadmap work.
-
-**Authorization stays central.** The gateway runs a `SubjectAccessReview`
-before delivery; only ownership transfer moves to the node.
-
-```go
-// ClaimGateway is the node-local fast path for warm-pool claims.
-// A claim is served by the node that already holds a warm microVM; the
-// SandboxClaim object is reconciled to Bound asynchronously afterward.
-type ClaimGateway interface {
-    // Claim transfers ownership of a node-local warm sandbox to the caller,
-    // returning connection info. It performs SubjectAccessReview inline;
-    // it does NOT block on writing the SandboxClaim.
-    Claim(ctx context.Context, req ClaimRequest) (Assignment, error)
-    // Release returns a sandbox to the node-local pool (or tears it down).
-    Release(ctx context.Context, assignment Assignment) error
-}
-```
-
-**Failure modes**
-
-| Scenario | Behavior | Breaks k8s semantics? |
-|---|---|---|
-| Gateway crashes after delivery, before recording `Bound` | Orphan binding → audit-only orphan GC + adopt reconciles the record (the VM is never destroyed on pod-level state — see the delete-authorization contract) | No — eventual consistency |
-| Node has no warm VM | Returns the explicit fallback signal; a deployment must route that request through the L1 Kubernetes path | No |
-
-**Acceptance:** claim p50 sub-millisecond on the sandboxd tier; orphan-binding
-rate converges to 0 via GC; `kubectl get sandboxclaims` still shows every claim.
+This repository carried a reference gateway with a fake-node harness until
+`f99c174`; nothing deployed it, so it was cut. The node-local claims that ship
+today are the L3 apiserver's `Create` and the vk-sandbox provider's `CreatePod`,
+both straight against `sandboxd`.
 
 ### L3 — aggregated apiserver: etcd stores intent, not sandboxes (implemented)
 
@@ -271,7 +247,7 @@ intact. The one-line framing:
 | | Modal | this stack |
 |---|---|---|
 | Scheduling | stateless fleet, in-memory worker state | upstream's leader-elected controller + Lease (L1) |
-| Create critical path | direct scheduler→worker RPC, no datastore | ownership transfer (L1) → node-local claim (L2/L3) |
+| Create critical path | direct scheduler→worker RPC, no datastore | ownership transfer (L1) → node-local claim (L3) |
 | State of record | Redis stream (async) | Kubernetes objects; node inventory in etcd is `O(nodes)` (L3) |
 | Sandbox storage | proprietary | aggregated apiserver, etcd stores intent only (L3) |
 | Client interface | proprietary SDK | any Kubernetes client — unchanged |
@@ -283,12 +259,13 @@ Numbers are labelled by substrate: **algorithmic complexity** is proven on a
 fake apiserver or an in-process store (so it isolates the scaling term, not
 machine speed), while **absolute latency on real microVMs** is measured on
 bare-metal nodes. The harnesses that still live in this repository regenerate
-their own evidence; the rows marked *retired* were measured against the forked
-controllers this repository no longer contains, at commit `0719d33`.
+their own evidence; the rows marked *retired* were measured by harnesses this
+repository no longer contains: the forked controllers at commit `0719d33`, the
+L2 gateway bench at `f99c174`.
 
 | Layer | Acceptance claim | Measured | Substrate / harness |
 |---|---|---|---|
-| **L2** | sub-millisecond node-local claim | gateway overhead p50 **0.039 ms**, p95 0.053 ms (sandboxd delivery itself is 0.2–0.7 ms by contract); 200/200 orphan bindings reconciled, **0** VM destroys | httptest sandboxd + fake recorder — `test/l2bench` |
+| **L2** *(retired)* | sub-millisecond node-local claim | gateway overhead p50 **0.039 ms**, p95 0.053 ms (sandboxd delivery itself is 0.2–0.7 ms by contract); 200/200 orphan bindings reconciled, **0** VM destroys | httptest sandboxd + fake recorder — `test/l2bench`, deleted with the gateway |
 | **L3** | etcd stores intent only, `kubectl` unchanged | **3000** sandboxes served through client-go List/Get/Watch from **8** etcd objects (3 nodes + 5 pools) — **0** per-sandbox objects, 3 server-side-apply writes | in-process aggregated apiserver — `test/l3bench` |
 | **L3** | one lookup does not scan the fleet twice | `Get` 2.49 ms / 36 MB → **39 µs / 217 KB** with the owning-node index, at 200 nodes × 2000 sandboxes | Go benchmarks — `pkg/scale`, `pkg/e2bcompat` |
 | **sandboxd tier (deployed)** | hot-pool warm claim via k8s, apiserver flat under load | 100 `Sandbox` create→Ready **p50 < 1 s** (warm), 98/100, submitted in 2.9 s; **100 %** routed to the sandboxd plane; apiserver LIST 37 ms/7 ms, **0 APF rejections, in-queue 0** | 26-node fleet, `vk-sandbox` + sandboxd |
@@ -296,6 +273,6 @@ controllers this repository no longer contains, at commit `0719d33`.
 | **L1** *(retired)* | claim p50 flat as the pool grows | fast-path p50 0.644 ms → 0.646 ms from N=100 to N=2000 | fake apiserver + the forked reconciler — harness deleted |
 | **L1** *(retired)* | warm claim on real microVMs | claim→Bound p50 129 ms, p95 926 ms; 100/100 warm hits | the microVM node, 100 concurrent claims — harness deleted |
 
-One honest caveat: the sub-millisecond L2 figure measures gateway overhead on a
-fake node; real end-to-end latency additionally pays the apiserver round-trip,
+One honest caveat: the retired L2 figure measured gateway overhead on a fake
+node; real end-to-end latency additionally pays the apiserver round-trip,
 sandboxd delivery (0.2–0.7 ms), and inventory convergence.

@@ -90,8 +90,7 @@ Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
 
 The end-to-end `create → Ready` is dominated by the Kubernetes round-trip
 (admission → reconcile → schedule → status propagation), sub-second at this
-scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms** and
-the L2 claim gateway's own overhead **~0.04 ms** (`test/l2bench`).
+scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms**.
 
 This run predates the upstream import: the Pod that reached the `vk-sandbox`
 node was produced by the forked controller plus the Pod mutator, both since
@@ -210,9 +209,6 @@ The harnesses that remain in this repository are build-tagged, one tag per
 directory, and write their evidence as JSON:
 
 ```bash
-# L2: node-local claim gateway overhead and orphan-binding convergence
-go run -tags l2bench ./test/l2bench -out /tmp/l2-gateway.json
-
 # L3: aggregation contract and the O(pools+nodes) object-count invariant
 go run -tags l3bench ./test/l3bench -out /tmp/l3-aggregation.json
 
@@ -224,7 +220,7 @@ go run -tags envdproxysmoke ./test/envdproxysmoke \
   -node <owner> -sandbox <id> -token <token> -port 49983
 ```
 
-`make vet` type-checks all three tagged harnesses.
+`make vet` type-checks both tagged harnesses.
 
 ## Retired: the CRD-path fork controllers (measured at `0719d33`)
 
