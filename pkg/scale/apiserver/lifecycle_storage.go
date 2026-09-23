@@ -115,8 +115,7 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 			if !ok {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("expected SandboxForkOptions, got %T", obj))
 			}
-			count := int(opts.Count)
-			count = cmp.Or(count, 1)
+			count := cmp.Or(int(opts.Count), 1)
 			if count < 0 {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("count must be >= 1, got %d", count))
 			}

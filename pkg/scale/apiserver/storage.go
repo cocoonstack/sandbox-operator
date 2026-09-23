@@ -108,8 +108,7 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 		}
 	}
 
-	namespace := genericapirequest.NamespaceValue(ctx)
-	namespace = cmp.Or(namespace, sb.Namespace)
+	namespace := cmp.Or(genericapirequest.NamespaceValue(ctx), sb.Namespace)
 	name := sb.Name
 	if name == "" && sb.GenerateName != "" {
 		name = names.SimpleNameGenerator.GenerateName(sb.GenerateName)

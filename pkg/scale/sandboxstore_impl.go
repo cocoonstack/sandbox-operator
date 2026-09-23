@@ -69,7 +69,7 @@ const (
 
 	// Selector keys are the pod annotations the vk-sandbox provider reads its claim axes from.
 	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
-	SelectorNetKey      = "sandbox.cocoonstack.io/net"
+	SelectorNetKey      = NetAnnotation
 	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
 
 	// Connection pooling for the node-local claim path. Idle conns per host are

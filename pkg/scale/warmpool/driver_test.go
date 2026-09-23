@@ -46,12 +46,7 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 				s.Template, s.Net, s.Size, want.Template, want.Net, want.Size)
 		}
 		sum += s.Warm
-		if s.Warm < minWarm {
-			minWarm = s.Warm
-		}
-		if s.Warm > maxWarm {
-			maxWarm = s.Warm
-		}
+		minWarm, maxWarm = min(minWarm, s.Warm), max(maxWarm, s.Warm)
 	}
 	if sum != 100 {
 		t.Fatalf("targets sum to %d, want 100", sum)
