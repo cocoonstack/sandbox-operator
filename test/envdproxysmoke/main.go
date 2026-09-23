@@ -31,6 +31,11 @@ import (
 
 const domain = "sandbox.smoke.invalid"
 
+type step struct {
+	name string
+	run  func(context.Context, *client) error
+}
+
 // client drives the proxy the way an unmodified e2b SDK would.
 type client struct {
 	base  string
@@ -166,10 +171,7 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	c := &client{base: "http://" + ln.Addr().String(), host: fmt.Sprintf("%d-%s.%s", port, publicID, domain), token: token}
 	fmt.Printf("proxying %s -> %s/%s:%d\n", c.host, node, sandboxID, port)
 
-	steps := []struct {
-		name string
-		run  func(context.Context, *client) error
-	}{
+	steps := []step{
 		{"missing token is 401", stepNoToken},
 		{"wrong token is 401", stepWrongToken},
 		{"envd internal path is 404", stepInternalPath},
@@ -177,20 +179,14 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	}
 	switch mode {
 	case "envd":
-		steps = append([]struct {
-			name string
-			run  func(context.Context, *client) error
-		}{
+		steps = append([]step{
 			{"http/1.1 reaches envd", stepEnvdHealth},
 			{"http/2 client reaches envd", stepEnvdHealthH2},
 			{"connect unary through the proxy", stepEnvdConnect},
 			{"header routing", stepEnvdHeaderRouting},
 		}, steps...)
 	case "echo":
-		steps = append([]struct {
-			name string
-			run  func(context.Context, *client) error
-		}{
+		steps = append([]step{
 			{"http/1.1 reaches the guest", stepHTTP1},
 			{"http/2 client reaches the guest", stepH2Client},
 			{"host credentials are stripped", stepStripped},
@@ -199,12 +195,12 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	default:
 		return fmt.Errorf("unknown -guest %q", mode)
 	}
-	for _, step := range steps {
+	for _, s := range steps {
 		t0 := time.Now()
-		if err := step.run(ctx, c); err != nil {
-			return fmt.Errorf("%s: %w", step.name, err)
+		if err := s.run(ctx, c); err != nil {
+			return fmt.Errorf("%s: %w", s.name, err)
 		}
-		fmt.Printf("  ok  %-32s %5.1fms\n", step.name, float64(time.Since(t0).Microseconds())/1000)
+		fmt.Printf("  ok  %-32s %5.1fms\n", s.name, float64(time.Since(t0).Microseconds())/1000)
 	}
 	return nil
 }
