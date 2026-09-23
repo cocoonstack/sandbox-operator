@@ -1,7 +1,7 @@
 //go:build l3bench
 
-// Command l3bench proves the L3 aggregated-apiserver acceptance criteria from the
-// README "Scaling design" chapter:
+// Command l3bench proves the L3 aggregated-apiserver acceptance criteria of
+// docs/scaling-design.md:
 //
 //   - kubectl_get_works: sandboxes.agents.x-k8s.io is served by a real
 //     genericapiserver.GenericAPIServer with a scatter-gather rest.Storage (no
@@ -42,7 +42,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,7 +49,6 @@ import (
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
-	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 var (
@@ -64,6 +62,12 @@ var (
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+func must(err error) {
+	if err != nil {
+		fail("%v", err)
+	}
 }
 
 // sliceLiveSource is a node's own live sandbox state (the sandboxd inventory /
@@ -97,11 +101,11 @@ func main() {
 	for p := range pools {
 		warmPools = append(warmPools, &extv1beta1.SandboxWarmPool{
 			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", p), Namespace: namespaceName(p % numNS)},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: ptr.To(int32(perNode))},
+			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: new(int32(perNode))},
 		})
 	}
 	scheme := runtime.NewScheme()
-	benchutil.Must(extv1beta1.AddToScheme(scheme))
+	must(extv1beta1.AddToScheme(scheme))
 	intent := fake.NewClientBuilder().WithScheme(scheme).WithObjects(warmPools...).Build()
 
 	// Publish one NodeInventory per node from that node's own live state.
@@ -123,7 +127,7 @@ func main() {
 				Address:  fmt.Sprintf("10.%d.%d.%d:7777", k, (i>>8)&0xff, i&0xff),
 			})
 		}
-		benchutil.Must(source.Apply(ctx, &scale.NodeInventory{
+		must(source.Apply(ctx, &scale.NodeInventory{
 			Kind:       scale.NodeInventoryGVK.Kind,
 			APIVersion: scale.NodeInventoryGVK.GroupVersion().String(),
 			Name:       node,
@@ -137,7 +141,7 @@ func main() {
 
 	// etcd object accounting: NodeInventory (O(nodes)) + WarmPool (O(pools)).
 	var stored extv1beta1.SandboxWarmPoolList
-	benchutil.Must(intent.List(ctx, &stored))
+	must(intent.List(ctx, &stored))
 	etcdObjectCount := source.ObjectCount() + len(stored.Items)
 	if source.ObjectCount() != nodes {
 		fail("expected %d NodeInventory objects, got %d", nodes, source.ObjectCount())
@@ -151,7 +155,7 @@ func main() {
 
 	store := scale.NewScatterGatherStore(source, scale.WithLogger(logr.Discard()), scale.WithWatchPollInterval(50*time.Millisecond))
 	server, err := sandboxapiserver.NewInProcessServer("l3bench-apiserver", store)
-	benchutil.Must(err)
+	must(err)
 	ts := httptest.NewServer(server.Handler)
 	defer ts.Close()
 
@@ -170,7 +174,7 @@ func main() {
 		fail("client-go namespaced list failed: %v", err)
 	}
 	wantNS, err := store.List(ctx, scale.ListOptions{Namespace: sampleNS})
-	benchutil.Must(err)
+	must(err)
 	if len(nsList.Items) != len(wantNS.Items) || len(nsList.Items) == 0 {
 		fail("namespaced list returned %d, want %d (>0)", len(nsList.Items), len(wantNS.Items))
 	}
@@ -219,9 +223,9 @@ func main() {
 		"substrate":                "in-process genericapiserver via httptest + client-go",
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
-	benchutil.Must(err)
-	benchutil.Must(os.MkdirAll(filepath.Dir(*outFlag), 0o755))
-	benchutil.Must(os.WriteFile(*outFlag, b, 0o644))
+	must(err)
+	must(os.MkdirAll(filepath.Dir(*outFlag), 0o755))
+	must(os.WriteFile(*outFlag, b, 0o644))
 
 	fmt.Printf("sandboxes served=%d | etcd objects=%d (nodes=%d + pools=%d) | ssa writes=%d | per-sandbox etcd objects=0\n",
 		len(allList.Items), etcdObjectCount, nodes, pools, source.ApplyCount())
@@ -243,7 +247,7 @@ func newRESTClient(host string) *restclient.RESTClient {
 	cfg.ContentConfig.NegotiatedSerializer = sandboxapiserver.Codecs.WithoutConversion()
 	cfg.ContentConfig.ContentType = "application/json"
 	rc, err := restclient.RESTClientFor(cfg)
-	benchutil.Must(err)
+	must(err)
 	return rc
 }
 

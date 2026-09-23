@@ -3,6 +3,7 @@ package envdproxy
 import (
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -77,10 +78,5 @@ func parsePort(s string) (uint16, bool) {
 // internalPath reports whether the request addresses envd's own control surface.
 func internalPath(path string) bool {
 	clean := "/" + strings.Trim(path, "/")
-	for _, p := range internalPaths {
-		if strings.EqualFold(clean, p) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(internalPaths, func(p string) bool { return strings.EqualFold(clean, p) })
 }

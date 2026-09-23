@@ -17,10 +17,10 @@ move any of these forward are welcome.
 
 ## Medium term
 
-- **L2 ClaimGateway deployment and quota hardening.** Package the concrete
-  gateway and orphan reconciler as a supported node-local deployment, wire its
-  existing `SubjectAccessReview` authorizer, and add `ResourceQuota` enforcement
-  on the claim path.
+- **L2 node-local claim gateway.** A per-node gateway that takes claims off
+  the apiserver path and records `Bound` afterwards, with orphan adoption, a
+  `SubjectAccessReview` authorizer and `ResourceQuota` enforcement on the claim
+  path; designed in [scaling-design.md](scaling-design.md), not built.
 - **Aggregated-apiserver HA.** Multi-replica scatter-gather with consistent
   claim routing (today: multiple replicas serve reads; claims prefer a single
   writer).

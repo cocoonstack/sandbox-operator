@@ -11,6 +11,9 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s -w
+      - -X github.com/cocoonstack/sandbox-operator/version.REVISION={{.Commit}}
+      - -X github.com/cocoonstack/sandbox-operator/version.VERSION={{.Env.VERSION}}
+      - -X github.com/cocoonstack/sandbox-operator/version.BUILTAT={{.Date}}
     goos:
       - linux
     goarch:
@@ -24,6 +27,9 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s -w
+      - -X github.com/cocoonstack/sandbox-operator/version.REVISION={{.Commit}}
+      - -X github.com/cocoonstack/sandbox-operator/version.VERSION={{.Env.VERSION}}
+      - -X github.com/cocoonstack/sandbox-operator/version.BUILTAT={{.Date}}
     goos:
       - linux
     goarch:

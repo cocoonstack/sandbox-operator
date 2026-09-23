@@ -86,6 +86,5 @@ func optionalTime(t time.Time) *metav1.Time {
 	if t.IsZero() {
 		return nil
 	}
-	m := metav1.NewTime(t)
-	return &m
+	return new(metav1.NewTime(t))
 }

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
@@ -25,8 +24,6 @@ import (
 	"k8s.io/klog/v2"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
@@ -34,15 +31,10 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
+	"github.com/cocoonstack/sandbox-operator/version"
 )
 
 const (
-	// inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory
-	// informer to sync. If the NodeInventory CRD is not installed or the
-	// kube-apiserver is unreachable, the binary fails loud instead of serving
-	// empty sandbox lists.
-	inventoryCacheSyncTimeout = 2 * time.Minute
-
 	// e2bReadHeaderTimeout bounds how long a client may take to send its request
 	// headers on the e2b surface, so a stalled connection cannot pin a handler.
 	e2bReadHeaderTimeout = 10 * time.Second
@@ -193,20 +185,17 @@ func run() error {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
+	klog.InfoS("starting sandbox-apiserver", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
 
-	// Route controller-runtime logs (the warm-pool driver's) through klog so they
-	// land in the apiserver's own log stream instead of being silently discarded.
+	// Route the warm-pool driver's controller-runtime logs into the apiserver's own stream.
 	ctrl.SetLogger(klog.NewKlogr())
 	ctx := genericapiserver.SetupSignalContext()
 
-	// The store reads NodeInventory objects through a cache-fed reader: the
-	// O(nodes) enumeration is served from an informer, never a hot-path LIST
-	// against the kube-apiserver/etcd.
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := startInventoryCache(ctx, restCfg)
+	reader, err := scale.NewInventoryCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
@@ -214,16 +203,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// WithClaimRouting wires the node-local claim/release write path: the uniform
-	// fleet token plus a per-node sandboxd HTTP client keyed on each node's
-	// advertised address (NodeInventory.Address). Empty token leaves it fail-closed.
 	invSource := scale.NewClientInventorySource(reader)
 	store := scale.NewScatterGatherStore(
 		invSource,
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),
 	)
 
-	// Optional in-process components sharing the apiserver's inventory cache.
 	if o.WarmPoolDriver {
 		if err = startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
 			return err
@@ -250,42 +235,6 @@ func run() error {
 	err = server.PrepareRun().RunWithContext(ctx)
 	stopE2B()
 	return err
-}
-
-// startInventoryCache builds, starts, and syncs a controller-runtime cache
-// scoped to exactly the NodeInventory GVK, returning it as the store's reader.
-// ReaderFailOnMissingInformer makes a read of any other GVK fail loudly instead
-// of silently spawning a cluster-wide informer, so the cache watches nothing
-// but the O(nodes) NodeInventory objects.
-func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache.Cache, error) {
-	inv := &unstructured.Unstructured{}
-	inv.SetGroupVersionKind(scale.NodeInventoryGVK)
-	invCache, err := cache.New(restCfg, cache.Options{
-		ByObject:                    map[client.Object]cache.ByObject{inv: {}},
-		ReaderFailOnMissingInformer: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build inventory cache: %w", err)
-	}
-	if _, err := invCache.GetInformer(ctx, inv); err != nil {
-		return nil, fmt.Errorf("register node inventory informer: %w", err)
-	}
-	cacheErr := make(chan error, 1)
-	go func() { cacheErr <- invCache.Start(ctx) }()
-	syncCtx, cancel := context.WithTimeout(ctx, inventoryCacheSyncTimeout)
-	defer cancel()
-	if !invCache.WaitForCacheSync(syncCtx) {
-		select {
-		case err := <-cacheErr:
-			if err != nil {
-				return nil, fmt.Errorf("run inventory cache: %w", err)
-			}
-		default:
-		}
-		return nil, fmt.Errorf("node inventory cache did not sync within %s (is the %s CRD installed?)",
-			inventoryCacheSyncTimeout, scale.NodeInventoryGVK.GroupKind())
-	}
-	return invCache, nil
 }
 
 // startWarmPoolDriver runs the SandboxWarmPool driver as a controller inside a

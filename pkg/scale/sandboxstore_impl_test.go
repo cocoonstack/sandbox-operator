@@ -11,8 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -384,4 +386,13 @@ func waitForType(t *testing.T, w watch.Interface, want watch.EventType, timeout 
 			return watch.Event{}
 		}
 	}
+}
+
+func newScaleScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	require.NoError(t, sandboxv1beta1.AddToScheme(s))
+	require.NoError(t, extv1beta1.AddToScheme(s))
+	require.NoError(t, cocoonv1beta1.AddToScheme(s))
+	return s
 }

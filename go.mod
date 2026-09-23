@@ -10,7 +10,6 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cocoonstack/sandbox/protocol/wire v0.1.13 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -48,6 +47,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.71.0 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
@@ -89,6 +89,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.37.0 // indirect
 	k8s.io/kms v0.37.0 // indirect
 	k8s.io/streaming v0.37.0 // indirect
+	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
@@ -97,9 +98,7 @@ require (
 )
 
 require (
-	github.com/cocoonstack/sandbox/sdk/go v0.1.14-0.20260923070732-4800131a603a
 	github.com/go-logr/logr v1.4.4
-	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sync v0.23.0
@@ -110,7 +109,6 @@ require (
 	k8s.io/component-base v0.37.0
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
-	k8s.io/utils v0.0.0-20260626114624-be93311217bd
-	sigs.k8s.io/agent-sandbox v1.0.3
-	sigs.k8s.io/controller-runtime v0.25.0
+	sigs.k8s.io/agent-sandbox v1.0.4-0.20260922222611-ce66bdc1484d
+	sigs.k8s.io/controller-runtime v0.25.1
 )

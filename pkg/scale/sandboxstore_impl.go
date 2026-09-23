@@ -69,6 +69,11 @@ const (
 	// TokenAnnotation carries the per-sandbox ownership token handed back on Create.
 	TokenAnnotation = "sandbox.cocoonstack.io/token"
 
+	// Selector keys are the pod annotations the vk-sandbox provider reads its claim axes from.
+	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
+	SelectorNetKey      = "sandbox.cocoonstack.io/net"
+	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
+
 	// Connection pooling for the node-local claim path. Idle conns per host are
 	// sized to the per-node claim fan-out so a burst reuses connections instead
 	// of handshaking; the timeout bounds a wedged sandboxd.
@@ -94,18 +99,10 @@ var (
 func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
 
 // InventorySource enumerates the per-node NodeInventory objects that back the
-// aggregated store. It is deliberately granular — a node enumeration plus a
-// per-node fetch — rather than one cluster-wide read, so:
-//
-//   - List fans out per node with bounded concurrency and a single partitioned
-//     node degrades to eventual consistency (its sandboxes are briefly absent)
-//     instead of failing the whole list, and
-//   - Get can route to the single owning node (the README "route Get to the
-//     owning node, not the summary" contract).
-//
-// In production ListNodes/NodeInventory are served from a cache-fed client
-// listing NodeInventory objects at ResourceVersion=0 (O(nodes), never a hot-path
-// LIST off etcd); tests inject StaticInventorySource.
+// aggregated store. It is a node enumeration plus a per-node fetch rather than
+// one cluster-wide read, so a partitioned node drops out of a List instead of
+// failing it and a Get reads its owning node alone. Production serves it from
+// the informer-fed ClientInventorySource; tests inject StaticInventorySource.
 type InventorySource interface {
 	// ListNodes returns the nodes that publish inventory. O(nodes), cache-fed.
 	ListNodes(ctx context.Context) ([]string, error)
@@ -136,6 +133,30 @@ func WithLogger(log logr.Logger) StoreOption {
 // deltas. Defaults to one second.
 func WithWatchPollInterval(d time.Duration) StoreOption {
 	return func(s *scatterGatherStore) { s.watchPoll = d }
+}
+
+// SandboxdClient is the subset of the sandboxd HTTP client the store needs,
+// kept as an interface so tests inject a fake without a live node. *sandboxd.Client
+// satisfies it.
+type SandboxdClient interface {
+	Claim(ctx context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error)
+	Release(ctx context.Context, id, token string) error
+
+	// The lifecycle verbs address an already-delivered sandbox by id. They all
+	// take sandboxd's operator path, authorized by the fleet api_token the
+	// client already carries, so the control plane needs no per-sandbox secret.
+	Hibernate(ctx context.Context, id string) error
+	Wake(ctx context.Context, id string) error
+	Renew(ctx context.Context, id string, spec sandboxd.RenewSpec) (time.Time, error)
+	Fork(ctx context.Context, id string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error)
+	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
+	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
+	DeleteCheckpoint(ctx context.Context, checkpointID string) error
+	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
+
+	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.
+	Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error)
+	SandboxesByClaimRef(ctx context.Context, ref string) ([]sandboxd.SandboxSummary, error)
 }
 
 // SandboxdClientFactory builds a sandboxd client for one node's advertise address
@@ -983,10 +1004,9 @@ func claimUndelivered(err error) bool {
 	if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
 		return true
 	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) && opErr.Op == "dial" {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && opErr.Op == "dial" {
 		return true
 	}
-	var httpErr *sandboxd.HTTPError
-	return errors.As(err, &httpErr) && httpErr.StatusCode >= http.StatusInternalServerError
+	httpErr, ok := errors.AsType[*sandboxd.HTTPError](err)
+	return ok && httpErr.StatusCode >= http.StatusInternalServerError
 }
