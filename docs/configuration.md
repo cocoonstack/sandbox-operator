@@ -218,8 +218,7 @@ Four behaviours are worth knowing before you set these:
 - **One domain feeds both binaries.** `envdProxy.domain` defaults to
   `apiserver.e2b.domain`, because the apiserver and the proxy must spell
   `{port}-{sandboxID}.{domain}` identically. Set `envdProxy.domain` only to
-  override. With neither set, `--domain` is omitted and the proxy exits at
-  startup.
+  override.
 - **TLS on the proxy switches more than the flag.** An empty
   `envdProxy.tlsSecretName` also makes the probes HTTP and the Service port
   80/`http`; set, they become HTTPS and 443/`https`.
