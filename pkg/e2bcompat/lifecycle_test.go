@@ -141,6 +141,32 @@ func TestConnectReturnsTheSandboxAccessToken(t *testing.T) {
 	}
 }
 
+func TestConnectRestoresAPausedClaimThenJudgesTheLeaseItsWakeGranted(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		wakeDeadline time.Duration
+		wantRenew    bool
+	}{
+		{"hibernated: the lease continues, 20 s left", 0, true},
+		{"archived: the wake grants an hour", time.Hour, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &lifecycleStore{nodePaused: true, deadline: time.Now().Add(20 * time.Second)}
+			if tc.wakeDeadline != 0 {
+				store.wakeDeadline = time.Now().Add(tc.wakeDeadline)
+			}
+			store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+			if w := do(t, h, http.MethodPost, "/v2/sandboxes/sb-abc/connect", `{"timeout":300}`, testKey); w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+			}
+			if store.resumedID != "sb_abc" || (store.renewedID != "") != tc.wantRenew {
+				t.Errorf("resumed %q, renewed %q; want a resume and renew=%v", store.resumedID, store.renewedID, tc.wantRenew)
+			}
+		})
+	}
+}
+
 func TestConnectExtendsALeaseShorterThanItsTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -352,7 +378,7 @@ type lifecycleStore struct {
 	renewedTTL             int
 	renewDeadline          time.Time
 	token                  string
-	deadline               time.Time
+	deadline, wakeDeadline time.Time
 	readNode, readID       string
 	err                    error
 	statsErr               error
@@ -376,6 +402,10 @@ func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
 
 func (f *lifecycleStore) Resume(_ context.Context, node, id string) error {
 	f.resumedNode, f.resumedID = node, id
+	f.nodePaused = false
+	if !f.wakeDeadline.IsZero() {
+		f.deadline = f.wakeDeadline
+	}
 	return f.err
 }
 

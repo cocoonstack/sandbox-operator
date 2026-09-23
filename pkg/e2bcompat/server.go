@@ -422,7 +422,7 @@ type listFilter struct {
 }
 
 func listFilterOf(q url.Values) (listFilter, error) {
-	if q.Has("metadata") {
+	if q.Get("metadata") != "" {
 		return listFilter{}, errors.New("metadata filters are not supported: metadata is not stored")
 	}
 	f := listFilter{template: q.Get("template")}
@@ -453,7 +453,7 @@ func (f listFilter) keeps(d SandboxDetail) bool {
 	}
 	if !f.startedAfter.IsZero() {
 		started, err := time.Parse(time.RFC3339, d.StartedAt)
-		if err != nil || !started.After(f.startedAfter) {
+		if err != nil || started.Before(f.startedAfter.Truncate(time.Second)) {
 			return false
 		}
 	}

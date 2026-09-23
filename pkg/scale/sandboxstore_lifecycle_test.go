@@ -55,6 +55,11 @@ func TestReadReportsTheClaimAsItsNodeHoldsIt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, SandboxRecord{Token: "secret", Paused: true, Deadline: deadline}, rec)
 
+	f.rows["n1:7777"] = []sandboxd.SandboxSummary{{ID: "sb_live", Archived: true}}
+	rec, err = store.Read(t.Context(), "n1", "sb_live")
+	require.NoError(t, err)
+	assert.True(t, rec.Paused, "an archived claim is paused: Resume restores it")
+
 	_, err = store.Read(t.Context(), "n1", "sb_gone")
 	assert.True(t, k8serrors.IsNotFound(err), "a sandboxd 404 must surface as NotFound, got %v", err)
 }

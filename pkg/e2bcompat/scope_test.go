@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
@@ -178,7 +179,9 @@ func TestListHonorsStateAndTemplateAndRefusesMetadata(t *testing.T) {
 		{"?state=running&state=paused", []string{"sb-a", "sb-b"}},
 		{"?template=other", []string{"sb-b"}},
 		{"?startedAfter=2000-01-01T00:00:00Z", []string{"sb-a", "sb-b"}},
+		{"?startedAfter=" + running.CreationTimestamp.UTC().Truncate(time.Second).Add(100*time.Millisecond).Format(time.RFC3339Nano), []string{"sb-a", "sb-b"}},
 		{"?startedAfter=2999-01-01T00:00:00Z", []string{}},
+		{"?metadata=", []string{"sb-a", "sb-b"}},
 	} {
 		w := do(t, h, http.MethodGet, "/v2/sandboxes"+tc.query, "", testKey)
 		var listed []SandboxDetail

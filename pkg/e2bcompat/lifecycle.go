@@ -87,11 +87,15 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	status := http.StatusOK
 	if rec.Paused {
-		if err := s.store.Resume(r.Context(), node, claimID); err != nil {
+		if err = s.store.Resume(r.Context(), node, claimID); err != nil {
 			s.writeVerbError(w, err, id, "connect: resume", "failed to resume the sandbox")
 			return
 		}
 		status = http.StatusCreated
+		if rec, err = s.store.Read(r.Context(), node, claimID); err != nil {
+			s.writeVerbError(w, err, id, "connect: read", "failed to connect the sandbox")
+			return
+		}
 	}
 	if ttl := s.timeoutSeconds(req.Timeout); time.Now().Add(time.Duration(ttl) * time.Second).After(rec.Deadline) {
 		if _, err := s.store.Renew(r.Context(), node, claimID, ttl); err != nil {
