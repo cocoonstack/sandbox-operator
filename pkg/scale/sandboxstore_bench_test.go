@@ -11,6 +11,7 @@ var benchFleets = []struct {
 	perNode int
 }{
 	{"26x100", 26, 100},
+	{"26x2000", 26, 2000},
 	{"200x2000", 200, 2000},
 }
 
@@ -53,8 +54,17 @@ func BenchmarkStoreWarmCandidates(b *testing.B) {
 
 func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey) {
 	b.Helper()
-	pool := PoolKey{Template: "ghcr.io/cocoonstack/sandbox/rt:24.04", Net: NetDefault, Size: SizeClassSmall}
+	invs, pool := benchInventories(nodes, perNode)
 	src := NewStaticInventorySource()
+	for _, inv := range invs {
+		src.Put(inv)
+	}
+	return NewScatterGatherStore(src), pool
+}
+
+func benchInventories(nodes, perNode int) ([]*NodeInventory, PoolKey) {
+	pool := PoolKey{Template: "ghcr.io/cocoonstack/sandbox/rt:24.04", Net: NetDefault, Size: SizeClassSmall}
+	invs := make([]*NodeInventory, 0, nodes)
 	for n := range nodes {
 		name := benchNodeName(n)
 		entries := make([]InventoryEntry, perNode)
@@ -66,7 +76,7 @@ func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey)
 				Address: "10.0.0.1:7777",
 			}
 		}
-		src.Put(&NodeInventory{
+		invs = append(invs, &NodeInventory{
 			Name:    name,
 			Node:    name,
 			Address: "10.0.0.1:7777",
@@ -74,7 +84,7 @@ func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey)
 			Pools:   []PoolCapacity{{Template: pool.Template, Net: pool.Net, Size: pool.Size, Warm: 5, Target: 5}},
 		})
 	}
-	return NewScatterGatherStore(src), pool
+	return invs, pool
 }
 
 func benchNodeName(n int) string { return fmt.Sprintf("node-%03d", n) }

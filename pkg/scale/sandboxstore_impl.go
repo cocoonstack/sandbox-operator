@@ -733,7 +733,7 @@ var _ InventorySource = (*ClientInventorySource)(nil)
 // objects through a controller-runtime reader. Back it with a cache-fed reader
 // (cmd/sandbox-apiserver builds one scoped to exactly this GVK) so the O(nodes)
 // enumeration is served from an informer, never a hot-path LIST off etcd.
-// Objects are read as unstructured so any reader works without scheme wiring.
+// Objects are read as unstructured and never mutated: NewInventoryCache hands out its cached objects themselves.
 type ClientInventorySource struct {
 	reader client.Reader
 }

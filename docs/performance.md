@@ -98,6 +98,24 @@ removed. The node-side numbers are unaffected — the same Pod is now written by
 hand, per the [pod-template contract](runtime-backends.md) — but the
 control-plane half is upstream's code and unmeasured here.
 
+### Claim node-pick over the inventory cache
+
+The aggregated apiserver picks a claim's node from the `NodeInventory` cache:
+one list for the node names, then one get per node for its address and pools.
+The controller-runtime cache deep-copied every object on the way out, so the
+pick paid for every sandbox entry in the fleet. The readers never mutate what
+they get, so the cache now hands out its objects as they are.
+`BenchmarkClientInventoryWarmCandidates` reads through a real informer-fed
+cache reader (Apple M2 Max, three runs per arm, arms run in both orders):
+
+| fleet | deep copy | no copy |
+|---|---|---|
+| 26 nodes × 100 entries | 0.88 ms, 1.9 MB, 11.8k allocs | 0.05 ms, 39 KB, 682 allocs |
+| 26 × 2000 | 11.9 ms, 36.7 MB, 209k allocs | 0.046 ms, 39 KB, 682 allocs |
+| 200 × 2000 | 87 ms, 283 MB, 1.61M allocs | 0.28 ms, 286 KB, 5.0k allocs |
+
+Without the copy the pick is flat in entries per node and linear in nodes.
+
 ## Upstream controller: warm claim on the sandboxd tier
 
 Measured on 2026-09-22 when the forked controllers were replaced by upstream's:

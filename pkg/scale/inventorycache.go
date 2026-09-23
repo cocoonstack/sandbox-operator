@@ -19,7 +19,7 @@ func NewInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache.C
 	inv := &unstructured.Unstructured{}
 	inv.SetGroupVersionKind(NodeInventoryGVK)
 	invCache, err := cache.New(restCfg, cache.Options{
-		ByObject:                    map[client.Object]cache.ByObject{inv: {}},
+		ByObject:                    map[client.Object]cache.ByObject{inv: {UnsafeDisableDeepCopy: new(true)}},
 		ReaderFailOnMissingInformer: true,
 	})
 	if err != nil {
