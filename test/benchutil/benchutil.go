@@ -64,12 +64,11 @@ func Round4(f float64) float64 { return float64(int(f*10000)) / 10000 }
 
 // EnsureTemplate creates the run's SandboxTemplate once; callers pass what differs between harnesses.
 func EnsureTemplate(ctx context.Context, cl client.Client, ns, name string, annotations map[string]string, spec corev1.PodSpec) {
-	svc := false
 	t := &extv1beta1.SandboxTemplate{
 		Name: name, Namespace: ns,
 		Spec: extv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				Service: &svc,
+				Service: new(false),
 				PodTemplate: sandboxv1beta1.PodTemplate{
 					ObjectMeta: sandboxv1beta1.PodMetadata{Annotations: annotations},
 					Spec:       spec,

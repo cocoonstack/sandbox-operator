@@ -42,7 +42,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -97,7 +96,7 @@ func main() {
 	for p := range pools {
 		warmPools = append(warmPools, &extv1beta1.SandboxWarmPool{
 			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", p), Namespace: namespaceName(p % numNS)},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: ptr.To(int32(perNode))},
+			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: new(int32(perNode))},
 		})
 	}
 	scheme := runtime.NewScheme()

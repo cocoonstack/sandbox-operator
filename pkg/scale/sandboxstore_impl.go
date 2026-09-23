@@ -983,10 +983,9 @@ func claimUndelivered(err error) bool {
 	if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
 		return true
 	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) && opErr.Op == "dial" {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && opErr.Op == "dial" {
 		return true
 	}
-	var httpErr *sandboxd.HTTPError
-	return errors.As(err, &httpErr) && httpErr.StatusCode >= http.StatusInternalServerError
+	httpErr, ok := errors.AsType[*sandboxd.HTTPError](err)
+	return ok && httpErr.StatusCode >= http.StatusInternalServerError
 }
