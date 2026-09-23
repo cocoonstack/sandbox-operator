@@ -54,6 +54,12 @@ granted expiry, which the node may clamp below what was asked for. Its
 `metadata.creationTimestamp` is the apiserver's clock at claim time; reads
 after the node's next publish carry the claim time the node recorded.
 
+`Create` is a claim, not an upsert: nothing checks `metadata.name` against the
+fleet, so a repeated `Create` under one name claims a second microVM, and the
+by-name verbs then reach whichever of the two a node answers for first. A caller
+that may repeat a `Create` uses `metadata.generateName`; the `claim-id`
+annotation names the microVM each call delivered.
+
 No warm microVM for the requested pool is a `503`, retryable as capacity
 refills. The aggregated path never cold-starts one.
 
