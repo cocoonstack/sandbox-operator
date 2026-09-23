@@ -190,6 +190,22 @@ func TestLifecycleVerbs_NodeUnknownSandboxIsNotFound(t *testing.T) {
 	}
 }
 
+func TestForkRecordsChildrenInTheNamespaceAndReturnsTheirTokens(t *testing.T) {
+	sb := &sandboxv1beta1.Sandbox{
+		Namespace:   "ns",
+		Name:        "s1",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+	}
+	store := &fakeStore{getSandbox: sb, forkChildren: []scale.Assignment{{SandboxName: "sb_c1", Node: "n1", Address: "n1:1", Token: "tok-c1"}}}
+	got, err := NewSandboxForkREST(store).(*lifecycleREST).Create(nsCtx(t, "ns"), "s1", &cocoonv1beta1.SandboxForkOptions{}, nil, &metav1.CreateOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "ns", store.forkNamespace, "children are recorded in the parent's namespace")
+	res, ok := got.(*cocoonv1beta1.SandboxForkResult)
+	require.True(t, ok, "got %T", got)
+	assert.Equal(t, []cocoonv1beta1.ForkedSandbox{{SandboxID: "sb_c1", NodeName: "n1", Address: "n1:1", Token: "tok-c1"}}, res.Children)
+}
+
 func TestLifecycleVerbsKeepTheNodesStatusCode(t *testing.T) {
 	sb := &sandboxv1beta1.Sandbox{
 		Namespace:   "ns",
@@ -221,6 +237,9 @@ type fakeStore struct {
 	claimCalls  int
 	claimTTL    int
 	claimAssign scale.Assignment
+
+	forkNamespace string
+	forkChildren  []scale.Assignment
 
 	released    bool
 	releaseNode string
@@ -260,8 +279,9 @@ func (f *fakeStore) Renew(context.Context, string, string, int) (time.Time, erro
 	return time.Time{}, f.verbErr
 }
 
-func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
-	return nil, f.verbErr
+func (f *fakeStore) Fork(_ context.Context, namespace, _, _ string, _, _ int) ([]scale.Assignment, error) {
+	f.forkNamespace = namespace
+	return f.forkChildren, f.verbErr
 }
 
 func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {

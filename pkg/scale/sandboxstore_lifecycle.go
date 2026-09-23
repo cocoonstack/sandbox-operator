@@ -51,7 +51,7 @@ func (s *scatterGatherStore) Resume(ctx context.Context, node, id string) error 
 	return nil
 }
 
-func (s *scatterGatherStore) Fork(ctx context.Context, node, id string, count, ttlSeconds int) ([]Assignment, error) {
+func (s *scatterGatherStore) Fork(ctx context.Context, namespace, node, id string, count, ttlSeconds int) ([]Assignment, error) {
 	if count < 1 {
 		return nil, fmt.Errorf("scale: fork count must be >= 1, got %d", count)
 	}
@@ -59,7 +59,7 @@ func (s *scatterGatherStore) Fork(ctx context.Context, node, id string, count, t
 	if err != nil {
 		return nil, err
 	}
-	res, err := cl.Fork(ctx, id, sandboxd.ForkSpec{Count: count, TTLSeconds: ttlSeconds})
+	res, err := cl.Fork(ctx, id, sandboxd.ForkSpec{Count: count, TTLSeconds: ttlSeconds, ClaimRefPrefix: namespacedName(namespace, "")})
 	if err != nil {
 		return nil, nodeVerbError(err, "fork", id, node)
 	}

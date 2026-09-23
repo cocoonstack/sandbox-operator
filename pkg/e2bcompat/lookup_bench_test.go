@@ -29,7 +29,7 @@ func BenchmarkLookupByID(b *testing.B) {
 			Entries: entries,
 		})
 	}
-	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", AllowAnonymous: true})
+	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
 	if err != nil {
 		b.Fatalf("NewServer: %v", err)
 	}

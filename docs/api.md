@@ -38,6 +38,7 @@ _Appears in:_
 | `sandboxID` _string_ | sandboxID is the child's node-local claim id. |  |  |
 | `nodeName` _string_ | nodeName is the node that owns the child. A fork is node-local, so every<br />child lands on the source's node. |  |  |
 | `address` _string_ | address is the child's connection address, when the node published one. |  |  |
+| `token` _string_ | token is the child's own bearer token, which guards its data plane. |  |  |
 
 
 #### InventoryEntry

@@ -229,8 +229,8 @@ func TestForkReturnsPerChildResults(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d results, want one per child", len(got))
 	}
-	if store.forkCount != 2 {
-		t.Errorf("fork count routed = %d, want 2", store.forkCount)
+	if store.forkCount != 2 || store.forkNamespace != "sandboxes" {
+		t.Errorf("fork routed count %d in %q, want 2 in the key's namespace", store.forkCount, store.forkNamespace)
 	}
 	for i, want := range []string{"sb-c1", "sb-c2"} {
 		if got[i].Sandbox == nil || got[i].Sandbox.SandboxID != want {
@@ -369,6 +369,7 @@ type lifecycleStore struct {
 
 	pausedNode, pausedID   string
 	resumedNode, resumedID string
+	forkNamespace          string
 	forkedID               string
 	forkCount              int
 	forkChildren           []scale.Assignment
@@ -414,8 +415,8 @@ func (f *lifecycleStore) Renew(_ context.Context, _, id string, ttlSeconds int) 
 	return f.renewDeadline, f.err
 }
 
-func (f *lifecycleStore) Fork(_ context.Context, _, id string, count, _ int) ([]scale.Assignment, error) {
-	f.forkedID, f.forkCount = id, count
+func (f *lifecycleStore) Fork(_ context.Context, namespace, _, id string, count, _ int) ([]scale.Assignment, error) {
+	f.forkNamespace, f.forkedID, f.forkCount = namespace, id, count
 	return f.forkChildren, f.err
 }
 

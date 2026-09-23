@@ -305,6 +305,7 @@ type recordingFactory struct {
 	builtAddr    string
 	builtToken   string
 	claimSpec    sandboxd.ClaimSpec
+	forkSpec     sandboxd.ForkSpec
 	claimCalls   int
 	releaseID    string
 	releaseToken string
@@ -360,7 +361,8 @@ func (c *recordingClient) Renew(context.Context, string, sandboxd.RenewSpec) (ti
 	return time.Time{}, c.f.verbErr
 }
 
-func (c *recordingClient) Fork(context.Context, string, sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
+func (c *recordingClient) Fork(_ context.Context, _ string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
+	c.f.forkSpec = spec
 	return sandboxd.ForkResult{}, c.f.verbErr
 }
 
