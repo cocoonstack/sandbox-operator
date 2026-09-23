@@ -136,8 +136,6 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if len(keys) == 0 && !opts.AllowAnonymous {
 		return nil, errors.New("e2bcompat: no API key configured; set one or enable anonymous access explicitly")
 	}
-	// The SDK derives the envd host from the domain, so an empty one hands out
-	// sandboxes whose data plane the client cannot address at all.
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("e2bcompat: no domain configured; the SDK cannot reach a sandbox without one")
 	}
