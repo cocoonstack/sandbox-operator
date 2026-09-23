@@ -66,6 +66,21 @@ pool nobody provisioned. The pool key the warm-pool driver provisions is
 `(template, net, size)`; a Pod naming a key with no warm capacity gets a typed
 `CreatePod` failure and stays `Pending`.
 
+Three things set how fast a drained warm pool refills
+([performance](performance.md#when-claims-drain-the-pool)):
+
+- **Spread the Pods.** vk-sandbox nodes look identical to the scheduler, which
+  then packs one of them. Label the pool's Pods and add a hostname
+  `topologySpreadConstraint`, as
+  [the example](https://github.com/cocoonstack/sandbox-operator/blob/master/examples/sandboxd/template-warmpool-claim.yaml)
+  does.
+- **Run a vk-sandbox whose pod queues follow `--kube-api-qps`**
+  ([vk-sandbox#19](https://github.com/cocoonstack/vk-sandbox/pull/19)). The
+  virtual-kubelet default holds each node to 10 Pod creates and status pushes a
+  second.
+- **Size both pools.** `SandboxWarmPool` replicas cover the burst you expect,
+  and each node's sandboxd keeps enough warm microVMs to refill them.
+
 The full provider contract, including what happens when a Pod is deleted while
 its `Sandbox` lives, is in
 [vk-sandbox's pod contract](https://github.com/cocoonstack/vk-sandbox/blob/master/docs/pod-contract.md).

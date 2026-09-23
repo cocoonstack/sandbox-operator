@@ -16,6 +16,8 @@ spec:
   envVarsInjectionPolicy: Allowed
   podTemplate:
     metadata:
+      labels:
+        app: sandboxd-agent
       annotations:
         sandbox.cocoonstack.io/runtime: sandboxd
         sandbox.cocoonstack.io/template: ghcr.io/cocoonstack/sandbox/rt:24.04
@@ -28,6 +30,14 @@ spec:
         - key: virtual-kubelet.io/provider
           operator: Exists
           effect: NoSchedule
+      # identical virtual nodes tie in scoring and the scheduler packs one of them
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: sandboxd-agent
       containers:
         - name: agent
           image: ghcr.io/cocoonstack/sandbox/rt:24.04

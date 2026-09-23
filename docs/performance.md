@@ -118,14 +118,54 @@ CRD set.
 | fork `0719d33` | 2 s | 44.5 ms | 69.7 ms | 73.8 ms | 75.7 ms | 40/40 |
 | upstream v1.0.3 | 2 s | 48.4 ms | 71.0 ms | 72.0 ms | 72.6 ms | 40/40 |
 
-Upstream's claim controller sits inside the fork's run-to-run spread; the CRD
-path lost nothing in the move. The same round re-ran the L3 half before and
-after the import on that cluster — the aggregated list across both nodes, the
-warm-pool driver setting both nodes' targets, every lifecycle verb over the
-Kubernetes and e2b surfaces (`examples/lifecycle`), and an e2b create on one
-host reached through `sandbox-envd-proxy` on the other — with identical
-results, and `test/l3bench` reports the same 3000 sandboxes from 8 etcd objects
-on both builds.
+While the pool holds warm members, upstream's claim controller sits inside the
+fork's run-to-run spread. The same round re-ran the L3 half before and after the
+import on that cluster — the aggregated list across both nodes, the warm-pool
+driver setting both nodes' targets, every lifecycle verb over the Kubernetes and
+e2b surfaces (`examples/lifecycle`), and an e2b create on one host reached
+through `sandbox-envd-proxy` on the other — with identical results, and
+`test/l3bench` reports the same 3000 sandboxes from 8 etcd objects on both
+builds.
+
+### When claims drain the pool
+
+Measured on 2026-09-23 on the same two hosts: a `SandboxWarmPool` of 40, then a
+burst of 200 `SandboxClaim`s at create parallelism 20, timed per claim from its
+create to its `Ready` condition, with every Sandbox's and Pod's stages watched
+on one clock. Arms interleaved, upstream v1.0.3 against the fork at `0719d33`.
+
+The first bursts found two limits outside the controllers, and both arms hit them
+alike:
+
+- **The default scheduler packs one virtual node.** Identical vk-sandbox nodes
+  score within a point of each other, and every Pod of a burst landed on one of
+  them. A hostname `topologySpreadConstraint` in the pod template spreads them.
+- **virtual-kubelet caps each node at 10 Pod syncs a second.** The library's
+  default workqueue limiter holds Pod creates and status pushes to 10 a second
+  after a burst of 100. Scheduled-to-Pod-IP took 1–6 s, and refill ran at about
+  10 a second per node, whatever sandboxd could deliver. vk-sandbox now runs
+  those queues at its kube client's budget
+  ([vk-sandbox#19](https://github.com/cocoonstack/vk-sandbox/pull/19)).
+
+Spread on, 150 warm microVMs per node:
+
+| vk-sandbox pod queues | controller | claim → Ready p50 / p95 / max | Pod scheduled → Pod IP p50 / p95 | refill |
+|---|---|---|---|---|
+| 10/s (library default) | upstream v1.0.3 | 0.49–0.50 / 7.9–8.4 / 8.8–9.0 s | 1.0–1.3 / 6.0–6.4 s | 23/s |
+| 10/s (library default) | fork `0719d33` | 1.84–1.85 / 4.2–4.7 / 5.1–5.4 s | 0.9–1.0 / 5.0 s | 26–27/s |
+| client budget (200/s) | upstream v1.0.3 | 0.48–0.63 / 1.1–1.9 / 1.6–2.1 s | 28–29 / 76–80 ms | 103–104/s |
+| client budget (200/s) | fork `0719d33` | 1.79–1.83 / 2.3–2.5 / 2.4–2.5 s | 25–26 / 45–49 ms | 76–82/s |
+
+With the node side fixed, upstream's controller is ahead on every percentile.
+Before that, its tail was longer: it binds a claim only to a warm Sandbox whose
+Pod IP it has seen, waits up to 2 s for one, then creates its own, and a slow
+node side makes that fallback fire. Its median is better throughout, because a
+claim it binds is ready.
+
+Per claim, upstream writes a little more: 23–24 apiserver writes against 22–23,
+19.6–20.6 etcd puts against 19.1–20.0, and 1.4–2.3 times the claim-controller
+reconciles, the more the longer claims wait for a warm Sandbox. `--disable-claim-events` removes one Event write per claim and
+changes no latency.
 
 ## Data plane
 
