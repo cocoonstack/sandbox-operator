@@ -19,22 +19,14 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	restclient "k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 const (
-	// inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory
-	// informer. Without it the proxy would serve "sandbox unavailable" for
-	// every request instead of failing loud.
-	inventoryCacheSyncTimeout = 2 * time.Minute
 	// readHeaderTimeout bounds how long a client may take to send its headers,
 	// so a stalled connection cannot pin a handler.
 	readHeaderTimeout = 10 * time.Second
@@ -96,7 +88,7 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := startInventoryCache(ctx, restCfg)
+	reader, err := scale.NewInventoryCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
@@ -154,37 +146,4 @@ func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) e
 		return nil
 	}
 	return err
-}
-
-// startInventoryCache serves node lookups from an informer, so a data-plane
-// request never turns into a LIST against the kube-apiserver.
-func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache.Cache, error) {
-	inv := &unstructured.Unstructured{}
-	inv.SetGroupVersionKind(scale.NodeInventoryGVK)
-	invCache, err := cache.New(restCfg, cache.Options{
-		ByObject:                    map[client.Object]cache.ByObject{inv: {}},
-		ReaderFailOnMissingInformer: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build inventory cache: %w", err)
-	}
-	if _, err := invCache.GetInformer(ctx, inv); err != nil {
-		return nil, fmt.Errorf("register node inventory informer: %w", err)
-	}
-	cacheErr := make(chan error, 1)
-	go func() { cacheErr <- invCache.Start(ctx) }()
-	syncCtx, cancel := context.WithTimeout(ctx, inventoryCacheSyncTimeout)
-	defer cancel()
-	if !invCache.WaitForCacheSync(syncCtx) {
-		select {
-		case err := <-cacheErr:
-			if err != nil {
-				return nil, fmt.Errorf("run inventory cache: %w", err)
-			}
-		default:
-		}
-		return nil, fmt.Errorf("node inventory cache did not sync within %s (is the %s CRD installed?)",
-			inventoryCacheSyncTimeout, scale.NodeInventoryGVK.GroupKind())
-	}
-	return invCache, nil
 }
