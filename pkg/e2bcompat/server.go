@@ -80,7 +80,7 @@ type Options struct {
 	// APIKeys, when non-empty, is the set of accepted X-API-KEY values, each
 	// "key" or "key namespace" (Namespace when none is given); a key sees
 	// nothing outside its namespace. Empty is refused unless AllowAnonymous.
-	APIKeys []string //nolint:gosec // the field holds API keys by design
+	APIKeys []string
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
 	// Inventory enumerates the fleet's nodes and their advertised pools. It is
