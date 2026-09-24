@@ -63,7 +63,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 func main() {
 	ctx := ctrl.SetupSignalHandler()
 	level := cmp.Or(os.Getenv("OPERATOR_LOG_LEVEL"), "info")
-	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, ""); err != nil {
+	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level, UseJSON: !stderrIsTerminal()}, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "setup log: %v\n", err)
 		os.Exit(1)
 	}
@@ -141,4 +141,9 @@ func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) e
 		return nil
 	}
 	return err
+}
+
+func stderrIsTerminal() bool {
+	fi, err := os.Stderr.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
