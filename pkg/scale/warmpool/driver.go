@@ -47,10 +47,6 @@ const (
 
 	// maxNodeConcurrency bounds the per-node PUT /v1/pools fan-out per tick.
 	maxNodeConcurrency = 16
-
-	// The sandboxd client has no HTTP timeout; unbounded, one silent node
-	// wedges the global reconcile forever.
-	setPoolsTimeout = 10 * time.Second
 )
 
 var errNoTemplateRef = errors.New("spec.sandboxTemplateRef.name is required")
@@ -65,8 +61,8 @@ type PoolSetter interface {
 // uniform fleet api_token.
 type ClientFactory func(addr, token string) PoolSetter
 
-// NewSandboxdFactory returns the production factory. It shares the store's
-// address rendering and keep-alive client, so a node advertising a scheme is
+// NewSandboxdFactory returns the production factory. It renders addresses and
+// builds its client as the store does, so a node advertising a scheme is
 // reachable here too.
 func NewSandboxdFactory() ClientFactory {
 	hc := scale.NewSandboxdHTTPClient()
@@ -268,9 +264,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 			)
 		})
 		g.Go(func() error {
-			callCtx, cancel := context.WithTimeout(ctx, setPoolsTimeout)
-			defer cancel()
-			info, err := d.factory(node.addr, d.token).SetPools(callCtx, specs)
+			info, err := d.factory(node.addr, d.token).SetPools(ctx, specs)
 			if err != nil {
 				d.log.Error(err, "set node warm pools", "node", node.name, "addr", node.addr)
 				return nil

@@ -55,12 +55,10 @@ const (
 	// synthesized Sandbox. Unlike the label keys above it is an annotation — an
 	// opaque node-local handle, not a selector axis: the aggregated apiserver reads
 	// it on Delete to release exactly the microVM this Sandbox stands for (releasing
-	// by k8s name would target the wrong claim). This is the single definition of
-	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
+	// by k8s name would target the wrong claim).
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339) of a
 	// Sandbox: stamped from inventory on reads and from the claim on Create.
-	// apiserver.DeadlineAnnotation aliases it.
 	DeadlineAnnotation = "sandbox.cocoonstack.io/deadline"
 	// NetAnnotation selects the pool network mode. Create and the warm-pool
 	// driver must read the same key or a claim never matches provisioned warm
@@ -71,7 +69,7 @@ const (
 
 	// Selector keys are the pod annotations the vk-sandbox provider reads its claim axes from.
 	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
-	SelectorNetKey      = "sandbox.cocoonstack.io/net"
+	SelectorNetKey      = NetAnnotation
 	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
 
 	// Connection pooling for the node-local claim path. Idle conns per host are
@@ -95,9 +93,6 @@ var (
 	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
 )
 
-// IsNoWarmCapacity reports whether err means Claim found no warm node.
-func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
-
 // InventorySource enumerates the per-node NodeInventory objects that back the
 // aggregated store. It is a node enumeration plus a per-node fetch rather than
 // one cluster-wide read, so a partitioned node drops out of a List instead of
@@ -112,13 +107,6 @@ type InventorySource interface {
 	// NodeCapacity returns one node's advertise address and warm pools without
 	// decoding its entry list, which the claim and routing paths never read.
 	NodeCapacity(ctx context.Context, node string) (address string, pools []PoolCapacity, err error)
-}
-
-// warmCandidate is one node advertising warm capacity for a requested pool.
-type warmCandidate struct {
-	node string
-	addr string
-	warm int
 }
 
 // StoreOption configures a scatterGatherStore.
@@ -175,31 +163,6 @@ func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
 	}
 }
 
-// NewSandboxdHTTPClient returns one HTTP client for the whole fleet. A per-call
-// client would fall back to http.DefaultTransport, whose MaxIdleConnsPerHost of
-// 2 forces a fresh TCP handshake on every concurrent claim past the second to
-// the same node.
-func NewSandboxdHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: sandboxdRequestTimeout,
-		Transport: &http.Transport{
-			MaxIdleConns:        sandboxdMaxIdleConns,
-			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
-			IdleConnTimeout:     sandboxdIdleConnTimeout,
-		},
-	}
-}
-
-// SandboxdBaseURL renders a node advertise address as a sandboxd base URL: a
-// bare "host:port" is given the http scheme, an address that already carries
-// one is used verbatim.
-func SandboxdBaseURL(addr string) string {
-	if strings.Contains(addr, "://") {
-		return addr
-	}
-	return "http://" + addr
-}
-
 // NewSandboxdClientFactory returns the production SandboxdClientFactory: an HTTP
 // sandboxd client per node advertise address, over the shared client.
 func NewSandboxdClientFactory() SandboxdClientFactory {
@@ -210,6 +173,13 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 }
 
 type inventoryMatch func(inv *NodeInventory, i int) bool
+
+// warmCandidate is one node advertising warm capacity for a requested pool.
+type warmCandidate struct {
+	node string
+	addr string
+	warm int
+}
 
 var _ SandboxStore = (*scatterGatherStore)(nil)
 
@@ -362,10 +332,8 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
 }
 
-// Release returns the claimed microVM id to node's pool via that node's sandboxd,
-// resolving the sandboxd address from the node's NodeInventory. It fails closed if
-// claim routing is not configured. Callers must only reach this on owner-authorized
-// teardown (the delete-authorization contract); it never destroys a VM on pod state.
+// Release destroys the claimed microVM through the node's advertised sandboxd and
+// fails closed when claim routing is not configured.
 func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error {
 	if id == "" {
 		return fmt.Errorf("scale: release requires a claim id")
@@ -380,10 +348,7 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	return nil
 }
 
-// Watch merges per-node inventory into a single Sandbox event stream. This
-// minimal-correct implementation re-derives the fanned-out list on a slow cadence
-// and translates the diff into Added/Modified/Deleted events; a production
-// implementation would merge real per-node watch streams instead of polling.
+// Watch re-derives the fanned-out list every watch poll interval and emits the diff as Added/Modified/Deleted events.
 func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) {
 	if _, _, err := parseSelectors(opts); err != nil {
 		return nil, err
@@ -424,7 +389,7 @@ func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows n
 func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
 	inv, err := s.src.NodeInventory(ctx, node)
 	if err != nil {
-		// a sibling's hit cancels ctx; reads failing from that are not unavailable nodes
+		// A sibling's hit cancels ctx; reads failing from that are not unavailable nodes.
 		if ctx.Err() == nil {
 			s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
 				"node", node, "err", err.Error())
@@ -553,34 +518,6 @@ func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, l
 		out = append(out, *sb)
 	}
 	return out
-}
-
-// AddressIPs strips the port from a "host:port" address, yielding the pod IP
-// list a synthesized Sandbox status carries. Shared with the aggregated
-// apiserver so both stamp identical PodIPs.
-func AddressIPs(addr string) []string {
-	if addr == "" {
-		return nil
-	}
-	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
-		return []string{host}
-	}
-	return []string{addr}
-}
-
-// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
-// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
-// whichever node looked best in that snapshot; sampling spreads the burst while
-// still biasing toward warm capacity. A stale pick costs one gossip redirect.
-func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
-	//nolint:gosec // load spreading, not a security decision
-	i := rand.IntN(len(candidates))
-	//nolint:gosec // load spreading, not a security decision
-	j := rand.IntN(len(candidates))
-	if candidates[j].warm > candidates[i].warm {
-		return candidates[j], j
-	}
-	return candidates[i], i
 }
 
 // NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
@@ -800,6 +737,47 @@ func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (
 	return addr, pools, nil
 }
 
+// IsNoWarmCapacity reports whether err means Claim found no warm node.
+func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
+
+// NewSandboxdHTTPClient returns one HTTP client for the whole fleet. A per-call
+// client would fall back to http.DefaultTransport, whose MaxIdleConnsPerHost of
+// 2 forces a fresh TCP handshake on every concurrent claim past the second to
+// the same node.
+func NewSandboxdHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: sandboxdRequestTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        sandboxdMaxIdleConns,
+			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
+			IdleConnTimeout:     sandboxdIdleConnTimeout,
+		},
+	}
+}
+
+// SandboxdBaseURL renders a node advertise address as a sandboxd base URL: a
+// bare "host:port" is given the http scheme, an address that already carries
+// one is used verbatim.
+func SandboxdBaseURL(addr string) string {
+	if strings.Contains(addr, "://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
+// AddressIPs strips the port from a "host:port" address, yielding the pod IP
+// list a synthesized Sandbox status carries. Shared with the aggregated
+// apiserver so both stamp identical PodIPs.
+func AddressIPs(addr string) []string {
+	if addr == "" {
+		return nil
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
+		return []string{host}
+	}
+	return []string{addr}
+}
+
 // FirstHit runs find on every node src lists, concurrency at a time, and
 // returns the first non-zero result, canceling the rest.
 func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrency int, find func(ctx context.Context, node string) T) (T, error) {
@@ -866,6 +844,21 @@ func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 	return pc.Template == key.Template &&
 		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&
 		cmp.Or(pc.Size, SizeClassSmall) == cmp.Or(key.Size, SizeClassSmall)
+}
+
+// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
+// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
+// whichever node looked best in that snapshot; sampling spreads the burst while
+// still biasing toward warm capacity. A stale pick costs one gossip redirect.
+func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
+	//nolint:gosec // load spreading, not a security decision
+	i := rand.IntN(len(candidates))
+	//nolint:gosec // load spreading, not a security decision
+	j := rand.IntN(len(candidates))
+	if candidates[j].warm > candidates[i].warm {
+		return candidates[j], j
+	}
+	return candidates[i], i
 }
 
 // parseSelectors turns the string selectors on ListOptions into matchers. Empty

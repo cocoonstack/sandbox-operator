@@ -74,13 +74,18 @@ a ~30 s cadence, so a list right after a create may not show it yet. Reads of
 one sandbox do not wait for that publish, on any apiserver replica: a `Get` by
 name asks the nodes for the claim recorded under `<namespace>/<name>`, and a
 lookup by claim id — the e2b surface and the envd proxy — asks them for that
-id. A deleted sandbox stays readable until its node publishes. Fork children
-and checkpoint branches carry no claim ref: by claim id they answer at once,
-by name only after their node publishes.
+id. A deleted sandbox stays readable until its node publishes. A fork child is
+recorded under `<namespace>/<claim id>`, so both lookups find it at once. A
+checkpoint branch carries no claim ref: by claim id it answers at once, by name
+only after its node publishes.
 
 `watch` is served by re-deriving that view and diffing it, so it inherits the
 same lag. Label selectors work against the axes the store stamps:
-`sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`.
+`sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`. The
+template label carries the pool template as is, and a registry image reference
+is not a valid label value (`/` and `:` are not allowed): a selector that names
+one is a `400`, so only the label's existence
+(`-l sandbox.cocoonstack.io/template`) selects on it.
 
 ## Warm capacity
 
@@ -146,7 +151,7 @@ Pod on a microVM node.
 ## Examples
 
 [`examples/`](https://github.com/cocoonstack/sandbox-operator/tree/master/examples)
-holds one runnable file per path: `l3/` (warm capacity plus a claim through the
+holds one directory per path: `l3/` (warm capacity plus a claim through the
 aggregated apiserver), `sandboxd/` (the Pod path on a vk-sandbox node),
 `vk-cocoon/`, `standard-kubelet/`, and `lifecycle/` (a Go walk-through of every
 verb on both surfaces).

@@ -28,9 +28,9 @@ import (
 )
 
 const (
-	// DefaultDialTimeout bounds a node dial. The relay it opens is unbounded by
+	// dialTimeout bounds a node dial. The relay it opens is unbounded by
 	// design: a pty or a watch stream lives as long as the client keeps it.
-	DefaultDialTimeout = 10 * time.Second
+	dialTimeout = 10 * time.Second
 	// flushInterval streams a proxied response as it arrives. ConnectRPC
 	// streaming and pty output are useless buffered.
 	flushInterval = -1
@@ -47,8 +47,6 @@ type Options struct {
 	// upgrade, which would fail every request; turn it on for a guest daemon
 	// that serves h2c, such as a user's own server on another port.
 	GuestHTTP2 bool
-	// DialTimeout overrides DefaultDialTimeout.
-	DialTimeout time.Duration
 	// Log receives request-level failures.
 	Log logr.Logger
 }
@@ -69,10 +67,7 @@ func NewServer(resolver Resolver, opts Options) (*Server, error) {
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("envdproxy: no domain configured; the SDK's sandbox host is derived from it")
 	}
-	if opts.DialTimeout <= 0 {
-		opts.DialTimeout = DefaultDialTimeout
-	}
-	dialer := &net.Dialer{Timeout: opts.DialTimeout}
+	dialer := &net.Dialer{Timeout: dialTimeout}
 	return &Server{resolver: resolver, transport: newGuestTransport(dialGuest(dialer)), opts: opts}, nil
 }
 
@@ -134,8 +129,6 @@ func (s *Server) proxy(rt route) *httputil.ReverseProxy {
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetXForwarded()
 			pr.Out.URL.Scheme = "http"
-			// the derived host is unique per sandbox and port, which is what
-			// keeps the HTTP/2 connection pool from crossing sandboxes
 			pr.Out.URL.Host = s.sandboxHost(rt)
 			pr.Out.Host = pr.Out.URL.Host
 			pr.Out.Header.Del(accessTokenHeader)

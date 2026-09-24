@@ -23,7 +23,7 @@
 // standing in for a cache-fed NodeInventory client. So it measures the aggregation
 // contract and the object-count invariant, not real microVM state.
 //
-//	Run: GOTOOLCHAIN=go1.26.3 go run -tags l3bench ./test/l3bench \
+//	Run: go run -tags l3bench ./test/l3bench \
 //	       -out /path/to/l3-aggregation.json
 package main
 
@@ -38,10 +38,11 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	genericapiserver "k8s.io/apiserver/pkg/server"
 	restclient "k8s.io/client-go/rest"
+	basecompatibility "k8s.io/component-base/compatibility"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,23 +60,23 @@ var (
 	namespacesFlag = flag.Int("namespaces", 3, "number of namespaces to spread sandboxes across")
 )
 
-func fail(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", args...)
-	os.Exit(1)
-}
-
-func must(err error) {
-	if err != nil {
-		fail("%v", err)
-	}
-}
-
 // sliceLiveSource is a node's own live sandbox state (the sandboxd inventory /
 // L0 node cache stand-in) — NOT a cluster-wide LIST.
 type sliceLiveSource []scale.InventoryEntry
 
 func (s sliceLiveSource) LiveSandboxes(context.Context) ([]scale.InventoryEntry, error) {
 	return []scale.InventoryEntry(s), nil
+}
+
+func failf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", args...)
+	os.Exit(1)
+}
+
+func must(err error) {
+	if err != nil {
+		failf("%v", err)
+	}
 }
 
 func namespaceName(i int) string { return fmt.Sprintf("l3bench-ns-%d", i) }
@@ -86,7 +87,7 @@ func main() {
 
 	nodes, perNode, pools, numNS := *nodesFlag, *perNodeFlag, *poolsFlag, *namespacesFlag
 	if nodes <= 0 || perNode <= 0 || pools <= 0 || numNS <= 0 {
-		fail("nodes/per-node/pools/namespaces must all be > 0")
+		failf("nodes/per-node/pools/namespaces must all be > 0")
 	}
 	wantSandboxes := nodes * perNode
 
@@ -100,8 +101,9 @@ func main() {
 	warmPools := make([]client.Object, 0, pools)
 	for p := range pools {
 		warmPools = append(warmPools, &extv1beta1.SandboxWarmPool{
-			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", p), Namespace: namespaceName(p % numNS)},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: new(int32(perNode))},
+			Name:      fmt.Sprintf("pool-%d", p),
+			Namespace: namespaceName(p % numNS),
+			Spec:      extv1beta1.SandboxWarmPoolSpec{Replicas: new(int32(perNode))},
 		})
 	}
 	scheme := runtime.NewScheme()
@@ -135,7 +137,7 @@ func main() {
 			Entries:    entries,
 		}))
 		if n := len(entries); n != perNode {
-			fail("published %d entries for %s, want %d", n, node, perNode)
+			failf("published %d entries for %s, want %d", n, node, perNode)
 		}
 	}
 
@@ -144,17 +146,17 @@ func main() {
 	must(intent.List(ctx, &stored))
 	etcdObjectCount := source.ObjectCount() + len(stored.Items)
 	if source.ObjectCount() != nodes {
-		fail("expected %d NodeInventory objects, got %d", nodes, source.ObjectCount())
+		failf("expected %d NodeInventory objects, got %d", nodes, source.ObjectCount())
 	}
 	if source.ApplyCount() != nodes {
-		fail("expected %d server-side-apply writes (O(nodes)), got %d", nodes, source.ApplyCount())
+		failf("expected %d server-side-apply writes (O(nodes)), got %d", nodes, source.ApplyCount())
 	}
 	if etcdObjectCount != nodes+pools {
-		fail("etcd object count %d != nodes+pools (%d+%d)", etcdObjectCount, nodes, pools)
+		failf("etcd object count %d != nodes+pools (%d+%d)", etcdObjectCount, nodes, pools)
 	}
 
 	store := scale.NewScatterGatherStore(source, scale.WithLogger(logr.Discard()), scale.WithWatchPollInterval(50*time.Millisecond))
-	server, err := sandboxapiserver.NewInProcessServer("l3bench-apiserver", store)
+	server, err := newInProcessServer(store)
 	must(err)
 	ts := httptest.NewServer(server.Handler)
 	defer ts.Close()
@@ -162,40 +164,39 @@ func main() {
 	rc := newRESTClient(ts.URL)
 
 	allList := &sandboxv1beta1.SandboxList{}
-	if err := rc.Get().Resource("sandboxes").Do(ctx).Into(allList); err != nil {
-		fail("client-go cluster-scoped list failed: %v", err)
+	if err = rc.Get().Resource("sandboxes").Do(ctx).Into(allList); err != nil {
+		failf("client-go cluster-scoped list failed: %v", err)
 	}
 	if len(allList.Items) != wantSandboxes {
-		fail("cluster list returned %d sandboxes, want %d", len(allList.Items), wantSandboxes)
+		failf("cluster list returned %d sandboxes, want %d", len(allList.Items), wantSandboxes)
 	}
 
 	nsList := &sandboxv1beta1.SandboxList{}
-	if err := rc.Get().Namespace(sampleNS).Resource("sandboxes").Do(ctx).Into(nsList); err != nil {
-		fail("client-go namespaced list failed: %v", err)
+	if err = rc.Get().Namespace(sampleNS).Resource("sandboxes").Do(ctx).Into(nsList); err != nil {
+		failf("client-go namespaced list failed: %v", err)
 	}
 	wantNS, err := store.List(ctx, scale.ListOptions{Namespace: sampleNS})
 	must(err)
 	if len(nsList.Items) != len(wantNS.Items) || len(nsList.Items) == 0 {
-		fail("namespaced list returned %d, want %d (>0)", len(nsList.Items), len(wantNS.Items))
+		failf("namespaced list returned %d, want %d (>0)", len(nsList.Items), len(wantNS.Items))
 	}
 
 	got := &sandboxv1beta1.Sandbox{}
-	if err := rc.Get().Namespace(sampleNS).Resource("sandboxes").Name(sampleName).Do(ctx).Into(got); err != nil {
-		fail("client-go get failed: %v", err)
+	if err = rc.Get().Namespace(sampleNS).Resource("sandboxes").Name(sampleName).Do(ctx).Into(got); err != nil {
+		failf("client-go get failed: %v", err)
 	}
 	if got.Name != sampleName || got.Namespace != sampleNS {
-		fail("get returned %s/%s, want %s/%s", got.Namespace, got.Name, sampleNS, sampleName)
+		failf("get returned %s/%s, want %s/%s", got.Namespace, got.Name, sampleNS, sampleName)
 	}
 
 	labelList := &sandboxv1beta1.SandboxList{}
-	if err := rc.Get().Resource("sandboxes").Param("labelSelector", scale.NodeLabel+"=node-0").Do(ctx).Into(labelList); err != nil {
-		fail("client-go label-selected list failed: %v", err)
+	if err = rc.Get().Resource("sandboxes").Param("labelSelector", scale.NodeLabel+"=node-0").Do(ctx).Into(labelList); err != nil {
+		failf("client-go label-selected list failed: %v", err)
 	}
 	if len(labelList.Items) != perNode {
-		fail("label-selected list returned %d, want %d", len(labelList.Items), perNode)
+		failf("label-selected list returned %d, want %d", len(labelList.Items), perNode)
 	}
 
-	// stream, narrowed to the sample object so the initial sync is a single event.
 	watchEvents, watchOK := exerciseWatch(ctx, rc, sampleNS, sampleName)
 
 	kubectlGetWorks := len(allList.Items) == wantSandboxes &&
@@ -224,8 +225,8 @@ func main() {
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	must(err)
-	must(os.MkdirAll(filepath.Dir(*outFlag), 0o755))
-	must(os.WriteFile(*outFlag, b, 0o644))
+	must(os.MkdirAll(filepath.Dir(*outFlag), 0o750))
+	must(os.WriteFile(*outFlag, b, 0o600))
 
 	fmt.Printf("sandboxes served=%d | etcd objects=%d (nodes=%d + pools=%d) | ssa writes=%d | per-sandbox etcd objects=0\n",
 		len(allList.Items), etcdObjectCount, nodes, pools, source.ApplyCount())
@@ -234,8 +235,25 @@ func main() {
 	fmt.Printf("wrote %s\n", *outFlag)
 
 	if !kubectlGetWorks {
-		fail("kubectl_get_works is false")
+		failf("kubectl_get_works is false")
 	}
+}
+
+func newInProcessServer(store scale.SandboxStore) (*genericapiserver.GenericAPIServer, error) {
+	config := genericapiserver.NewConfig(sandboxapiserver.Codecs)
+	config.ExternalAddress = "localhost:443"
+	config.LoopbackClientConfig = &restclient.Config{}
+	config.EffectiveVersion = basecompatibility.NewEffectiveVersionFromString("", "", "")
+	config.OpenAPIV3Config = sandboxapiserver.NewOpenAPIV3Config()
+
+	server, err := config.Complete(nil).New("l3bench-apiserver", genericapiserver.NewEmptyDelegate())
+	if err != nil {
+		return nil, fmt.Errorf("build generic server: %w", err)
+	}
+	if err := sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
+		return nil, err
+	}
+	return server, nil
 }
 
 // newRESTClient builds a real client-go REST client (kubectl's transport) against
@@ -243,9 +261,9 @@ func main() {
 func newRESTClient(host string) *restclient.RESTClient {
 	cfg := &restclient.Config{Host: host}
 	cfg.APIPath = "/apis"
-	cfg.ContentConfig.GroupVersion = &sandboxv1beta1.GroupVersion
-	cfg.ContentConfig.NegotiatedSerializer = sandboxapiserver.Codecs.WithoutConversion()
-	cfg.ContentConfig.ContentType = "application/json"
+	cfg.GroupVersion = &sandboxv1beta1.GroupVersion
+	cfg.NegotiatedSerializer = sandboxapiserver.Codecs.WithoutConversion()
+	cfg.ContentType = "application/json"
 	rc, err := restclient.RESTClientFor(cfg)
 	must(err)
 	return rc
@@ -275,9 +293,7 @@ func exerciseWatch(ctx context.Context, rc *restclient.RESTClient, ns, name stri
 			}
 			if ev.Type == watch.Added || ev.Type == watch.Modified || ev.Type == watch.Deleted {
 				events++
-				if events >= 1 {
-					return events, true
-				}
+				return events, true
 			}
 		case <-deadline:
 			return events, events > 0

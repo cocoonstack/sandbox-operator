@@ -122,6 +122,9 @@ func TestEntryFromSummaryIsWhatANodePublishes(t *testing.T) {
 
 	unnamed := EntryFromSummary(sandboxd.SandboxSummary{ID: "sb_2", Hibernated: true})
 	assert.Equal(t, InventoryEntry{Name: "sb_2", ID: "sb_2", Phase: PhaseHibernated, ClaimRef: "sb_2"}, unnamed)
+
+	archived := EntryFromSummary(sandboxd.SandboxSummary{ID: "sb_3", Archived: true})
+	assert.Equal(t, PhaseHibernated, archived.Phase, "an archived claim has no VM on the node; it is paused, not running")
 }
 
 func TestFirstHitReturnsTheFirstNonZeroAnswer(t *testing.T) {

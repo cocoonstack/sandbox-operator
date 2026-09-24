@@ -28,28 +28,18 @@ import (
 )
 
 const (
-	// readHeaderTimeout bounds how long a client may take to send its headers,
-	// so a stalled connection cannot pin a handler.
 	readHeaderTimeout = 10 * time.Second
 	// shutdownTimeout bounds the graceful drain. Data-plane streams are long by
 	// design, so this is a floor on restart latency, not a wait for idleness.
 	shutdownTimeout = 10 * time.Second
 )
 
-// options configures the proxy process.
 type options struct {
-	// Addr is the public listener. TLS is served on it when both CertFile and
-	// KeyFile are set; otherwise it serves h2c behind an edge that already
-	// terminated TLS.
-	Addr string
-	// Domain must match the apiserver's --e2b-domain: both spell a sandbox host
-	// as "{port}-{sandboxID}.{domain}".
-	Domain string
-	// Namespace filters inventory lookups; empty matches every namespace.
-	Namespace string
-	CertFile  string
-	KeyFile   string
-	// GuestHTTP2 forwards to the guest over cleartext HTTP/2.
+	Addr       string
+	Domain     string
+	Namespace  string
+	CertFile   string
+	KeyFile    string
 	GuestHTTP2 bool
 }
 
@@ -67,14 +57,12 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func main() {
+	ctrl.SetLogger(klog.NewKlogr())
 	ctx := ctrl.SetupSignalHandler()
 	o := &options{Addr: ":8443", Namespace: "default"}
 	fs := pflag.NewFlagSet("sandbox-envd-proxy", pflag.ExitOnError)
 	o.addFlags(fs)
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		klog.ErrorS(err, "parse flags")
-		os.Exit(1)
-	}
+	_ = fs.Parse(os.Args[1:])
 	if err := run(ctx, o); err != nil {
 		klog.ErrorS(err, "sandbox-envd-proxy exited")
 		os.Exit(1)
@@ -107,15 +95,11 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return err
 	}
-	return serve(ctx, o, srv.Handler())
-}
-
-func serve(ctx context.Context, o *options, h http.Handler) error {
 	ln, err := net.Listen("tcp", o.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %q: %w", o.Addr, err)
 	}
-	return serveOn(ctx, o, ln, h)
+	return serveOn(ctx, o, ln, srv.Handler())
 }
 
 func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) error {

@@ -60,10 +60,10 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
 | `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
-| `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored; `metadata` is refused with `400`, since metadata is not stored; `limit`, `nextToken` and `order` are ignored: one page, in inventory order. |
+| `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored; `metadata` is refused with `400`, since metadata is not stored; `limit`, `nextToken` and `order` are ignored: one page, sorted by the sandbox's Kubernetes name. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |
-| `POST /sandboxes/{id}/timeout` | `store.Renew` | Moves the owning node's lease to `timeout` seconds from now. `204` once the node has renewed, `500` when it refuses. |
+| `POST /sandboxes/{id}/timeout` | `store.Renew` | Moves the owning node's lease to `timeout` seconds from now. `204` once the node has renewed; a node's refusal keeps its 4xx status (`409` for an archived sandbox), and any other failure is `500`. |
 | `POST /sandboxes/{id}/refreshes` | `store.Renew` | The SDK keepalive. Renews for the body's `duration` when it carries one, otherwise `--e2b-default-timeout`. |
 | `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
 | `POST /sandboxes/{id}/connect`, `POST /v2/sandboxes/{id}/connect` | `store.Resume` when paused | The SDK's resume operation. Returns `200` when already running or `201` after restoring a paused or archived sandbox, carrying the sandbox's `envdAccessToken` read from the owning node (a sandboxd with sandbox#229, whose root by-id read carries the token). `timeout` (default `--e2b-default-timeout`) extends the lease to that many seconds from now when the node's deadline is nearer and never shortens it; `memory: false` (the SDK's `onResume: 'reboot'`) is refused with `400`, since a paused sandbox here resumes from its memory snapshot. |
@@ -141,7 +141,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   before this scoping carry no namespace and are not listed.
   Fork children are recorded in the key's namespace under their own claim id
   (a sandboxd with cocoonstack/sandbox#230); an older node records them
-  without a namespace, where they surface in `--e2b-namespace`.
+  without a namespace, so they surface in the `default` namespace.
 - **Checked against the real SDKs.** JS 2.50.0, JS 2.51.0 and Python 2.51.0
   ran create, exec, files, list, pause, connect from a fresh process, exec
   after the resume, the second key's refusals, the default lane and a refused

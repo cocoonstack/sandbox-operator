@@ -35,11 +35,8 @@ import (
 )
 
 const (
-	// e2bReadHeaderTimeout bounds how long a client may take to send its request
-	// headers on the e2b surface, so a stalled connection cannot pin a handler.
 	e2bReadHeaderTimeout = 10 * time.Second
-	// e2bShutdownTimeout bounds the graceful drain of in-flight e2b requests.
-	e2bShutdownTimeout = 10 * time.Second
+	e2bShutdownTimeout   = 10 * time.Second
 )
 
 // options are the standard aggregated-apiserver options: secure serving plus
@@ -52,22 +49,12 @@ type options struct {
 	Authorization  *genericoptions.DelegatingAuthorizationOptions
 	Features       *genericoptions.FeatureOptions
 
-	// SandboxdToken is the uniform fleet-wide sandboxd api_token presented on the
-	// node-local claim/release verbs. SandboxdTokenFile, when set, is read at
-	// startup (a Secret mount) and takes precedence. When both are empty the
-	// Create/Delete write path stays disabled (fails closed).
 	SandboxdToken     string
 	SandboxdTokenFile string
 
-	// WarmPoolDriver enables the in-process SandboxWarmPool → sandboxd pool
-	// reconcile loop (the control-plane surface for warm capacity). Pool-level,
-	// O(pools+nodes); never per-sandbox. WarmPoolInterval is its resync cadence.
 	WarmPoolDriver   bool
 	WarmPoolInterval time.Duration
 
-	// E2B* configure the optional e2b-compatible REST surface, which lets an
-	// unmodified e2b SDK drive the same warm pools. It is off by default and
-	// serves on its own address, so the aggregated API is never affected.
 	E2BAPI            bool
 	E2BAddr           string
 	E2BNamespace      string
@@ -89,6 +76,7 @@ func newOptions() *options {
 		E2BNamespace:   "default",
 	}
 	o.SecureServing.BindPort = 6443
+	o.Features.EnablePriorityAndFairness = false
 	// Allow running without a remote kubeconfig (in-cluster service account).
 	o.Authentication.RemoteKubeConfigFileOptional = true
 	o.Authorization.RemoteKubeConfigFileOptional = true
@@ -166,6 +154,9 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 	cfg := genericapiserver.NewConfig(sandboxapiserver.Codecs)
 	cfg.EffectiveVersion = apiservercompatibility.DefaultBuildEffectiveVersion()
 	cfg.OpenAPIV3Config = sandboxapiserver.NewOpenAPIV3Config()
+	if err := o.Features.ApplyTo(cfg, nil, nil); err != nil {
+		return nil, fmt.Errorf("apply features: %w", err)
+	}
 	if err := o.SecureServing.ApplyTo(&cfg.SecureServing, &cfg.LoopbackClientConfig); err != nil {
 		return nil, fmt.Errorf("apply secure serving: %w", err)
 	}
@@ -182,14 +173,13 @@ func run() error {
 	o := newOptions()
 	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
 	o.addFlags(fs)
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		return err
-	}
+	_ = fs.Parse(os.Args[1:])
 	klog.InfoS("starting sandbox-apiserver", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
 
 	// Route the warm-pool driver's controller-runtime logs into the apiserver's own stream.
 	ctrl.SetLogger(klog.NewKlogr())
-	ctx := genericapiserver.SetupSignalContext()
+	ctx, fail := context.WithCancelCause(genericapiserver.SetupSignalContext())
+	defer fail(nil)
 
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
@@ -210,7 +200,7 @@ func run() error {
 	)
 
 	if o.WarmPoolDriver {
-		if err = startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
+		if err = startWarmPoolDriver(ctx, fail, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
 			return err
 		}
 	}
@@ -234,6 +224,9 @@ func run() error {
 	}
 	err = server.PrepareRun().RunWithContext(ctx)
 	stopE2B()
+	if cause := context.Cause(ctx); err == nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
 	return err
 }
 
@@ -246,7 +239,7 @@ func run() error {
 // aggregated apiserver owns the serving port. inv is the process-wide cache-fed
 // inventory source; the manager's own client would read NodeInventory
 // unstructured and so bypass its cache on every node read.
-func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
+func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register extensions scheme: %w", err)
@@ -274,7 +267,7 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	}
 	go func() {
 		if err := mgr.Start(ctx); err != nil {
-			klog.ErrorS(err, "warm-pool manager exited")
+			fail(fmt.Errorf("warm-pool manager: %w", err))
 		}
 	}()
 	return nil

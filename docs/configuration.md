@@ -113,8 +113,11 @@ account, or from `KUBECONFIG` when run outside a cluster.
 | `--sandboxd-token` | — | Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer `--sandboxd-token-file` for a Secret mount. |
 | `--sandboxd-token-file` | — | Path to a file (Secret mount) holding the sandboxd api_token; overrides `--sandboxd-token` when set. |
 
-With both empty the write path stays disabled and fails closed: reads still
-work, `Create`/`Delete` do not.
+With both empty, node-local calls carry no token. A sandboxd with an
+`api_token` refuses them all, and even an open one refuses `Delete` and the
+lifecycle verbs, which act on a sandbox only under its own token or the node's
+`api_token`: reads of published inventory still work, and a `Create` against an
+open node holds its microVM until the lease expires.
 
 ### Warm-pool driver
 
@@ -152,7 +155,7 @@ surface are in [e2b compatibility](e2b-compat.md).
 
 The binary also takes the standard aggregated-apiserver option sets from
 `k8s.io/apiserver` — secure serving, delegated authentication and
-authorization, feature gates. `--help` prints all of them. The ones a
+authorization, and profiling. `--help` prints all of them. The ones a
 deployment sets are `--secure-port` (default `6443`), `--tls-cert-file` /
 `--tls-private-key-file` (or `--cert-dir`, which self-signs when the pair is
 absent), and `--authentication-kubeconfig` / `--authorization-kubeconfig` when
@@ -186,7 +189,7 @@ mapping are in [envd-proxy](envd-proxy.md).
 | `apiserver.replicaCount` | `2` | Apiserver replicas |
 | `apiserver.securePort` | `6443` | `--secure-port` |
 | `apiserver.warmPoolDriver` | `true` | `--enable-warm-pool-driver` |
-| `apiserver.sandboxdToken.secretName` | `""` | Secret holding the fleet sandboxd `api_token`, mounted for `--sandboxd-token-file`. Empty leaves the `Create`/`Delete` write path closed |
+| `apiserver.sandboxdToken.secretName` | `""` | Secret holding the fleet sandboxd `api_token`, mounted for `--sandboxd-token-file`. Empty sends node-local calls without a token |
 | `apiserver.sandboxdToken.key` | `token` | Key within that Secret |
 | `apiserver.e2b.enabled` | `false` | `--enable-e2b-api` |
 | `apiserver.e2b.domain` | `""` | `--e2b-domain`; required once enabled |
@@ -215,8 +218,7 @@ Four behaviours are worth knowing before you set these:
 - **One domain feeds both binaries.** `envdProxy.domain` defaults to
   `apiserver.e2b.domain`, because the apiserver and the proxy must spell
   `{port}-{sandboxID}.{domain}` identically. Set `envdProxy.domain` only to
-  override. With neither set, `--domain` is omitted and the proxy exits at
-  startup.
+  override.
 - **TLS on the proxy switches more than the flag.** An empty
   `envdProxy.tlsSecretName` also makes the probes HTTP and the Service port
   80/`http`; set, they become HTTPS and 443/`https`.

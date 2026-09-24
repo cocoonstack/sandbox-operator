@@ -69,7 +69,6 @@ func (r *lifecycleREST) Create(ctx context.Context, name string, obj runtime.Obj
 			"sandbox %s/%s has no owning node; cannot run a lifecycle verb against it", namespace, name))
 	}
 	if claimID(sb) == "" {
-		// releasing or pausing by k8s name would target the wrong claim
 		return nil, apierrors.NewInternalError(fmt.Errorf(
 			"sandbox %s/%s carries no %s (node-local claim id); refusing to act by name",
 			namespace, name, ClaimIDAnnotation))
@@ -115,8 +114,7 @@ func NewSandboxForkREST(store scale.SandboxStore) rest.Storage {
 			if !ok {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("expected SandboxForkOptions, got %T", obj))
 			}
-			count := int(opts.Count)
-			count = cmp.Or(count, 1)
+			count := cmp.Or(int(opts.Count), 1)
 			if count < 0 {
 				return nil, apierrors.NewBadRequest(fmt.Sprintf("count must be >= 1, got %d", count))
 			}

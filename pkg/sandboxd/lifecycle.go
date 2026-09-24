@@ -63,7 +63,6 @@ type PoolKey struct {
 	Template string `json:"template"`
 	Net      string `json:"net,omitempty"`
 	Size     string `json:"size,omitempty"`
-	Engine   string `json:"engine,omitempty"`
 }
 
 // SandboxSummary is one live claim as the owning node reports it.
@@ -116,7 +115,7 @@ func (c *Client) Renew(ctx context.Context, id string, spec RenewSpec) (time.Tim
 		return time.Time{}, fmt.Errorf("sandboxd: renew requires a sandbox id")
 	}
 	var out RenewResult
-	err := c.postJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/renew", spec, &out)
+	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/renew", spec, &out)
 	return out.Deadline, err
 }
 
@@ -128,7 +127,7 @@ func (c *Client) Fork(ctx context.Context, id string, spec ForkSpec) (ForkResult
 	if id == "" {
 		return out, fmt.Errorf("sandboxd: fork requires a sandbox id")
 	}
-	err := c.postJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/fork", spec, &out)
+	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/fork", spec, &out)
 	return out, err
 }
 
@@ -141,7 +140,7 @@ func (c *Client) Checkpoint(ctx context.Context, id string, spec CheckpointSpec)
 	var out struct {
 		Checkpoint Checkpoint `json:"checkpoint"`
 	}
-	err := c.postJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/checkpoint", spec, &out)
+	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/checkpoint", spec, &out)
 	return out.Checkpoint, err
 }
 
@@ -208,14 +207,6 @@ func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
 	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, http.StatusNoContent)
 }
 
-func (c *Client) postJSON(ctx context.Context, path string, body, out any) error {
-	return c.sendJSON(ctx, http.MethodPost, path, body, out)
-}
-
-func (c *Client) putJSON(ctx context.Context, path string, body, out any) error {
-	return c.sendJSON(ctx, http.MethodPut, path, body, out)
-}
-
 func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -240,7 +231,6 @@ func (c *Client) sendJSON(ctx context.Context, method, path string, body, out an
 	return decodeInto(resp, out, path)
 }
 
-// getJSON decodes a 2xx GET reply into out.
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {

@@ -78,14 +78,10 @@ linters:
       # length, or an HTTP status code — none can reach 2^31.
       - linters: [gosec]
         text: "G115"
-      # Request targets come from NodeInventory advertise addresses, which only the
-      # cluster's own nodes publish; they are not caller-supplied URLs.
-      - linters: [gosec]
-        text: "G704"
-      # OpenAPI schema field names, Kubernetes label keys/values and Prometheus
-      # label names read worse behind an identifier than as the literal they are.
+      # OpenAPI schema names and e2b request keys read worse behind an identifier
+      # than as the literal they are.
       - linters: [goconst]
-        text: "string `(kind|object|apiVersion|name|namespace|true|timeout|v1beta1|sandboxes\\.agents\\.x-k8s\\.io)`"
+        text: "string `(kind|object|apiVersion|timeout)`"
 
 formatters:
   enable:

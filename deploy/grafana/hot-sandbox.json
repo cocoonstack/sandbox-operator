@@ -1,6 +1,6 @@
 {
   "uid": "hot-sandbox",
-  "title": "Hot Sandbox — 热 Sandbox 池",
+  "title": "Hot Sandbox — warm pools",
   "tags": [
     "cocoon",
     "sandbox",
@@ -25,7 +25,7 @@
     {
       "id": 900,
       "type": "row",
-      "title": "⓪ 填充点阵 / Fill matrix — 每节点 warm 实时(5s 采样)",
+      "title": "⓪ Fill matrix — per-node warm, live (5s samples)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -38,13 +38,13 @@
     {
       "id": 901,
       "type": "status-history",
-      "title": "每节点 warm 点阵(格子=某时刻该节点 warm 数,越绿越满)",
+      "title": "Per-node warm matrix (a cell is the node's warm count at that instant; greener is fuller)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
       "interval": "5s",
-      "description": "sum by(host)(sandboxd_pool_warm). 每行一个节点, X 轴时间(5s 一格). 开池瞬间整列由红转绿即体现填充速度.",
+      "description": "sum by(host)(sandboxd_pool_warm). One row per node, time on the X axis, one cell per 5s. How fast a column turns from red to green after a pool opens is the fill speed.",
       "gridPos": {
         "h": 10,
         "w": 18,
@@ -119,13 +119,13 @@
     {
       "id": 902,
       "type": "timeseries",
-      "title": "总 warm (5s)",
+      "title": "Total warm (5s)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
       "interval": "5s",
-      "description": "sum(sandboxd_pool_warm). 5s 采样, 开池是近乎垂直的一跳=填充秒级.",
+      "description": "sum(sandboxd_pool_warm), 5s samples. A pool opening shows as a near-vertical step: the fill takes seconds.",
       "gridPos": {
         "h": 10,
         "w": 6,
@@ -212,7 +212,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "① 池子实时状态 / Pool state — 全 fleet sandboxd 直采",
+      "title": "① Pool state — scraped from every sandboxd",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -225,7 +225,7 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Warm 可认领",
+      "title": "Warm (claimable)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -273,7 +273,7 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Claimed 已认领/活跃",
+      "title": "Claimed (live)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -321,7 +321,7 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Hibernated 休眠",
+      "title": "Hibernated",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -369,7 +369,7 @@
     {
       "id": 5,
       "type": "stat",
-      "title": "Archived 归档",
+      "title": "Archived",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -417,7 +417,7 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Target 目标水位",
+      "title": "Target (watermark)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -465,7 +465,7 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "Draining 排水节点",
+      "title": "Draining nodes",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -525,7 +525,7 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "所有状态随时间 / all states over time",
+      "title": "All states over time",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -544,7 +544,7 @@
             "uid": "volc-vmp"
           },
           "expr": "sum(sandboxd_pool_warm) or vector(0)",
-          "legendFormat": "warm 可认领",
+          "legendFormat": "warm",
           "refId": "A",
           "range": true
         },
@@ -554,7 +554,7 @@
             "uid": "volc-vmp"
           },
           "expr": "sum(sandboxd_claimed) or vector(0)",
-          "legendFormat": "claimed 已认领",
+          "legendFormat": "claimed",
           "refId": "B",
           "range": true
         },
@@ -564,7 +564,7 @@
             "uid": "volc-vmp"
           },
           "expr": "sum(sandboxd_hibernated) or vector(0)",
-          "legendFormat": "hibernated 休眠",
+          "legendFormat": "hibernated",
           "refId": "C",
           "range": true
         },
@@ -574,7 +574,7 @@
             "uid": "volc-vmp"
           },
           "expr": "sum(sandboxd_archived) or vector(0)",
-          "legendFormat": "archived 归档",
+          "legendFormat": "archived",
           "refId": "D",
           "range": true
         },
@@ -584,7 +584,7 @@
             "uid": "volc-vmp"
           },
           "expr": "sum(sandboxd_pool_target) or vector(0)",
-          "legendFormat": "target 目标水位",
+          "legendFormat": "target",
           "refId": "E",
           "range": true
         }
@@ -608,7 +608,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "target 目标水位"
+              "options": "target"
             },
             "properties": [
               {
@@ -659,7 +659,7 @@
     {
       "id": 9,
       "type": "row",
-      "title": "② 吞吐 / Throughput — 创建·消耗·回收速率",
+      "title": "② Throughput — claim, release and reap rates",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -672,7 +672,7 @@
     {
       "id": 10,
       "type": "stat",
-      "title": "创建速度 claims/s",
+      "title": "Claims/s",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -720,7 +720,7 @@
     {
       "id": 11,
       "type": "stat",
-      "title": "释放速度 releases/s",
+      "title": "Releases/s",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -768,7 +768,7 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "回收速度 reaps/s",
+      "title": "Reaps/s",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -816,7 +816,7 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "创建速度 by tier (warm / clone / cold) + 消耗 + 回收",
+      "title": "Claims by tier (warm / clone / cold), releases and reaps",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -892,7 +892,7 @@
     {
       "id": 14,
       "type": "row",
-      "title": "③ 认领延迟 / Claim latency",
+      "title": "③ Claim latency",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -905,7 +905,7 @@
     {
       "id": 15,
       "type": "stat",
-      "title": "平均认领延迟 (ms)",
+      "title": "Mean claim latency (ms)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -969,7 +969,7 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "平均认领延迟随时间 (ms)",
+      "title": "Mean claim latency over time (ms)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -988,7 +988,7 @@
             "uid": "volc-vmp"
           },
           "expr": "(sum(rate(sandboxd_claim_seconds_total[5m])) / sum(rate(sandboxd_claims_total[5m])) * 1000) or vector(0)",
-          "legendFormat": "平均 (fleet)",
+          "legendFormat": "mean (fleet)",
           "refId": "A",
           "range": true
         },
@@ -1036,7 +1036,7 @@
     {
       "id": 17,
       "type": "row",
-      "title": "④ 生命周期事件 / Lifecycle transitions",
+      "title": "④ Lifecycle transitions",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1164,7 +1164,7 @@
     {
       "id": 19,
       "type": "row",
-      "title": "⑤ 每节点分布 / Per-node (26 nodes)",
+      "title": "⑤ Per node",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1177,7 +1177,7 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "Warm 每节点",
+      "title": "Warm per node",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -1230,7 +1230,7 @@
     {
       "id": 21,
       "type": "timeseries",
-      "title": "Claimed 每节点",
+      "title": "Claimed per node",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"

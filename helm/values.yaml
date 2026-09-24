@@ -9,7 +9,7 @@ apiserver:
   # the pool RBAC and the leader-election lease this chart installs with it.
   warmPoolDriver: true
   # sandboxdToken names a Secret holding the fleet-wide sandboxd api_token.
-  # Without it the Create/Delete write path stays disabled and fails closed.
+  # Without it node-local calls carry no token, and a node that requires one refuses them.
   sandboxdToken:
     secretName: ""
     key: token

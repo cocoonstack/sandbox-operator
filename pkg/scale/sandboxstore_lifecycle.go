@@ -129,7 +129,6 @@ func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (Sandbo
 		MemTotalBytes:   st.MemTotalBytes,
 		MemUsedBytes:    st.MemUsedBytes,
 		MemUsedMeasured: st.MemUsedMeasured,
-		Paused:          st.Hibernated,
 		MeasuredAt:      st.MeasuredAt,
 	}, nil
 }
@@ -143,7 +142,7 @@ func (s *scatterGatherStore) Read(ctx context.Context, node, id string) (Sandbox
 	if err != nil {
 		return SandboxRecord{}, nodeVerbError(err, "read", id, node)
 	}
-	return SandboxRecord{Token: row.Token, Paused: row.Hibernated || row.Archived, Deadline: row.Deadline}, nil
+	return SandboxRecord{Token: row.Token, Paused: isPaused(row), Deadline: row.Deadline}, nil
 }
 
 // nodeClient resolves a node's advertised sandboxd address and returns a client

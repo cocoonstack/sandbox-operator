@@ -364,6 +364,26 @@ func TestLifecycleVerbsOnAReapedSandboxAre404(t *testing.T) {
 	}
 }
 
+func TestPauseAndForkTreatAnArchivedSandboxAsPaused(t *testing.T) {
+	for _, tc := range []struct{ path, body string }{
+		{"/sandboxes/sb-abc/pause", ``},
+		{"/sandboxes/sb-abc/fork", `{"count":1}`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			store := &lifecycleStore{nodeArchived: true}
+			store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+
+			if w := do(t, h, http.MethodPost, tc.path, tc.body, testKey); w.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409: the node holds the claim archived, which is paused: %s", w.Code, w.Body.String())
+			}
+			if store.pausedID != "" || store.forkedID != "" {
+				t.Errorf("the verb reached the node (paused %q, forked %q) for an archived sandbox", store.pausedID, store.forkedID)
+			}
+		})
+	}
+}
+
 type lifecycleStore struct {
 	fakeStore
 
@@ -384,16 +404,17 @@ type lifecycleStore struct {
 	err                    error
 	statsErr               error
 
-	nodePaused bool
+	nodePaused   bool
+	nodeArchived bool
 }
 
 func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.SandboxRecord, error) {
 	f.readNode, f.readID = node, id
-	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused, Deadline: f.deadline}, f.statsErr
+	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused || f.nodeArchived, Deadline: f.deadline}, f.statsErr
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{Paused: f.nodePaused, CPUCount: 1, MemTotalBytes: 512 << 20}, f.statsErr
+	return scale.SandboxStats{CPUCount: 1, MemTotalBytes: 512 << 20}, f.statsErr
 }
 
 func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {

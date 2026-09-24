@@ -59,9 +59,6 @@ type ClaimSpec struct {
 	Net        string `json:"net,omitempty"`
 	Size       string `json:"size,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
-	// NoRedirect is set by an SDK retrying at a redirect target; this client does
-	// not chase redirects (a redirect-only reply is a capacity miss), so it stays false.
-	NoRedirect bool `json:"no_redirect,omitempty"`
 	// ClaimRef is the k8s "<namespace>/<name>" of the Sandbox this claim is
 	// created for. sandboxd records it on the claim and echoes it in its
 	// operator index, so the aggregated read path can map a listed sandbox back
@@ -92,8 +89,7 @@ type PoolSpec struct {
 	Warm     int    `json:"warm"`
 }
 
-// NodePool is one pool's live state in a NodeInfo. Only the fields the
-// warm-pool driver reports on are decoded.
+// NodePool is one pool's live state in a NodeInfo.
 type NodePool struct {
 	Key       PoolKey `json:"key"`
 	Warm      int     `json:"warm"`
@@ -114,8 +110,8 @@ type NodeInfo struct {
 // Client talks to a single sandboxd instance. It is safe for concurrent use.
 type Client struct {
 	baseURL string
-	// token is the node api_token (root or tenant) presented on the claim verb.
-	// Release authenticates with the sandbox's own token, passed per call.
+	// token is the node api_token (root or tenant) every other verb presents;
+	// Release and IsOwner authenticate with a token passed per call.
 	token string
 	hc    *http.Client
 }
@@ -182,7 +178,7 @@ func (c *Client) SetPools(ctx context.Context, pools []PoolSpec) (*NodeInfo, err
 		pools = []PoolSpec{}
 	}
 	var info NodeInfo
-	if err := c.putJSON(ctx, "/v1/pools", struct {
+	if err := c.sendJSON(ctx, http.MethodPut, "/v1/pools", struct {
 		Pools []PoolSpec `json:"pools"`
 	}{Pools: pools}, &info); err != nil {
 		return nil, err
@@ -200,10 +196,10 @@ func (c *Client) Info(ctx context.Context) (*NodeInfo, error) {
 	return &info, nil
 }
 
-// Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM. It
-// authenticates with the sandbox's own token. A 404 (unknown id or already gone)
-// is treated as success, matching the SDK. Callers must only reach this on
-// owner-authorized teardown — see the SandboxStore.Release contract.
+// Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM,
+// authenticated with the sandbox's own token or the node api_token. A 404
+// (unknown id or already gone) is success, matching the SDK. Callers must only
+// reach this on owner-authorized teardown — see the SandboxStore.Release contract.
 func (c *Client) Release(ctx context.Context, id, token string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: release requires a sandbox id")

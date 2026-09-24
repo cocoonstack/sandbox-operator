@@ -28,12 +28,9 @@ import (
 // from node inventory, and Delete reads it to release exactly the node-local
 // microVM that was handed over.
 const (
-	// ClaimIDAnnotation carries the sandboxd claim id of a claimed sandbox. It is
-	// defined in package scale (whose store stamps it on synthesized reads); this
-	// alias keeps apiserver call sites writing and reading the identical key.
+	// ClaimIDAnnotation carries the sandboxd claim id of a claimed sandbox.
 	ClaimIDAnnotation = scale.ClaimIDAnnotation
-	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339); the
-	// same scale-defined key the synthesized read path stamps from inventory.
+	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339).
 	DeadlineAnnotation = scale.DeadlineAnnotation
 	// AddressAnnotation carries the delivered sandbox connection address.
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
@@ -111,8 +108,7 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 		}
 	}
 
-	namespace := genericapirequest.NamespaceValue(ctx)
-	namespace = cmp.Or(namespace, sb.Namespace)
+	namespace := cmp.Or(genericapirequest.NamespaceValue(ctx), sb.Namespace)
 	name := sb.Name
 	if name == "" && sb.GenerateName != "" {
 		name = names.SimpleNameGenerator.GenerateName(sb.GenerateName)
@@ -142,7 +138,7 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 	if options != nil && len(options.DryRun) > 0 {
 		return nil, false, apierrors.NewBadRequest(dryRunUnsupported)
 	}
-	// owner-authorized teardown of the Sandbox resource only; pod state never reaches here
+	// Owner-authorized teardown of the Sandbox resource only; pod state never reaches here.
 	namespace := genericapirequest.NamespaceValue(ctx)
 	sb, err := r.store.Get(ctx, namespace, name)
 	if err != nil {
@@ -157,14 +153,13 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 
 	node := sb.Status.NodeName
 	if node == "" {
-		// reporting success here would leak the microVM to its TTL
+		// Reporting success here would leak the microVM to its TTL.
 		return nil, false, apierrors.NewInternalError(fmt.Errorf(
 			"cannot delete sandbox %s/%s: inventory entry names no owning node; refusing to report it released",
 			namespace, name))
 	}
 	claimID := sb.Annotations[ClaimIDAnnotation]
 	if claimID == "" {
-		// releasing by the k8s name would target the wrong claim (or none)
 		return nil, false, apierrors.NewInternalError(fmt.Errorf(
 			"cannot delete sandbox %s/%s: node %q inventory carries no %s (sandboxd claim id); refusing to release by name",
 			namespace, name, node, ClaimIDAnnotation))

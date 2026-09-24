@@ -16,7 +16,7 @@
 //	GET /snapshots, DELETE /templates/{id}     -> list or delete checkpoints
 //	GET /templates, /v2/templates              -> advertised warm-pool keys
 //	GET /sandboxes/{id}/metrics                -> node resource statistics
-//	POST timeout|refreshes, GET /health         -> existence or liveness checks
+//	POST timeout|refreshes, GET /health         -> lease renewal, liveness
 package e2bcompat
 
 import (
@@ -83,9 +83,6 @@ type Options struct {
 	APIKeys []string //nolint:gosec // the field holds API keys by design
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
-	// SizeClass pins the warm-pool size axis for compat claims (default
-	// "small"); e2b's NewSandbox carries no size selector.
-	SizeClass string
 	// Inventory enumerates the fleet's nodes and their advertised pools. It is
 	// required by the surfaces that are fleet-wide rather than sandbox-scoped
 	// (template listing, snapshot listing); without it those report an error
@@ -120,7 +117,6 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	opts.Namespace = cmp.Or(opts.Namespace, "default")
 	opts.EnvdVersion = cmp.Or(opts.EnvdVersion, DefaultEnvdVersion)
 	opts.DefaultTimeoutSeconds = cmp.Or(opts.DefaultTimeoutSeconds, DefaultTimeoutSeconds)
-	opts.SizeClass = cmp.Or(opts.SizeClass, scale.SizeClassSmall)
 	keys := make(map[string]string, len(opts.APIKeys))
 	for _, entry := range opts.APIKeys {
 		switch fields := strings.Fields(entry); len(fields) {
@@ -136,8 +132,6 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if len(keys) == 0 && !opts.AllowAnonymous {
 		return nil, errors.New("e2bcompat: no API key configured; set one or enable anonymous access explicitly")
 	}
-	// The SDK derives the envd host from the domain, so an empty one hands out
-	// sandboxes whose data plane the client cannot address at all.
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("e2bcompat: no domain configured; the SDK cannot reach a sandbox without one")
 	}
@@ -236,7 +230,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	pool := scale.PoolKey{
 		Template: req.TemplateID,
 		Net:      netFor(req.AllowInternetAccess),
-		Size:     s.opts.SizeClass,
+		Size:     scale.SizeClassSmall,
 	}
 	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, s.timeoutSeconds(req.Timeout))
 	if err != nil {
@@ -293,7 +287,7 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.detailFor(sb))
 }
 
-// deleteSandbox releases the claim back to its owning node's warm pool.
+// deleteSandbox releases the claim, which destroys its microVM on the owning node.
 func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
@@ -307,10 +301,7 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
-	// Release against the raw node-local claim id, never the id as the client
-	// spelled it: the published id is a DNS-safe rendering, and sandboxd knows
-	// only the original.
-	claimID := sb.Annotations[scale.ClaimIDAnnotation]
+	claimID := claimIDOf(sb)
 	if err := s.store.Release(r.Context(), node, claimID); err != nil {
 		s.opts.Log.Error(err, "e2b delete: release failed", "sandboxID", id, "claimID", claimID, "node", node)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
@@ -404,7 +395,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 	return SandboxDetail{
 		TemplateID:  templateOf(sb),
-		SandboxID:   PublicID(sb.Annotations[scale.ClaimIDAnnotation]),
+		SandboxID:   PublicID(claimIDOf(sb)),
 		ClientID:    sb.Status.NodeName,
 		StartedAt:   started.UTC().Format(time.RFC3339),
 		EndAt:       endAt.UTC().Format(time.RFC3339),

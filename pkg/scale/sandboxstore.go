@@ -61,7 +61,7 @@ type SandboxStore interface {
 	// Get resolves one sandbox from the cache-fed node inventories, or from its
 	// node when the node has not republished.
 	Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error)
-	// Watch merges per-node inventory streams into a single sandbox watch.
+	// Watch emits sandbox events as the node inventories change.
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)
 	// Claim delivers a warm microVM for namespace/name from a node advertising warm
 	// capacity for pool, returning the node-local assignment (claim id, node,
@@ -71,7 +71,7 @@ type SandboxStore interface {
 	// When no node has a warm microVM for the pool it returns an error for which
 	// IsNoWarmCapacity is true, so the caller can surface a retryable 503.
 	Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error)
-	// Release returns the claimed microVM id to its owning node's pool. It is
+	// Release destroys the claimed microVM on its owning node. It is
 	// owner-authorized teardown only (the Sandbox resource itself being deleted);
 	// it never destroys a VM on pod state alone. The node's sandboxd address is
 	// resolved from its NodeInventory.
@@ -155,7 +155,6 @@ type SandboxStats struct {
 	MemTotalBytes   int64
 	MemUsedBytes    int64
 	MemUsedMeasured bool
-	Paused          bool
 	MeasuredAt      time.Time
 }
 

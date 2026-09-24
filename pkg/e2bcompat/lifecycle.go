@@ -218,8 +218,6 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// deleteSnapshot also serves DELETE /templates/{templateID}: e2b addresses
-// snapshots as templates on delete.
 func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	snapshotID := r.PathValue("snapshotID")
 	snaps, complete, err := s.snapshotsOf(r)
@@ -379,10 +377,10 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 // back to the cached label.
 func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool, error) {
 	if node, id := sb.Status.NodeName, claimIDOf(sb); node != "" && id != "" {
-		st, err := s.store.Stats(ctx, node, id)
+		rec, err := s.store.Read(ctx, node, id)
 		switch {
 		case err == nil:
-			return st.Paused, nil
+			return rec.Paused, nil
 		case k8serrors.IsNotFound(err):
 			return false, errSandboxNotFound
 		}

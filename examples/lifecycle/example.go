@@ -63,6 +63,89 @@ type options struct {
 	keep       bool
 }
 
+// e2bClient is a minimal client for the e2b REST contract. The real e2b SDKs
+// (JS and Python) speak exactly this and need no changes — point E2B_API_URL at
+// the server. This exists because there is no official Go SDK.
+type e2bClient struct {
+	base string
+	key  string
+	hc   http.Client
+}
+
+func (e *e2bClient) health(ctx context.Context) error {
+	code, err := e.status(ctx, http.MethodGet, "/health", nil)
+	if err != nil {
+		return err
+	}
+	if code/100 != 2 {
+		return fmt.Errorf("health returned %d", code)
+	}
+	return nil
+}
+
+func (e *e2bClient) request(ctx context.Context, method, path string, body any) (*http.Request, error) {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, e.base+path, rdr)
+	if err != nil {
+		return nil, err
+	}
+	if e.key != "" {
+		req.Header.Set("X-API-KEY", e.key)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+// do performs a request and decodes a 2xx JSON reply into out.
+func (e *e2bClient) do(ctx context.Context, method, path string, body, out any) error {
+	req, err := e.request(ctx, method, path, body)
+	if err != nil {
+		return err
+	}
+	resp, err := e.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+	if out == nil || len(payload) == 0 {
+		return nil
+	}
+	return json.Unmarshal(payload, out)
+}
+
+// status performs a request and returns only its status code, for the verbs
+// whose contract IS the status code.
+func (e *e2bClient) status(ctx context.Context, method, path string, body any) (int, error) {
+	req, err := e.request(ctx, method, path, body)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := e.hc.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
+}
+
 func main() {
 	var o options
 	flag.StringVar(&o.kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "path to a kubeconfig; empty uses in-cluster config")
@@ -385,7 +468,7 @@ func runE2B(ctx context.Context, o options, k8sCheckpoint string) error {
 	} else if code/100 != 2 {
 		return fmt.Errorf("timeout returned %d", code)
 	}
-	stepf("timeout", "acknowledged (the TTL is fixed at claim time)")
+	stepf("timeout", "lease renewed on the owning node")
 
 	if code, err := e.status(ctx, http.MethodPost, "/sandboxes/"+id+"/refreshes",
 		map[string]any{"duration": 60}); err != nil {
@@ -409,89 +492,6 @@ func runE2B(ctx context.Context, o options, k8sCheckpoint string) error {
 	}
 	stepf("delete", "released %s", id)
 	return nil
-}
-
-// e2bClient is a minimal client for the e2b REST contract. The real e2b SDKs
-// (JS and Python) speak exactly this and need no changes — point E2B_API_URL at
-// the server. This exists because there is no official Go SDK.
-type e2bClient struct {
-	base string
-	key  string
-	hc   http.Client
-}
-
-func (e *e2bClient) health(ctx context.Context) error {
-	code, err := e.status(ctx, http.MethodGet, "/health", nil)
-	if err != nil {
-		return err
-	}
-	if code/100 != 2 {
-		return fmt.Errorf("health returned %d", code)
-	}
-	return nil
-}
-
-func (e *e2bClient) request(ctx context.Context, method, path string, body any) (*http.Request, error) {
-	var rdr io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		rdr = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, e.base+path, rdr)
-	if err != nil {
-		return nil, err
-	}
-	if e.key != "" {
-		req.Header.Set("X-API-KEY", e.key)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	return req, nil
-}
-
-// do performs a request and decodes a 2xx JSON reply into out.
-func (e *e2bClient) do(ctx context.Context, method, path string, body, out any) error {
-	req, err := e.request(ctx, method, path, body)
-	if err != nil {
-		return err
-	}
-	resp, err := e.hc.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(payload)))
-	}
-	if out == nil || len(payload) == 0 {
-		return nil
-	}
-	return json.Unmarshal(payload, out)
-}
-
-// status performs a request and returns only its status code, for the verbs
-// whose contract IS the status code.
-func (e *e2bClient) status(ctx context.Context, method, path string, body any) (int, error) {
-	req, err := e.request(ctx, method, path, body)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := e.hc.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode, nil
 }
 
 func section(name string) { fmt.Printf("\n=== %s ===\n", name) }

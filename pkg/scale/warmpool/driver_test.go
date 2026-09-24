@@ -46,12 +46,7 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 				s.Template, s.Net, s.Size, want.Template, want.Net, want.Size)
 		}
 		sum += s.Warm
-		if s.Warm < minWarm {
-			minWarm = s.Warm
-		}
-		if s.Warm > maxWarm {
-			maxWarm = s.Warm
-		}
+		minWarm, maxWarm = min(minWarm, s.Warm), max(maxWarm, s.Warm)
 	}
 	if sum != 100 {
 		t.Fatalf("targets sum to %d, want 100", sum)
@@ -171,7 +166,6 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 	}
 	sum := 0
 	for addr, specs := range setter.byAddr {
-
 		if len(specs) != 1 {
 			t.Fatalf("node %s got %d specs, want 1 aggregated (no duplicate key): %+v", addr, len(specs), specs)
 		}
@@ -289,17 +283,6 @@ func TestEveryTriggerCollapsesOntoTheSyncKey(t *testing.T) {
 	}
 }
 
-func TestApplyBoundsEachNodeCall(t *testing.T) {
-	d, setter, inv, _ := newTestDriver(t, warmPool("p", 3), template())
-	putNodes(inv, 2)
-	if err := d.reconcileOnce(t.Context()); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if !setter.sawDeadline {
-		t.Fatal("SetPools ran without a context deadline; a silent node would block reconcile forever")
-	}
-}
-
 func BenchmarkReconcileOnce(b *testing.B) {
 	objs := []client.Object{template()}
 	for i := range 4 {
@@ -322,8 +305,7 @@ type fakeSetter struct {
 
 	warm map[string]int
 
-	failAddr    string
-	sawDeadline bool
+	failAddr string
 }
 
 func (f *fakeSetter) reportWarm(addr string, n int) {
@@ -344,10 +326,9 @@ type fakeNode struct {
 	parent *fakeSetter
 }
 
-func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
+func (n *fakeNode) SetPools(_ context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
 	n.parent.mu.Lock()
 	defer n.parent.mu.Unlock()
-	_, n.parent.sawDeadline = ctx.Deadline()
 	if n.parent.failAddr == n.addr {
 		return nil, errors.New("node unreachable")
 	}
@@ -356,9 +337,8 @@ func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sa
 	info := &sandboxd.NodeInfo{}
 	for _, p := range pools {
 		info.Pools = append(info.Pools, sandboxd.NodePool{
-			Key:  sandboxd.PoolKey{Template: p.Template, Net: p.Net, Size: p.Size},
-			Warm: n.parent.warm[n.addr],
-
+			Key:    sandboxd.PoolKey{Template: p.Template, Net: p.Net, Size: p.Size},
+			Warm:   n.parent.warm[n.addr],
 			Target: p.Warm,
 		})
 	}
