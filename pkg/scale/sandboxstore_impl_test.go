@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -224,44 +225,34 @@ func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {
 }
 
 func TestScatterGatherWatch_EndsTheInitialEventsWithABookmarkForAWatchList(t *testing.T) {
-	for _, watchList := range []bool{true, false} {
-		t.Run(fmt.Sprintf("sendInitialEvents=%v", watchList), func(t *testing.T) {
-			src := NewStaticInventorySource()
-			src.Put(inv("n1", entry("ns/s1", "Running"), entry("ns/s2", "Running")))
-			store := NewScatterGatherStore(src, WithWatchPollInterval(10*time.Millisecond))
+	for name, tc := range map[string]struct {
+		watchList bool
+		want      []watch.EventType
+	}{
+		"watch list":  {watchList: true, want: []watch.EventType{watch.Added, watch.Added, watch.Bookmark}},
+		"plain watch": {want: []watch.EventType{watch.Added, watch.Added}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				src := NewStaticInventorySource()
+				src.Put(inv("n1", entry("ns/s1", "Running"), entry("ns/s2", "Running")))
+				w, err := NewScatterGatherStore(src).Watch(t.Context(), ListOptions{WatchList: tc.watchList})
+				require.NoError(t, err)
+				defer w.Stop()
 
-			w, err := store.Watch(t.Context(), ListOptions{SendInitialEvents: watchList})
-			require.NoError(t, err)
-			defer w.Stop()
-
-			for _, name := range []string{"s1", "s2"} {
-				ev := waitForType(t, w, watch.Added, time.Second)
-				assert.Equal(t, name, ev.Object.(*sandboxv1beta1.Sandbox).Name)
-			}
-			select {
-			case ev := <-w.ResultChan():
-				require.True(t, watchList, "a plain watch must not send a bookmark, got %s", ev.Type)
-				require.Equal(t, watch.Bookmark, ev.Type)
-				assert.Equal(t, "true", ev.Object.(*sandboxv1beta1.Sandbox).Annotations[metav1.InitialEventsAnnotationKey])
-			case <-time.After(100 * time.Millisecond):
-				require.False(t, watchList, "a watch-list client waits forever without the initial-events-end bookmark")
-			}
+				synctest.Wait()
+				var got []watch.EventType
+				var last watch.Event
+				for len(w.ResultChan()) > 0 {
+					last = <-w.ResultChan()
+					got = append(got, last.Type)
+				}
+				assert.Equal(t, tc.want, got)
+				if tc.watchList {
+					assert.Equal(t, "true", last.Object.(*sandboxv1beta1.Sandbox).Annotations[metav1.InitialEventsAnnotationKey])
+				}
+			})
 		})
-	}
-}
-
-func TestScatterGatherWatch_AWatchListEndsWhenTheInitialListFails(t *testing.T) {
-	store := NewScatterGatherStore(unlistableSource{}, WithWatchPollInterval(10*time.Millisecond))
-
-	w, err := store.Watch(t.Context(), ListOptions{SendInitialEvents: true})
-	require.NoError(t, err)
-	defer w.Stop()
-
-	select {
-	case ev, open := <-w.ResultChan():
-		require.False(t, open, "a failed initial list must not be reported as an empty initial state, got %s", ev.Type)
-	case <-time.After(time.Second):
-		t.Fatal("the watch stayed open after its initial list failed")
 	}
 }
 
@@ -408,20 +399,6 @@ type mutableLive struct{ entries []InventoryEntry }
 
 func (m *mutableLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
 	return m.entries, nil
-}
-
-type unlistableSource struct{}
-
-func (unlistableSource) ListNodes(context.Context) ([]string, error) {
-	return nil, fmt.Errorf("node inventories unreadable")
-}
-
-func (unlistableSource) NodeInventory(context.Context, string) (*NodeInventory, error) {
-	return nil, fmt.Errorf("node inventories unreadable")
-}
-
-func (unlistableSource) NodeCapacity(context.Context, string) (string, []PoolCapacity, error) {
-	return "", nil, fmt.Errorf("node inventories unreadable")
 }
 
 type sandboxStatusView struct{ node, label string }

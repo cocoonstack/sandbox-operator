@@ -75,15 +75,15 @@ one sandbox do not wait for that publish, on any apiserver replica: a `Get` by
 name asks the nodes for the claim recorded under `<namespace>/<name>`, and a
 lookup by claim id — the e2b surface and the envd proxy — asks them for that
 id. A deleted sandbox stays readable until its node publishes, so `kubectl
-delete` (which waits through a watch-list stream, ended by the
-`k8s.io/initial-events-end` bookmark) returns once that publish drops the
-entry. A fork child is
+delete` returns only once that publish drops the entry. A fork child is
 recorded under `<namespace>/<claim id>`, so both lookups find it at once. A
 checkpoint branch carries no claim ref: by claim id it answers at once, by name
 only after its node publishes.
 
 `watch` is served by re-deriving that view and diffing it, so it inherits the
-same lag. Label selectors work against the axes the store stamps:
+same lag. A watch-list request (`sendInitialEvents=true`, what kubectl and
+client-go informers send) gets the `k8s.io/initial-events-end` bookmark after
+its initial events. Label selectors work against the axes the store stamps:
 `sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`. The
 template label carries the pool template as is, and a registry image reference
 is not a valid label value (`/` and `:` are not allowed): a selector that names

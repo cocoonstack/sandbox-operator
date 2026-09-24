@@ -136,19 +136,18 @@ func TestTTLSecondsForSandbox(t *testing.T) {
 }
 
 func TestToScaleListOptions_CarriesWatchListMode(t *testing.T) {
-	yes, no := true, false
 	for name, tc := range map[string]struct {
 		options *metainternalversion.ListOptions
 		want    bool
 	}{
 		"no options":                         {},
 		"plain watch":                        {options: &metainternalversion.ListOptions{Watch: true}},
-		"watch list":                         {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: &yes, AllowWatchBookmarks: true}, want: true},
-		"initial events without bookmarks":   {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: &yes}},
-		"initial events explicitly declined": {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: &no, AllowWatchBookmarks: true}},
+		"watch list":                         {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: new(true), AllowWatchBookmarks: true}, want: true},
+		"initial events without bookmarks":   {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: new(true)}},
+		"initial events explicitly declined": {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: new(false), AllowWatchBookmarks: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, toScaleListOptions(nsCtx(t, "ns"), tc.options).SendInitialEvents)
+			assert.Equal(t, tc.want, toScaleListOptions(nsCtx(t, "ns"), tc.options).WatchList)
 		})
 	}
 }
