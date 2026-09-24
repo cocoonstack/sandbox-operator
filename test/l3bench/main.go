@@ -37,7 +37,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	genericapiserver "k8s.io/apiserver/pkg/server"
@@ -155,7 +154,7 @@ func main() {
 		failf("etcd object count %d != nodes+pools (%d+%d)", etcdObjectCount, nodes, pools)
 	}
 
-	store := scale.NewScatterGatherStore(source, scale.WithLogger(logr.Discard()), scale.WithWatchPollInterval(50*time.Millisecond))
+	store := scale.NewScatterGatherStore(source, scale.WithWatchPollInterval(50*time.Millisecond))
 	server, err := newInProcessServer(store)
 	must(err)
 	ts := httptest.NewServer(server.Handler)

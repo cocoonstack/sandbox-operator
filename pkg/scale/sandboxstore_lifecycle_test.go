@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,7 +20,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))
 	f := &recordingFactory{verbErr: &sandboxd.HTTPError{StatusCode: http.StatusNotFound, Message: "unknown sandbox"}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 	ctx := t.Context()
 
 	_, statsErr := store.Stats(ctx, "n1", "sb_gone")
@@ -49,7 +48,7 @@ func TestReadReportsTheClaimAsItsNodeHoldsIt(t *testing.T) {
 	src.Put(poolInv("n1", "n1:7777"))
 	deadline := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	f := &recordingFactory{rows: map[string][]sandboxd.SandboxSummary{"n1:7777": {{ID: "sb_live", Token: "secret", Hibernated: true, Deadline: deadline}}}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	rec, err := store.Read(t.Context(), "n1", "sb_live")
 	require.NoError(t, err)
@@ -82,7 +81,7 @@ func TestForkRecordsChildrenUnderTheNamespace(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))
 	f := &recordingFactory{}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Fork(t.Context(), "team-a", "n1", "sb_live", 2, 60)
 	require.NoError(t, err)
@@ -93,7 +92,7 @@ func TestLifecycleVerbsKeepANodeRejectionsStatus(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777"))
 	f := &recordingFactory{verbErr: &sandboxd.HTTPError{StatusCode: http.StatusBadRequest, Message: "count 9999 exceeds max_fork_count"}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Fork(t.Context(), "ns", "n1", "sb_live", 9999, 0)
 	require.Error(t, err)
@@ -121,7 +120,7 @@ func TestReleaseOfAReapedSandboxIsASuccessThroughTheRealClient(t *testing.T) {
 	defer srv.Close()
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", strings.TrimPrefix(srv.URL, "http://")))
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", NewSandboxdClientFactory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", NewSandboxdClientFactory()))
 
 	require.NoError(t, store.Release(t.Context(), "n1", "sb_gone"), "the node's 404 on release means already gone, which the client reports as success")
 	require.Equal(t, int64(1), releases.Load())

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/projecteru2/core/log"
 	"golang.org/x/sync/errgroup"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
@@ -41,12 +42,12 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "pause")
+		s.writeLookupError(w, r, err, "pause")
 		return
 	}
 	paused, err := s.isPaused(r.Context(), sb)
 	if err != nil {
-		s.writeLookupError(w, err, id, "pause")
+		s.writeLookupError(w, r, err, "pause")
 		return
 	}
 	if paused {
@@ -54,7 +55,7 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.Pause(r.Context(), sb.Status.NodeName, claimIDOf(sb)); err != nil {
-		s.writeVerbError(w, err, id, "pause", "failed to pause the sandbox")
+		s.writeVerbError(w, r, err, "pause", "failed to pause the sandbox")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -76,30 +77,30 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "connect")
+		s.writeLookupError(w, r, err, "connect")
 		return
 	}
 	node, claimID := sb.Status.NodeName, claimIDOf(sb)
 	rec, err := s.store.Read(r.Context(), node, claimID)
 	if err != nil {
-		s.writeVerbError(w, err, id, "connect: read", "failed to connect the sandbox")
+		s.writeVerbError(w, r, err, "connect: read", "failed to connect the sandbox")
 		return
 	}
 	status := http.StatusOK
 	if rec.Paused {
 		if err = s.store.Resume(r.Context(), node, claimID); err != nil {
-			s.writeVerbError(w, err, id, "connect: resume", "failed to resume the sandbox")
+			s.writeVerbError(w, r, err, "connect: resume", "failed to resume the sandbox")
 			return
 		}
 		status = http.StatusCreated
 		if rec, err = s.store.Read(r.Context(), node, claimID); err != nil {
-			s.writeVerbError(w, err, id, "connect: read", "failed to connect the sandbox")
+			s.writeVerbError(w, r, err, "connect: read", "failed to connect the sandbox")
 			return
 		}
 	}
 	if ttl := s.timeoutSeconds(req.Timeout); time.Now().Add(time.Duration(ttl) * time.Second).After(rec.Deadline) {
 		if _, err := s.store.Renew(r.Context(), node, claimID, ttl); err != nil {
-			s.writeVerbError(w, err, id, "connect: renew", "failed to connect the sandbox")
+			s.writeVerbError(w, r, err, "connect: renew", "failed to connect the sandbox")
 			return
 		}
 	}
@@ -139,12 +140,12 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "fork")
+		s.writeLookupError(w, r, err, "fork")
 		return
 	}
 	paused, err := s.isPaused(r.Context(), sb)
 	if err != nil {
-		s.writeLookupError(w, err, id, "fork")
+		s.writeLookupError(w, r, err, "fork")
 		return
 	}
 	if paused {
@@ -154,7 +155,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	children, err := s.store.Fork(r.Context(), s.namespace(r), sb.Status.NodeName, claimIDOf(sb), int(count), s.timeoutSeconds(req.Timeout))
 	if err != nil {
-		s.writeVerbError(w, err, id, "fork", "failed to fork the sandbox")
+		s.writeVerbError(w, r, err, "fork", "failed to fork the sandbox")
 		return
 	}
 	template := templateOf(sb)
@@ -182,17 +183,17 @@ func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "snapshot")
+		s.writeLookupError(w, r, err, "snapshot")
 		return
 	}
 	name, err := scale.CheckpointName(s.namespace(r), req.Name)
 	if err != nil {
-		s.writeVerbError(w, err, id, "snapshot", "failed to snapshot the sandbox")
+		s.writeVerbError(w, r, err, "snapshot", "failed to snapshot the sandbox")
 		return
 	}
 	snap, err := s.store.Snapshot(r.Context(), sb.Status.NodeName, claimIDOf(sb), name)
 	if err != nil {
-		s.writeVerbError(w, err, id, "snapshot", "failed to snapshot the sandbox")
+		s.writeVerbError(w, r, err, "snapshot", "failed to snapshot the sandbox")
 		return
 	}
 	snap.Name = req.Name
@@ -203,7 +204,7 @@ func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	snaps, _, err := s.snapshotsOf(r)
 	if err != nil {
-		s.opts.Log.Error(err, "e2b list snapshots failed")
+		log.WithFunc("e2bcompat.listSnapshots").Error(r.Context(), err, "e2b list snapshots failed")
 		writeError(w, http.StatusInternalServerError, "failed to list snapshots")
 		return
 	}
@@ -222,7 +223,7 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	snapshotID := r.PathValue("snapshotID")
 	snaps, complete, err := s.snapshotsOf(r)
 	if err != nil {
-		s.opts.Log.Error(err, "e2b delete snapshot: listing failed", "snapshotID", snapshotID)
+		log.WithFunc("e2bcompat.deleteSnapshot").Errorf(r.Context(), err, "e2b delete snapshot: listing failed snapshotID=%s", snapshotID)
 		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
 		return
 	}
@@ -236,7 +237,7 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteSnapshot(r.Context(), snaps[i].Node, snapshotID); err != nil {
-		s.opts.Log.Error(err, "e2b delete snapshot failed", "node", snaps[i].Node, "snapshotID", snapshotID)
+		log.WithFunc("e2bcompat.deleteSnapshot").Errorf(r.Context(), err, "e2b delete snapshot failed node=%s snapshotID=%s", snaps[i].Node, snapshotID)
 		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
 		return
 	}
@@ -259,7 +260,7 @@ func (s *Server) snapshotsOf(r *http.Request) (snaps []scale.Snapshot, complete 
 		g.Go(func() error {
 			snaps, err := s.store.Snapshots(r.Context(), node)
 			if err != nil {
-				s.opts.Log.Error(err, "e2b snapshots: node failed", "node", node)
+				log.WithFunc("e2bcompat.snapshotsOf").Errorf(r.Context(), err, "e2b snapshots: node failed node=%s", node)
 				return nil
 			}
 			answered[i] = true
@@ -283,12 +284,12 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "metrics")
+		s.writeLookupError(w, r, err, "metrics")
 		return
 	}
 	st, err := s.store.Stats(r.Context(), sb.Status.NodeName, claimIDOf(sb))
 	if err != nil {
-		s.writeVerbError(w, err, id, "metrics", "failed to read sandbox metrics")
+		s.writeVerbError(w, r, err, "metrics", "failed to read sandbox metrics")
 		return
 	}
 	at := st.MeasuredAt
@@ -311,7 +312,7 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 	nodes, err := s.inventories(r)
 	if err != nil {
-		s.opts.Log.Error(err, "e2b list templates failed")
+		log.WithFunc("e2bcompat.listTemplates").Error(r.Context(), err, "e2b list templates failed")
 		writeError(w, http.StatusInternalServerError, "failed to list templates")
 		return
 	}
@@ -355,7 +356,7 @@ func (s *Server) inventories(r *http.Request) ([]*scale.NodeInventory, error) {
 		if err != nil {
 			// A partitioned node is skipped, not fatal — the same rule the
 			// aggregated read path applies.
-			s.opts.Log.Error(err, "e2b: node inventory unavailable", "node", node)
+			log.WithFunc("e2bcompat.inventories").Errorf(r.Context(), err, "e2b: node inventory unavailable node=%s", node)
 			continue
 		}
 		out = append(out, inv)
@@ -388,7 +389,8 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool
 	return sb.Labels[scale.PhaseLabel] == scale.PhaseHibernated, nil
 }
 
-func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg string) {
+func (s *Server) writeVerbError(w http.ResponseWriter, r *http.Request, err error, op, msg string) {
+	id := r.PathValue("sandboxID")
 	if k8serrors.IsNotFound(err) || errors.Is(err, errSandboxNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("sandbox %q not found", id))
 		return
@@ -397,7 +399,7 @@ func (s *Server) writeVerbError(w http.ResponseWriter, err error, id, op, msg st
 		writeError(w, int(se.ErrStatus.Code), se.ErrStatus.Message)
 		return
 	}
-	s.opts.Log.Error(err, "e2b "+op+" failed", "sandboxID", id)
+	log.WithFunc("e2bcompat.writeVerbError").Errorf(r.Context(), err, "e2b %s failed sandboxID=%s", op, id)
 	writeError(w, http.StatusInternalServerError, msg)
 }
 

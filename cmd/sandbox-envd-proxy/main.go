@@ -9,6 +9,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -18,11 +19,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/projecteru2/core/log"
+	"github.com/projecteru2/core/types"
 	"github.com/spf13/pflag"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
+	"github.com/cocoonstack/sandbox-operator/pkg/logbridge"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	"github.com/cocoonstack/sandbox-operator/version"
 )
@@ -57,15 +60,19 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func main() {
-	ctrl.SetLogger(klog.NewKlogr())
 	ctx := ctrl.SetupSignalHandler()
+	level := cmp.Or(os.Getenv("OPERATOR_LOG_LEVEL"), "info")
+	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "setup log: %v\n", err)
+		os.Exit(1)
+	}
+	ctrl.SetLogger(logbridge.New(ctx))
 	o := &options{Addr: ":8443", Namespace: "default"}
 	fs := pflag.NewFlagSet("sandbox-envd-proxy", pflag.ExitOnError)
 	o.addFlags(fs)
 	_ = fs.Parse(os.Args[1:])
 	if err := run(ctx, o); err != nil {
-		klog.ErrorS(err, "sandbox-envd-proxy exited")
-		os.Exit(1)
+		log.WithFunc("main").Fatalf(ctx, err, "sandbox-envd-proxy exited")
 	}
 }
 
@@ -73,7 +80,7 @@ func run(ctx context.Context, o *options) error {
 	if (o.CertFile == "") != (o.KeyFile == "") {
 		return errors.New("--tls-cert-file and --tls-private-key-file must be set together")
 	}
-	klog.InfoS("starting sandbox-envd-proxy", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
+	log.WithFunc("main.run").Infof(ctx, "starting sandbox-envd-proxy version=%s revision=%s builtAt=%s", version.VERSION, version.REVISION, version.BUILTAT)
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
@@ -90,7 +97,6 @@ func run(ctx context.Context, o *options) error {
 	srv, err := envdproxy.NewServer(resolver, envdproxy.Options{
 		Domain:     o.Domain,
 		GuestHTTP2: o.GuestHTTP2,
-		Log:        ctrl.Log.WithName("envd-proxy"),
 	})
 	if err != nil {
 		return err
@@ -109,6 +115,7 @@ func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) e
 		Protocols:         envdproxy.Protocols(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
+	logger := log.WithFunc("main.serveOn")
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
@@ -116,10 +123,10 @@ func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) e
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
 		if shutdownErr := httpSrv.Shutdown(shutdownCtx); shutdownErr != nil {
-			klog.ErrorS(shutdownErr, "envd-proxy shutdown")
+			logger.Error(ctx, shutdownErr, "envd-proxy shutdown")
 		}
 	}()
-	klog.InfoS("serving envd-proxy", "address", o.Addr, "domain", o.Domain, "tls", o.CertFile != "")
+	logger.Infof(ctx, "serving envd-proxy address=%s domain=%s tls=%t", o.Addr, o.Domain, o.CertFile != "")
 	var err error
 	if o.CertFile != "" {
 		httpSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}

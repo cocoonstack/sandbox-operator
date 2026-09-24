@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/go-logr/logr"
 	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -368,7 +367,7 @@ func TestNewServerRequiresADomainAndAResolver(t *testing.T) {
 
 func newTestProxy(t *testing.T, r Resolver, opts ...func(*Options)) http.Handler {
 	t.Helper()
-	o := Options{Domain: testDomain, Log: logr.Discard()}
+	o := Options{Domain: testDomain}
 	for _, fn := range opts {
 		fn(&o)
 	}

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -132,7 +131,7 @@ func TestScatterGatherList_ToleratesPartitionedNode(t *testing.T) {
 	src.Put(inv("n1", entry("ns/s1", "Running")))
 	src.Put(inv("n2", entry("ns/s2", "Running")))
 	src.Partition("n2")
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+	store := NewScatterGatherStore(src)
 
 	list, err := store.List(t.Context(), ListOptions{})
 	require.NoError(t, err)
@@ -291,7 +290,7 @@ func TestNodeInventory_DeepCopyIsIndependent(t *testing.T) {
 func TestWatchSeesAShortLivedSandbox(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(inv("n1", entry("sb-1", "Running")))
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithWatchPollInterval(10*time.Millisecond))
+	store := NewScatterGatherStore(src, WithWatchPollInterval(10*time.Millisecond))
 
 	w, err := store.Watch(t.Context(), ListOptions{})
 	require.NoError(t, err)

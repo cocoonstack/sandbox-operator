@@ -24,8 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
-
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
 )
@@ -139,7 +137,7 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	// hands it to the SDK; the proxy must resolve it back to the claim id.
 	publicID := e2bcompat.PublicID(sandboxID)
 	srv, err := envdproxy.NewServer(staticResolver{claimID: sandboxID, address: node, publicID: publicID},
-		envdproxy.Options{Domain: domain, GuestHTTP2: guestHTTP2, Log: logr.Discard()})
+		envdproxy.Options{Domain: domain, GuestHTTP2: guestHTTP2})
 	if err != nil {
 		return err
 	}
