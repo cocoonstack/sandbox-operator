@@ -4,6 +4,7 @@ package logbridge
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -31,9 +32,8 @@ func (s *sink) Info(_ int, msg string, kvs ...any) {
 
 func (s *sink) Error(err error, msg string, kvs ...any) {
 	if err == nil {
-		// Logr reports anomalies as Error(nil, ...), which core/log drops.
-		log.WithFunc(s.funcName()).Warn(s.ctx, s.line(msg, kvs))
-		return
+		// core/log drops a nil err, and logr and klog.Errorf pass nil for an error with no value.
+		err = errors.New(msg)
 	}
 	log.WithFunc(s.funcName()).Error(s.ctx, err, s.line(msg, kvs))
 }
