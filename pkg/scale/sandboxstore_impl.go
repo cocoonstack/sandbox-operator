@@ -196,7 +196,7 @@ type scatterGatherStore struct {
 }
 
 // NewScatterGatherStore builds the aggregated store over src.
-func NewScatterGatherStore(src InventorySource, opts ...StoreOption) *scatterGatherStore {
+func NewScatterGatherStore(src InventorySource, opts ...StoreOption) SandboxStore {
 	s := &scatterGatherStore{
 		src:         src,
 		concurrency: 16,

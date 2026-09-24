@@ -299,7 +299,7 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []SandboxMetric{{
 		Timestamp:     at.UTC().Format(time.RFC3339),
 		TimestampUnix: at.Unix(),
-		CPUCount:      int32(st.CPUCount), //nolint:gosec // a size tier's CPU count is single digits
+		CPUCount:      int32(st.CPUCount),
 		MemUsed:       st.MemUsedBytes,
 		MemTotal:      st.MemTotalBytes,
 	}})

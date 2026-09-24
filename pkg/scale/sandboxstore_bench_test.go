@@ -59,7 +59,7 @@ func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey)
 	for _, inv := range invs {
 		src.Put(inv)
 	}
-	return NewScatterGatherStore(src), pool
+	return NewScatterGatherStore(src).(*scatterGatherStore), pool
 }
 
 func benchInventories(nodes, perNode int) ([]*NodeInventory, PoolKey) {

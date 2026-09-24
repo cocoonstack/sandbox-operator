@@ -30,13 +30,13 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `name` _string_ | name is the sandbox "<namespace>/<name>"; an unqualified name means the<br />default namespace. |  |  |
-| `id` _string_ | id is the owning node's sandboxd claim id ("sb_..."), the handle its<br />sandbox-release verb needs. The aggregated apiserver surfaces it on the<br />synthesized Sandbox so Delete can release exactly this node-local microVM<br />(releasing by k8s name would target the wrong claim). Empty until the<br />node publishes it. |  |  |
+| `id` _string_ | id is the owning node's sandboxd claim id ("sb_..."), the handle its<br />sandbox-release verb needs. The aggregated apiserver surfaces it on the<br />synthesized Sandbox so Delete can release exactly this node-local microVM<br />(releasing by k8s name would target the wrong claim). Empty until the<br />node publishes it. |  | Optional: \{\} <br /> |
 | `phase` _string_ | phase is the node-reported sandbox phase (e.g. Running). |  |  |
-| `template` _string_ | template is the pool template (base image) the sandbox was claimed from.<br />It is the only place the aggregated read path can recover it: no<br />per-sandbox object holds the pod spec. |  |  |
-| `claimRef` _string_ | claimRef is the "<namespace>/<name>" of the SandboxClaim the sandbox is<br />bound to, if any. |  |  |
-| `addr` _string_ | addr is the sandbox "host:port" address, if published. |  |  |
-| `deadline` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | deadline is the node-granted lease expiry, if published. |  |  |
-| `claimedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | claimedAt is when the node first granted the claim, if published; a renew<br />or a wake moves deadline, never this. |  |  |
+| `template` _string_ | template is the pool template (base image) the sandbox was claimed from.<br />It is the only place the aggregated read path can recover it: no<br />per-sandbox object holds the pod spec. |  | Optional: \{\} <br /> |
+| `claimRef` _string_ | claimRef is the "<namespace>/<name>" of the SandboxClaim the sandbox is<br />bound to, if any. |  | Optional: \{\} <br /> |
+| `addr` _string_ | addr is the sandbox "host:port" address, if published. |  | Optional: \{\} <br /> |
+| `deadline` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | deadline is the node-granted lease expiry, if published. |  | Optional: \{\} <br /> |
+| `claimedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | claimedAt is when the node first granted the claim, if published; a renew<br />or a wake moves deadline, never this. |  | Optional: \{\} <br /> |
 
 
 #### NodeInventory
@@ -60,13 +60,13 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `sandbox.cocoonstack.io/v1beta1` | | |
 | `kind` _string_ | `NodeInventory` | | |
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `node` _string_ | node is the owning node name; it matches metadata.name. |  |  |
-| `entries` _[InventoryEntry](#inventoryentry) array_ | entries summarizes the node's live sandboxes. |  |  |
-| `address` _string_ | address is the node's sandboxd advertise address ("host:port"); the<br />aggregated apiserver routes a claim to this node's sandboxd through it. |  |  |
-| `pools` _[PoolCapacity](#poolcapacity) array_ | pools is the node's per-pool warm capacity, used to pick a node that<br />already holds a warm microVM for a requested (template, net, size). |  |  |
+| `entries` _[InventoryEntry](#inventoryentry) array_ | entries summarizes the node's live sandboxes. |  | Optional: \{\} <br /> |
+| `address` _string_ | address is the node's sandboxd advertise address ("host:port"); the<br />aggregated apiserver routes a claim to this node's sandboxd through it. |  | Optional: \{\} <br /> |
+| `pools` _[PoolCapacity](#poolcapacity) array_ | pools is the node's per-pool warm capacity, used to pick a node that<br />already holds a warm microVM for a requested (template, net, size). |  | Optional: \{\} <br /> |
 
 
 #### NodeInventoryList
@@ -83,8 +83,8 @@ NodeInventoryList contains a list of NodeInventory.
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `sandbox.cocoonstack.io/v1beta1` | | |
 | `kind` _string_ | `NodeInventoryList` | | |
-| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
-| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |
 | `metadata` _[ListMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#listmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `items` _[NodeInventory](#nodeinventory) array_ |  |  |  |
 
@@ -106,8 +106,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `template` _string_ | template is the pool's base image (the sandbox template). |  |  |
-| `net` _string_ | net is the pool's network shape (e.g. "none", "egress"). |  |  |
-| `size` _string_ | size is the pool's VM size class (e.g. "small"). |  |  |
+| `net` _string_ | net is the pool's network shape (e.g. "none", "egress"). |  | Optional: \{\} <br /> |
+| `size` _string_ | size is the pool's VM size class (e.g. "small"). |  | Optional: \{\} <br /> |
 | `warm` _integer_ | warm is the number of ready-to-claim warm microVMs currently in the pool. |  |  |
 | `target` _integer_ | target is the pool's desired warm depth. |  |  |
 

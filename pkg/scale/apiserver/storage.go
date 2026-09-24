@@ -52,7 +52,7 @@ var (
 	_ rest.Lister               = (*sandboxREST)(nil)
 	_ rest.Getter               = (*sandboxREST)(nil)
 	_ rest.Watcher              = (*sandboxREST)(nil)
-	_ rest.Creater              = (*sandboxREST)(nil) //nolint:misspell // rest.Creater is the upstream Kubernetes interface name.
+	_ rest.Creater              = (*sandboxREST)(nil)
 	_ rest.GracefulDeleter      = (*sandboxREST)(nil)
 	_ rest.TableConvertor       = (*sandboxREST)(nil)
 	_ rest.SingularNameProvider = (*sandboxREST)(nil)

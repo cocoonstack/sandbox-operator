@@ -92,5 +92,5 @@ func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scatterGa
 	if !invCache.WaitForCacheSync(syncCtx) {
 		b.Fatal("node inventory cache did not sync")
 	}
-	return NewScatterGatherStore(NewClientInventorySource(invCache)), pool
+	return NewScatterGatherStore(NewClientInventorySource(invCache)).(*scatterGatherStore), pool
 }

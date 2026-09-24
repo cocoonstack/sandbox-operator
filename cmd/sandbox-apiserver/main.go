@@ -181,7 +181,7 @@ func run() error {
 	ctx, fail := context.WithCancelCause(genericapiserver.SetupSignalContext())
 	defer fail(nil)
 	level := cmp.Or(os.Getenv("OPERATOR_LOG_LEVEL"), "info")
-	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, ""); err != nil {
+	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level, UseJSON: !stderrIsTerminal()}, ""); err != nil {
 		return fmt.Errorf("setup log: %w", err)
 	}
 	ctrl.SetLogger(logbridge.New(ctx))
@@ -342,4 +342,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "sandbox-apiserver:", err)
 		os.Exit(1)
 	}
+}
+
+func stderrIsTerminal() bool {
+	fi, err := os.Stderr.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

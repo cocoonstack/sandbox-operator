@@ -36,7 +36,7 @@ GOIMPORTS_VERSION ?= v0.49.0
 GOIMPORTS_ROOT := $(LOCALBIN)/goimports-$(GOIMPORTS_VERSION)
 GOIMPORTS := $(GOIMPORTS_ROOT)/goimports
 
-CONTROLLERGEN_VERSION ?= v0.21.0
+CONTROLLERGEN_VERSION ?= v0.22.0
 CONTROLLERGEN_ROOT := $(LOCALBIN)/controller-gen-$(CONTROLLERGEN_VERSION)
 CONTROLLER_GEN := $(CONTROLLERGEN_ROOT)/controller-gen
 
@@ -80,7 +80,7 @@ generate: controller-gen ## Regenerate the NodeInventory CRD and the deepcopy me
 	$(CONTROLLER_GEN) object crd:maxDescLen=0 paths=./api/... output:crd:dir=helm/crds
 
 api-docs: ## Regenerate docs/api.md from the API types
-	GOWORK=off go run github.com/elastic/crd-ref-docs@v0.2.0 --config=hack/crd-ref-docs.yaml --source-path=. --renderer=markdown --output-path=docs/api.md --max-depth=12
+	GOWORK=off go run github.com/elastic/crd-ref-docs@v0.3.0 --config=hack/crd-ref-docs.yaml --source-path=. --renderer=markdown --output-path=docs/api.md --max-depth=12
 
 # --- Build ---
 

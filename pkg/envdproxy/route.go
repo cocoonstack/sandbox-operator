@@ -14,7 +14,7 @@ const (
 	sandboxIDHeader   = "E2b-Sandbox-Id"
 	sandboxPortHeader = "E2b-Sandbox-Port"
 	// accessTokenHeader is the per-sandbox data-plane credential.
-	accessTokenHeader = "X-Access-Token" //nolint:gosec // a header name, not a credential
+	accessTokenHeader = "X-Access-Token"
 	apiKeyHeader      = "X-API-KEY"
 )
 
