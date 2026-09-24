@@ -241,3 +241,11 @@ default) exposes `/debug/pprof`. The warm-pool driver's controller-runtime
 metrics and health servers are disabled: the aggregated apiserver owns the
 serving port. `sandbox-envd-proxy` serves an unauthenticated `GET /healthz` for
 probes and no metrics endpoint.
+
+Both binaries log to stderr through `projecteru2/core/log`, together with the
+controller-runtime output; `sandbox-apiserver` also routes the generic
+apiserver's klog output there.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `OPERATOR_LOG_LEVEL` | `info` | Log level of both binaries: `debug`, `info`, `warn` or `error`. An unknown level fails startup. |
