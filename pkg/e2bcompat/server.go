@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
+	"github.com/projecteru2/core/log"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apiserver/pkg/storage/names"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
@@ -88,8 +88,6 @@ type Options struct {
 	// (template listing, snapshot listing); without it those report an error
 	// instead of an empty list, so a missing dependency cannot read as "none".
 	Inventory scale.InventorySource
-	// Log receives request-level errors.
-	Log logr.Logger
 }
 
 type namespaceKey struct{}
@@ -239,7 +237,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 				"no warm sandbox available for template %q; retry as warm capacity refills", req.TemplateID))
 			return
 		}
-		s.opts.Log.Error(err, "e2b create: claim failed", "template", req.TemplateID, "name", name)
+		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: claim failed template=%s name=%s", req.TemplateID, name)
 		writeError(w, http.StatusInternalServerError, "failed to claim a sandbox")
 		return
 	}
@@ -263,7 +261,7 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
-		s.opts.Log.Error(err, "e2b list: store list failed")
+		log.WithFunc("e2bcompat.listSandboxes").Error(r.Context(), err, "e2b list: store list failed")
 		writeError(w, http.StatusInternalServerError, "failed to list sandboxes")
 		return
 	}
@@ -281,7 +279,7 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "get")
+		s.writeLookupError(w, r, err, "get")
 		return
 	}
 	writeJSON(w, http.StatusOK, s.detailFor(sb))
@@ -292,18 +290,18 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, "delete")
+		s.writeLookupError(w, r, err, "delete")
 		return
 	}
 	node := sb.Status.NodeName
 	if node == "" {
-		s.opts.Log.Error(errNoOwningNode, "e2b delete: release failed", "sandboxID", id)
+		log.WithFunc("e2bcompat.deleteSandbox").Errorf(r.Context(), errNoOwningNode, "e2b delete: release failed sandboxID=%s", id)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
 	claimID := claimIDOf(sb)
 	if err := s.store.Release(r.Context(), node, claimID); err != nil {
-		s.opts.Log.Error(err, "e2b delete: release failed", "sandboxID", id, "claimID", claimID, "node", node)
+		log.WithFunc("e2bcompat.deleteSandbox").Errorf(r.Context(), err, "e2b delete: release failed sandboxID=%s claimID=%s node=%s", id, claimID, node)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
@@ -345,11 +343,11 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request, op string, ttlSec
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
-		s.writeLookupError(w, err, id, op)
+		s.writeLookupError(w, r, err, op)
 		return
 	}
 	if _, err := s.store.Renew(r.Context(), sb.Status.NodeName, claimIDOf(sb), ttlSeconds); err != nil {
-		s.writeVerbError(w, err, id, op, "failed to extend the sandbox lease")
+		s.writeVerbError(w, r, err, op, "failed to extend the sandbox lease")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -373,8 +371,8 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 	return sb, nil
 }
 
-func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op string) {
-	s.writeVerbError(w, err, id, op+": lookup", "failed to resolve the sandbox")
+func (s *Server) writeLookupError(w http.ResponseWriter, r *http.Request, err error, op string) {
+	s.writeVerbError(w, r, err, op+": lookup", "failed to resolve the sandbox")
 }
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires

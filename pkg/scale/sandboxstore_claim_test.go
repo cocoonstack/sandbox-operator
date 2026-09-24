@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,7 +23,7 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	src.Put(poolInv("n2", "10.0.0.2:7777", PoolCapacity{Template: "img", Warm: 4, Target: 5}))
 	deadline := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000", Deadline: deadline}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("uniform-token", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("uniform-token", f.factory()))
 
 	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 600)
 	require.NoError(t, err)
@@ -47,7 +46,7 @@ func TestStoreClaim_NoWarmCapacityIsRetryable(t *testing.T) {
 
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
 	f := &recordingFactory{}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
@@ -60,7 +59,7 @@ func TestStoreClaim_PoolKeyMatchingNormalizesDefaults(t *testing.T) {
 
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-1"}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img", Net: "none", Size: "small"}, 0)
 	require.NoError(t, err)
@@ -75,7 +74,7 @@ func TestStoreClaim_SandboxdCapacityRaceIsRetryable(t *testing.T) {
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 
 	f := &recordingFactory{claimErr: sandboxd.ErrNodeAtCapacity}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
@@ -86,7 +85,7 @@ func TestStoreRelease_RoutesToNodeAddressWithUniformToken(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n2", "10.0.0.2:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
 	f := &recordingFactory{}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("uniform-token", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("uniform-token", f.factory()))
 
 	err := store.Release(t.Context(), "n2", "sb-abc")
 	require.NoError(t, err)
@@ -99,7 +98,7 @@ func TestStoreRelease_RoutesToNodeAddressWithUniformToken(t *testing.T) {
 func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+	store := NewScatterGatherStore(src)
 
 	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
@@ -113,7 +112,7 @@ func TestGetKeepsTheClaimTimeHintThroughThePublishLag(t *testing.T) {
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
 	src.Put(poolInv("n2", "n2:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_1", Token: "tok", OwnerAddr: "10.0.0.1:7777"}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.NoError(t, err)
@@ -143,7 +142,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 	}{{"n1", 4}, {"n2", 4}, {"n3", 4}, {"n4", 4}} {
 		src.Put(poolInv(n.node, n.node+":7777", PoolCapacity{Template: "img", Warm: n.warm, Target: 5}))
 	}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+	store := NewScatterGatherStore(src)
 
 	picked := map[string]int{}
 	for range 200 {
@@ -160,7 +159,7 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("cold", "cold:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+	store := NewScatterGatherStore(src)
 
 	warmPicks := 0
 	for range 200 {
@@ -181,7 +180,7 @@ func TestStoreClaimFallsBackWhenTheSampledNodeRacedToZero(t *testing.T) {
 	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
 
 	f := &raceFactory{emptyAddr: "stale:7777", result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	for range 40 {
 		a, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
@@ -204,7 +203,7 @@ func TestStoreClaimSkipsANodeThatDeliveredNothing(t *testing.T) {
 			src.Put(poolInv("dead", "dead:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
 			src.Put(poolInv("live", "live:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 			f := &raceFactory{deadAddr: "dead:7777", deadErr: tt.err, result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
-			store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+			store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 			for range 20 {
 				a, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
@@ -219,7 +218,7 @@ func TestStoreClaimDoesNotRetryElsewhereAfterATimeout(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("slow", "slow:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
 	f := &raceFactory{deadAddr: "slow:7777", deadErr: fmt.Errorf("claim: %w", context.DeadlineExceeded)}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -231,7 +230,7 @@ func TestStoreClaimIsRetryableWhenEveryNodeIsDown(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
 	f := &raceFactory{deadAddr: "n1:7777", deadErr: fmt.Errorf("claim: %w", &sandboxd.HTTPError{StatusCode: 503})}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
@@ -244,7 +243,7 @@ func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
 	src.Put(poolInv("n2", "n2:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
 
 	f := &raceFactory{emptyAll: true}
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)

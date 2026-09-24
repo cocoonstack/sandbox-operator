@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-logr/logr"
+	"github.com/projecteru2/core/log"
 	"golang.org/x/sync/errgroup"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,11 +112,6 @@ type InventorySource interface {
 // StoreOption configures a scatterGatherStore.
 type StoreOption func(*scatterGatherStore)
 
-// WithLogger sets the store logger. The zero logr.Logger discards.
-func WithLogger(log logr.Logger) StoreOption {
-	return func(s *scatterGatherStore) { s.log = log }
-}
-
 // WithWatchPollInterval sets how often Watch re-derives node inventory to emit
 // deltas. Defaults to one second.
 func WithWatchPollInterval(d time.Duration) StoreOption {
@@ -189,7 +184,6 @@ var _ SandboxStore = (*scatterGatherStore)(nil)
 // metrics.k8s.io aggregation pattern extended with a synchronous write path.
 type scatterGatherStore struct {
 	src         InventorySource
-	log         logr.Logger
 	concurrency int
 	watchPoll   time.Duration
 	index       *nodeIndex
@@ -228,8 +222,7 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
 		inv, invErr := s.src.NodeInventory(gctx, node)
 		if invErr != nil {
-			s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
-				"node", node, "err", invErr.Error())
+			log.WithFunc("scale.List").Debugf(gctx, "node inventory unavailable; omitting from list (eventual consistency) node=%s err=%v", node, invErr)
 			return nil
 		}
 		return s.materialize(inv, opts.Namespace, labelSel, fieldSel)
@@ -325,8 +318,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		if !claimUndelivered(claimErr) {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, best.node, claimErr)
 		}
-		s.log.V(1).Info("node delivered nothing for the claim; trying another node",
-			"node", best.node, "err", claimErr.Error(), "remaining", len(candidates)-1)
+		log.WithFunc("scale.Claim").Debugf(ctx, "node delivered nothing for the claim; trying another node node=%s err=%v remaining=%d", best.node, claimErr, len(candidates)-1)
 		candidates = slices.Delete(candidates, idx, idx+1)
 	}
 	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
@@ -391,8 +383,7 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, m
 	if err != nil {
 		// A sibling's hit cancels ctx; reads failing from that are not unavailable nodes.
 		if ctx.Err() == nil {
-			s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
-				"node", node, "err", err.Error())
+			log.WithFunc("scale.matchOnNode").Debugf(ctx, "node inventory unavailable during %s; skipping node node=%s err=%v", op, node, err)
 		}
 		return nil
 	}
@@ -409,8 +400,7 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
 		addr, pools, err := s.src.NodeCapacity(gctx, n)
 		if err != nil {
-			s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
-				"node", n, "err", err.Error())
+			log.WithFunc("scale.warmCandidates").Debugf(gctx, "node inventory unavailable during claim node-pick; skipping node=%s err=%v", n, err)
 			return nil
 		}
 		if addr == "" {
@@ -429,6 +419,7 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *watch.ProxyWatcher, ch chan watch.Event) {
 	defer close(ch)
 
+	logger := log.WithFunc("scale.runWatch")
 	known := map[string]*sandboxv1beta1.Sandbox{}
 	emit := func(t watch.EventType, sb *sandboxv1beta1.Sandbox) bool {
 		select {
@@ -442,7 +433,7 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 	}
 
 	if list, err := s.List(ctx, opts); err != nil {
-		s.log.Error(err, "initial watch list failed")
+		logger.Error(ctx, err, "initial watch list failed")
 	} else {
 		for i := range list.Items {
 			sb := list.Items[i].DeepCopy()
@@ -469,7 +460,7 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		case <-ticker.C:
 			list, err := s.List(ctx, opts)
 			if err != nil {
-				s.log.Error(err, "watch poll list failed")
+				logger.Error(ctx, err, "watch poll list failed")
 				continue
 			}
 			cur := make(map[string]*sandboxv1beta1.Sandbox, len(list.Items))

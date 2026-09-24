@@ -20,7 +20,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/go-logr/logr"
+	"github.com/projecteru2/core/log"
 	"golang.org/x/sync/errgroup"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -74,7 +74,6 @@ func NewSandboxdFactory() ClientFactory {
 // Options configures a Driver.
 type Options struct {
 	Interval time.Duration
-	Log      logr.Logger
 }
 
 // nodeView is one schedulable node: its name, sandboxd address, and current
@@ -103,7 +102,6 @@ type Driver struct {
 	factory ClientFactory
 
 	interval time.Duration
-	log      logr.Logger
 }
 
 // New builds a Driver. token empty leaves the driver fail-closed (it logs and
@@ -112,7 +110,7 @@ func New(kube client.Client, inv scale.InventorySource, token string, factory Cl
 	if opts.Interval <= 0 {
 		opts.Interval = defaultInterval
 	}
-	return &Driver{kube: kube, inv: inv, token: token, factory: factory, interval: opts.Interval, log: opts.Log}
+	return &Driver{kube: kube, inv: inv, token: token, factory: factory, interval: opts.Interval}
 }
 
 func (d *Driver) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
@@ -165,7 +163,7 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 			if !k8serrors.IsNotFound(rerr) && !errors.Is(rerr, errNoTemplateRef) {
 				return fmt.Errorf("resolve warm pool %s/%s template: %w", p.Namespace, p.Name, rerr)
 			}
-			d.log.Error(rerr, "resolve warm pool template", "pool", p.Namespace+"/"+p.Name)
+			log.WithFunc("warmpool.reconcileOnce").Errorf(ctx, rerr, "resolve warm pool template pool=%s/%s", p.Namespace, p.Name)
 			d.writeStatus(ctx, p, 0)
 			continue
 		}
@@ -201,7 +199,7 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 	for _, name := range names {
 		addr, pools, err := d.inv.NodeCapacity(ctx, name)
 		if err != nil {
-			d.log.V(1).Info("skip node without readable inventory", "node", name, "err", err.Error())
+			log.WithFunc("warmpool.schedulableNodes").Debugf(ctx, "skip node without readable inventory node=%s err=%v", name, err)
 			continue
 		}
 		if addr == "" {
@@ -237,8 +235,9 @@ func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (sc
 // config wholesale — an omitted pool drains. Per-node failures are logged, not
 // fatal: one unreachable node must not stall the rest.
 func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []desiredPool) {
+	logger := log.WithFunc("warmpool.applyToNodes")
 	if d.token == "" {
-		d.log.Info("warm-pool driver has no sandboxd token; skipping pool apply (fail-closed)")
+		logger.Warn(ctx, "warm-pool driver has no sandboxd token; skipping pool apply (fail-closed)")
 		return
 	}
 	var g errgroup.Group
@@ -266,7 +265,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 		g.Go(func() error {
 			info, err := d.factory(node.addr, d.token).SetPools(ctx, specs)
 			if err != nil {
-				d.log.Error(err, "set node warm pools", "node", node.name, "addr", node.addr)
+				logger.Errorf(ctx, err, "set node warm pools node=%s addr=%s", node.name, node.addr)
 				return nil
 			}
 			if info == nil {
@@ -300,7 +299,7 @@ func (d *Driver) writeStatus(ctx context.Context, p *extv1beta1.SandboxWarmPool,
 	fresh.Status.ReadyReplicas = int32(warm)
 	fresh.Status.Selector = selector
 	if err := d.kube.Status().Update(ctx, fresh); err != nil {
-		d.log.V(1).Info("warm-pool status update deferred", "pool", p.Namespace+"/"+p.Name, "err", err.Error())
+		log.WithFunc("warmpool.writeStatus").Debugf(ctx, "warm-pool status update deferred pool=%s/%s err=%v", p.Namespace, p.Name, err)
 	}
 }
 

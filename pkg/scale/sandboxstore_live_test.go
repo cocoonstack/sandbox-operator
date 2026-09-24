@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -106,7 +105,7 @@ func TestGetMatchesTheNameWhenANodeIgnoresTheFilter(t *testing.T) {
 func TestLiveReadsNeedClaimRouting(t *testing.T) {
 	src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
 	src.Put(poolInv("n1", "n1:7777"))
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+	store := NewScatterGatherStore(src)
 
 	_, err := store.GetByClaimID(t.Context(), "ns", "sb_1", func(id string) bool { return id == "sb_1" })
 	assert.True(t, k8serrors.IsNotFound(err), "without a fleet token the store only reads published inventory: %v", err)
@@ -150,7 +149,7 @@ func unpublishedStore(f *recordingFactory) (*scatterGatherStore, *countingSource
 	src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
 	src.Put(poolInv("n1", "n1:7777"))
 	src.Put(poolInv("n2", "n2:7777"))
-	return NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory())), src
+	return NewScatterGatherStore(src, WithClaimRouting("t", f.factory())), src
 }
 
 type countingSource struct {

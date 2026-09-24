@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
+	"github.com/projecteru2/core/log"
 )
 
 const (
@@ -47,8 +47,6 @@ type Options struct {
 	// upgrade, which would fail every request; turn it on for a guest daemon
 	// that serves h2c, such as a user's own server on another port.
 	GuestHTTP2 bool
-	// Log receives request-level failures.
-	Log logr.Logger
 }
 
 // Server routes one public host onto many sandboxes' guest ports.
@@ -104,7 +102,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		// A caller must not learn from this whether the id exists, which node
 		// holds it, or whether the fleet is reachable.
 		if !errors.Is(err, ErrSandboxNotFound) {
-			s.opts.Log.Error(err, "envd-proxy: resolve sandbox", "sandboxID", rt.sandboxID)
+			log.WithFunc("envdproxy.serve").Errorf(r.Context(), err, "envd-proxy: resolve sandbox sandboxID=%s", rt.sandboxID)
 		}
 		writeError(w, http.StatusBadGateway, "sandbox unavailable")
 		return
@@ -160,7 +158,7 @@ func (s *Server) writeUpstreamError(w http.ResponseWriter, r *http.Request, err 
 			return
 		}
 	}
-	s.opts.Log.Error(err, "envd-proxy: relay failed", "host", r.Host, "path", r.URL.Path)
+	log.WithFunc("envdproxy.writeUpstreamError").Errorf(r.Context(), err, "envd-proxy: relay failed host=%s path=%s", r.Host, r.URL.Path)
 	writeError(w, http.StatusBadGateway, "sandbox unreachable")
 }
 

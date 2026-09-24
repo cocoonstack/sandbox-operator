@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -620,7 +619,7 @@ func (f *renewStore) Renew(_ context.Context, node, id string, ttlSeconds int) (
 
 func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
 	t.Helper()
-	o := Options{Namespace: "sandboxes", Domain: testDomain, APIKeys: []string{testKey}, Log: logr.Discard()}
+	o := Options{Namespace: "sandboxes", Domain: testDomain, APIKeys: []string{testKey}}
 	for _, fn := range opts {
 		fn(&o)
 	}

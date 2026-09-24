@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/projecteru2/core/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
@@ -29,7 +30,7 @@ func (s *scatterGatherStore) liveOnNode(ctx context.Context, op, node string, ro
 	got, err := rows(ctx, cl)
 	if err != nil {
 		if ctx.Err() == nil {
-			s.log.V(1).Info("node did not answer a live "+op, "node", node, "err", err.Error())
+			log.WithFunc("scale.liveOnNode").Debugf(ctx, "node did not answer a live %s node=%s err=%v", op, node, err)
 		}
 		return nil
 	}

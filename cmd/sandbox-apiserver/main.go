@@ -6,6 +6,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/projecteru2/core/log"
+	"github.com/projecteru2/core/types"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	genericapiserver "k8s.io/apiserver/pkg/server"
@@ -28,6 +31,7 @@ import (
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
+	"github.com/cocoonstack/sandbox-operator/pkg/logbridge"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
@@ -174,12 +178,15 @@ func run() error {
 	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
 	o.addFlags(fs)
 	_ = fs.Parse(os.Args[1:])
-	klog.InfoS("starting sandbox-apiserver", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
-
-	// Route the warm-pool driver's controller-runtime logs into the apiserver's own stream.
-	ctrl.SetLogger(klog.NewKlogr())
 	ctx, fail := context.WithCancelCause(genericapiserver.SetupSignalContext())
 	defer fail(nil)
+	level := cmp.Or(os.Getenv("OPERATOR_LOG_LEVEL"), "info")
+	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, ""); err != nil {
+		return fmt.Errorf("setup log: %w", err)
+	}
+	ctrl.SetLogger(logbridge.New(ctx))
+	klog.SetLogger(logbridge.New(ctx).WithName("klog"))
+	log.WithFunc("main.run").Infof(ctx, "starting sandbox-apiserver version=%s revision=%s builtAt=%s", version.VERSION, version.REVISION, version.BUILTAT)
 
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
@@ -258,10 +265,7 @@ func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, rest
 	if err != nil {
 		return fmt.Errorf("build warm-pool manager: %w", err)
 	}
-	driver := warmpool.New(nil, inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{
-		Interval: interval,
-		Log:      ctrl.Log.WithName("warmpool"),
-	})
+	driver := warmpool.New(nil, inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{Interval: interval})
 	if err := driver.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("set up warm-pool controller: %w", err)
 	}
@@ -288,7 +292,6 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 		Inventory:             inv,
 		APIKeys:               keys,
 		AllowAnonymous:        o.E2BAllowAnonymous,
-		Log:                   ctrl.Log.WithName("e2b"),
 	})
 	if err != nil {
 		return nil, err
@@ -302,11 +305,11 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 	if err != nil {
 		return nil, fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
 	}
-	klog.InfoS("serving e2b-compatible API", "address", o.E2BAddr, "namespace", o.E2BNamespace,
-		"authenticated", len(keys) > 0)
+	logger := log.WithFunc("main.startE2BServer")
+	logger.Infof(ctx, "serving e2b-compatible API address=%s namespace=%s authenticated=%t", o.E2BAddr, o.E2BNamespace, len(keys) > 0)
 	go func() {
 		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			klog.ErrorS(err, "e2b-compatible API server exited")
+			logger.Error(ctx, err, "e2b-compatible API server exited")
 		}
 	}()
 	e2bCtx, stop := context.WithCancel(ctx)
@@ -317,7 +320,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e2bShutdownTimeout)
 		defer cancel()
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-			klog.ErrorS(err, "e2b-compatible API server shutdown")
+			logger.Error(ctx, err, "e2b-compatible API server shutdown")
 		}
 	}()
 	return func() { stop(); <-drained }, nil
