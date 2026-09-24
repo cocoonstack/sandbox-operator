@@ -155,7 +155,6 @@ type SandboxStats struct {
 	MemTotalBytes   int64
 	MemUsedBytes    int64
 	MemUsedMeasured bool
-	Paused          bool
 	MeasuredAt      time.Time
 }
 

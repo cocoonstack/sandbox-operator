@@ -44,24 +44,8 @@ type client struct {
 	token string
 }
 
-func (c *client) get(ctx context.Context, h2 bool, path, host, token string, extra http.Header) (string, error) {
-	resp, err := c.send(ctx, h2, http.MethodPost, path, host, token, extra, "{}")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %s: %s", resp.Status, body)
-	}
-	return string(body), nil
-}
-
-func (c *client) post(ctx context.Context, path, host, token string, extra http.Header, body string) (string, error) {
-	resp, err := c.send(ctx, false, http.MethodPost, path, host, token, extra, body)
+func (c *client) post(ctx context.Context, h2 bool, path, host, token string, extra http.Header, body string) (string, error) {
+	resp, err := c.send(ctx, h2, http.MethodPost, path, host, token, extra, body)
 	if err != nil {
 		return "", err
 	}
@@ -205,7 +189,7 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 }
 
 func stepHTTP1(ctx context.Context, c *client) error {
-	body, err := c.get(ctx, false, "/echo?probe=1", c.host, c.token, nil)
+	body, err := c.post(ctx, false, "/echo?probe=1", c.host, c.token, nil, "{}")
 	if err != nil {
 		return err
 	}
@@ -215,7 +199,7 @@ func stepHTTP1(ctx context.Context, c *client) error {
 // stepH2Client proves an HTTP/2 client is served end to end: ConnectRPC uses
 // it, and the guest leg's own protocol must not leak back into that.
 func stepH2Client(ctx context.Context, c *client) error {
-	_, err := c.get(ctx, true, "/process.Process/Start", c.host, c.token, nil)
+	_, err := c.post(ctx, true, "/process.Process/Start", c.host, c.token, nil, "{}")
 	return err
 }
 
@@ -223,7 +207,7 @@ func stepH2Client(ctx context.Context, c *client) error {
 // sandbox that learned its own token could drive its own control plane.
 func stepStripped(ctx context.Context, c *client) error {
 	extra := http.Header{"X-Api-Key": []string{"e2b_secret"}, "X-Probe": []string{"kept"}}
-	body, err := c.get(ctx, false, "/echo", c.host, c.token, extra)
+	body, err := c.post(ctx, false, "/echo", c.host, c.token, extra, "{}")
 	if err != nil {
 		return err
 	}
@@ -245,7 +229,7 @@ func stepHeaderRouting(ctx context.Context, c *client) error {
 		"E2b-Sandbox-Id":   []string{sandboxID},
 		"E2b-Sandbox-Port": []string{port},
 	}
-	body, err := c.get(ctx, false, "/echo", "sandbox."+domain, c.token, extra)
+	body, err := c.post(ctx, false, "/echo", "sandbox."+domain, c.token, extra, "{}")
 	if err != nil {
 		return err
 	}
@@ -279,7 +263,7 @@ func stepEnvdConnect(ctx context.Context, c *client) error {
 		"Connect-Protocol-Version": []string{"1"},
 		"X-User":                   []string{"root"},
 	}
-	body, err := c.post(ctx, "/filesystem.Filesystem/Stat", c.host, c.token, extra, `{"path":"/etc/envd-version"}`)
+	body, err := c.post(ctx, false, "/filesystem.Filesystem/Stat", c.host, c.token, extra, `{"path":"/etc/envd-version"}`)
 	if err != nil {
 		return err
 	}

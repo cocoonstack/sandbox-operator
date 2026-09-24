@@ -59,9 +59,6 @@ type ClaimSpec struct {
 	Net        string `json:"net,omitempty"`
 	Size       string `json:"size,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
-	// NoRedirect is set by an SDK retrying at a redirect target; this client does
-	// not chase redirects (a redirect-only reply is a capacity miss), so it stays false.
-	NoRedirect bool `json:"no_redirect,omitempty"`
 	// ClaimRef is the k8s "<namespace>/<name>" of the Sandbox this claim is
 	// created for. sandboxd records it on the claim and echoes it in its
 	// operator index, so the aggregated read path can map a listed sandbox back
@@ -181,7 +178,7 @@ func (c *Client) SetPools(ctx context.Context, pools []PoolSpec) (*NodeInfo, err
 		pools = []PoolSpec{}
 	}
 	var info NodeInfo
-	if err := c.putJSON(ctx, "/v1/pools", struct {
+	if err := c.sendJSON(ctx, http.MethodPut, "/v1/pools", struct {
 		Pools []PoolSpec `json:"pools"`
 	}{Pools: pools}, &info); err != nil {
 		return nil, err

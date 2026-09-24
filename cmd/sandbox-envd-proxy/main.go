@@ -62,10 +62,7 @@ func main() {
 	o := &options{Addr: ":8443", Namespace: "default"}
 	fs := pflag.NewFlagSet("sandbox-envd-proxy", pflag.ExitOnError)
 	o.addFlags(fs)
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		klog.ErrorS(err, "parse flags")
-		os.Exit(1)
-	}
+	_ = fs.Parse(os.Args[1:])
 	if err := run(ctx, o); err != nil {
 		klog.ErrorS(err, "sandbox-envd-proxy exited")
 		os.Exit(1)
@@ -98,15 +95,11 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return err
 	}
-	return serve(ctx, o, srv.Handler())
-}
-
-func serve(ctx context.Context, o *options, h http.Handler) error {
 	ln, err := net.Listen("tcp", o.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %q: %w", o.Addr, err)
 	}
-	return serveOn(ctx, o, ln, h)
+	return serveOn(ctx, o, ln, srv.Handler())
 }
 
 func serveOn(ctx context.Context, o *options, ln net.Listener, h http.Handler) error {

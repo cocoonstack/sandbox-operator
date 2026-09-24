@@ -83,9 +83,6 @@ type Options struct {
 	APIKeys []string //nolint:gosec // the field holds API keys by design
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
-	// SizeClass pins the warm-pool size axis for compat claims (default
-	// "small"); e2b's NewSandbox carries no size selector.
-	SizeClass string
 	// Inventory enumerates the fleet's nodes and their advertised pools. It is
 	// required by the surfaces that are fleet-wide rather than sandbox-scoped
 	// (template listing, snapshot listing); without it those report an error
@@ -120,7 +117,6 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	opts.Namespace = cmp.Or(opts.Namespace, "default")
 	opts.EnvdVersion = cmp.Or(opts.EnvdVersion, DefaultEnvdVersion)
 	opts.DefaultTimeoutSeconds = cmp.Or(opts.DefaultTimeoutSeconds, DefaultTimeoutSeconds)
-	opts.SizeClass = cmp.Or(opts.SizeClass, scale.SizeClassSmall)
 	keys := make(map[string]string, len(opts.APIKeys))
 	for _, entry := range opts.APIKeys {
 		switch fields := strings.Fields(entry); len(fields) {
@@ -234,7 +230,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	pool := scale.PoolKey{
 		Template: req.TemplateID,
 		Net:      netFor(req.AllowInternetAccess),
-		Size:     s.opts.SizeClass,
+		Size:     scale.SizeClassSmall,
 	}
 	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, s.timeoutSeconds(req.Timeout))
 	if err != nil {

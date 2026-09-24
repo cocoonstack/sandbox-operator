@@ -6,8 +6,6 @@ import (
 	openapinamer "k8s.io/apiserver/pkg/endpoints/openapi"
 	"k8s.io/apiserver/pkg/registry/rest"
 	genericapiserver "k8s.io/apiserver/pkg/server"
-	restclient "k8s.io/client-go/rest"
-	basecompatibility "k8s.io/component-base/compatibility"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
@@ -48,27 +46,4 @@ func InstallSandboxAPI(server *genericapiserver.GenericAPIServer, store scale.Sa
 		return fmt.Errorf("apiserver: install sandboxes API group: %w", err)
 	}
 	return nil
-}
-
-// NewInProcessServer builds a minimal GenericAPIServer with the sandboxes API
-// installed, suitable for in-process serving via httptest. Authentication and
-// authorization are left nil (the generic handler chain treats nil as
-// "disabled", i.e. pass-through) so the aggregation acceptance harness can
-// exercise the real client-go → apiserver storage code path without TLS or
-// certificate machinery.
-func NewInProcessServer(name string, store scale.SandboxStore) (*genericapiserver.GenericAPIServer, error) {
-	config := genericapiserver.NewConfig(Codecs)
-	config.ExternalAddress = "localhost:443"
-	config.LoopbackClientConfig = &restclient.Config{}
-	config.EffectiveVersion = basecompatibility.NewEffectiveVersionFromString("", "", "")
-	config.OpenAPIV3Config = NewOpenAPIV3Config()
-
-	server, err := config.Complete(nil).New(name, genericapiserver.NewEmptyDelegate())
-	if err != nil {
-		return nil, fmt.Errorf("apiserver: build generic server: %w", err)
-	}
-	if err := InstallSandboxAPI(server, store); err != nil {
-		return nil, err
-	}
-	return server, nil
 }

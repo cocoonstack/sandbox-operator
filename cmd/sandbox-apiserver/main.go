@@ -173,9 +173,7 @@ func run() error {
 	o := newOptions()
 	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
 	o.addFlags(fs)
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		return err
-	}
+	_ = fs.Parse(os.Args[1:])
 	klog.InfoS("starting sandbox-apiserver", "version", version.VERSION, "revision", version.REVISION, "builtAt", version.BUILTAT)
 
 	// Route the warm-pool driver's controller-runtime logs into the apiserver's own stream.

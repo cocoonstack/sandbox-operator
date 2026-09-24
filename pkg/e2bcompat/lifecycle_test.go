@@ -414,7 +414,7 @@ func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.Sandbox
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{Paused: f.nodePaused, CPUCount: 1, MemTotalBytes: 512 << 20}, f.statsErr
+	return scale.SandboxStats{CPUCount: 1, MemTotalBytes: 512 << 20}, f.statsErr
 }
 
 func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {

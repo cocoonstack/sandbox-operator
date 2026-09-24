@@ -40,7 +40,9 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	genericapiserver "k8s.io/apiserver/pkg/server"
 	restclient "k8s.io/client-go/rest"
+	basecompatibility "k8s.io/component-base/compatibility"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -154,7 +156,7 @@ func main() {
 	}
 
 	store := scale.NewScatterGatherStore(source, scale.WithLogger(logr.Discard()), scale.WithWatchPollInterval(50*time.Millisecond))
-	server, err := sandboxapiserver.NewInProcessServer("l3bench-apiserver", store)
+	server, err := newInProcessServer(store)
 	must(err)
 	ts := httptest.NewServer(server.Handler)
 	defer ts.Close()
@@ -237,6 +239,23 @@ func main() {
 	}
 }
 
+func newInProcessServer(store scale.SandboxStore) (*genericapiserver.GenericAPIServer, error) {
+	config := genericapiserver.NewConfig(sandboxapiserver.Codecs)
+	config.ExternalAddress = "localhost:443"
+	config.LoopbackClientConfig = &restclient.Config{}
+	config.EffectiveVersion = basecompatibility.NewEffectiveVersionFromString("", "", "")
+	config.OpenAPIV3Config = sandboxapiserver.NewOpenAPIV3Config()
+
+	server, err := config.Complete(nil).New("l3bench-apiserver", genericapiserver.NewEmptyDelegate())
+	if err != nil {
+		return nil, fmt.Errorf("build generic server: %w", err)
+	}
+	if err := sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
+		return nil, err
+	}
+	return server, nil
+}
+
 // newRESTClient builds a real client-go REST client (kubectl's transport) against
 // the in-process aggregated apiserver, decoding with the served group's codec.
 func newRESTClient(host string) *restclient.RESTClient {
@@ -274,9 +293,7 @@ func exerciseWatch(ctx context.Context, rc *restclient.RESTClient, ns, name stri
 			}
 			if ev.Type == watch.Added || ev.Type == watch.Modified || ev.Type == watch.Deleted {
 				events++
-				if events >= 1 {
-					return events, true
-				}
+				return events, true
 			}
 		case <-deadline:
 			return events, events > 0

@@ -129,7 +129,6 @@ func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (Sandbo
 		MemTotalBytes:   st.MemTotalBytes,
 		MemUsedBytes:    st.MemUsedBytes,
 		MemUsedMeasured: st.MemUsedMeasured,
-		Paused:          st.Hibernated,
 		MeasuredAt:      st.MeasuredAt,
 	}, nil
 }

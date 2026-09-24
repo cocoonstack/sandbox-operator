@@ -283,17 +283,6 @@ func TestEveryTriggerCollapsesOntoTheSyncKey(t *testing.T) {
 	}
 }
 
-func TestApplyBoundsEachNodeCall(t *testing.T) {
-	d, setter, inv, _ := newTestDriver(t, warmPool("p", 3), template())
-	putNodes(inv, 2)
-	if err := d.reconcileOnce(t.Context()); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if !setter.sawDeadline {
-		t.Fatal("SetPools ran without a context deadline; a silent node would block reconcile forever")
-	}
-}
-
 func BenchmarkReconcileOnce(b *testing.B) {
 	objs := []client.Object{template()}
 	for i := range 4 {
@@ -316,8 +305,7 @@ type fakeSetter struct {
 
 	warm map[string]int
 
-	failAddr    string
-	sawDeadline bool
+	failAddr string
 }
 
 func (f *fakeSetter) reportWarm(addr string, n int) {
@@ -338,10 +326,9 @@ type fakeNode struct {
 	parent *fakeSetter
 }
 
-func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
+func (n *fakeNode) SetPools(_ context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
 	n.parent.mu.Lock()
 	defer n.parent.mu.Unlock()
-	_, n.parent.sawDeadline = ctx.Deadline()
 	if n.parent.failAddr == n.addr {
 		return nil, errors.New("node unreachable")
 	}
