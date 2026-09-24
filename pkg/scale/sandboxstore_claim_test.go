@@ -112,7 +112,7 @@ func TestGetKeepsTheClaimTimeHintThroughThePublishLag(t *testing.T) {
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
 	src.Put(poolInv("n2", "n2:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_1", Token: "tok", OwnerAddr: "10.0.0.1:7777"}}
-	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory())).(*scatterGatherStore)
 
 	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 	}{{"n1", 4}, {"n2", 4}, {"n3", 4}, {"n4", 4}} {
 		src.Put(poolInv(n.node, n.node+":7777", PoolCapacity{Template: "img", Warm: n.warm, Target: 5}))
 	}
-	store := NewScatterGatherStore(src)
+	store := NewScatterGatherStore(src).(*scatterGatherStore)
 
 	picked := map[string]int{}
 	for range 200 {
@@ -159,7 +159,7 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("cold", "cold:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
-	store := NewScatterGatherStore(src)
+	store := NewScatterGatherStore(src).(*scatterGatherStore)
 
 	warmPicks := 0
 	for range 200 {

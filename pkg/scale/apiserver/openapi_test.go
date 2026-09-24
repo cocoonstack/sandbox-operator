@@ -50,7 +50,7 @@ func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
 }
 
 func TestEveryServedTypeResolvesToAnOpenAPIModel(t *testing.T) {
-	defs := sandboxOpenAPIDefinitions(func(path string) spec.Ref { return spec.Ref{} })
+	defs := sandboxOpenAPIDefinitions(func(_ string) spec.Ref { return spec.Ref{} })
 
 	for _, tt := range []struct {
 		obj  runtime.Object
@@ -88,7 +88,7 @@ func TestEveryServedTypeResolvesToAnOpenAPIModel(t *testing.T) {
 }
 
 func TestOnlySandboxKindsUseTheUpstreamDefinitionPrefix(t *testing.T) {
-	defs := sandboxOpenAPIDefinitions(func(path string) spec.Ref { return spec.Ref{} })
+	defs := sandboxOpenAPIDefinitions(func(_ string) spec.Ref { return spec.Ref{} })
 
 	var got []string
 	for key := range defs {
