@@ -443,6 +443,9 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 			}
 		}
 	}
+	if opts.WatchList && !emit(watch.Bookmark, &sandboxv1beta1.Sandbox{Annotations: map[string]string{metav1.InitialEventsAnnotationKey: "true"}}) {
+		return
+	}
 
 	// A fixed cadence, deliberately: backing off while quiet would let a sandbox
 	// that is created and deleted inside the widened gap produce neither an Added

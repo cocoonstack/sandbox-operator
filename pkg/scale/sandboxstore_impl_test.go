@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -221,6 +222,38 @@ func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {
 
 	src.Put(inv("n1"))
 	waitForType(t, w, watch.Deleted, 2*time.Second)
+}
+
+func TestScatterGatherWatch_EndsTheInitialEventsWithABookmarkForAWatchList(t *testing.T) {
+	for name, tc := range map[string]struct {
+		watchList bool
+		want      []watch.EventType
+	}{
+		"watch list":  {watchList: true, want: []watch.EventType{watch.Added, watch.Added, watch.Bookmark}},
+		"plain watch": {want: []watch.EventType{watch.Added, watch.Added}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				src := NewStaticInventorySource()
+				src.Put(inv("n1", entry("ns/s1", "Running"), entry("ns/s2", "Running")))
+				w, err := NewScatterGatherStore(src).Watch(t.Context(), ListOptions{WatchList: tc.watchList})
+				require.NoError(t, err)
+				defer w.Stop()
+
+				synctest.Wait()
+				var got []watch.EventType
+				var last watch.Event
+				for len(w.ResultChan()) > 0 {
+					last = <-w.ResultChan()
+					got = append(got, last.Type)
+				}
+				assert.Equal(t, tc.want, got)
+				if tc.watchList {
+					assert.Equal(t, "true", last.Object.(*sandboxv1beta1.Sandbox).Annotations[metav1.InitialEventsAnnotationKey])
+				}
+			})
+		})
+	}
 }
 
 func TestScatterGather_ObjectCountIsPoolsPlusNodes(t *testing.T) {

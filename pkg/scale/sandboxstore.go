@@ -11,12 +11,12 @@ import (
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-// ListOptions is the subset of client list parameters the aggregated store
-// honors when fanning out to node inventories.
+// ListOptions is the subset of client list and watch parameters the aggregated store honors.
 type ListOptions struct {
 	Namespace     string
 	LabelSelector string
 	FieldSelector string
+	WatchList     bool
 }
 
 // PoolKey identifies a warm pool by the claim axes the aggregated Create path

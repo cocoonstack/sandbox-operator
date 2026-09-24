@@ -175,8 +175,6 @@ func (r *sandboxREST) ConvertToTable(ctx context.Context, object runtime.Object,
 	return r.tableConvertor.ConvertToTable(ctx, object, tableOptions)
 }
 
-// toScaleListOptions lifts the request namespace and selectors into the store's
-// ListOptions. The namespace comes from the request path (empty = all namespaces).
 func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOptions) scale.ListOptions {
 	o := scale.ListOptions{Namespace: genericapirequest.NamespaceValue(ctx)}
 	if options != nil {
@@ -186,6 +184,7 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 		if options.FieldSelector != nil {
 			o.FieldSelector = options.FieldSelector.String()
 		}
+		o.WatchList = options.SendInitialEvents != nil && *options.SendInitialEvents && options.AllowWatchBookmarks
 	}
 	return o
 }
