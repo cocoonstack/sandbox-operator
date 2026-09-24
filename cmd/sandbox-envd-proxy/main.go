@@ -22,6 +22,7 @@ import (
 	"github.com/projecteru2/core/log"
 	"github.com/projecteru2/core/types"
 	"github.com/spf13/pflag"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
@@ -67,6 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 	ctrl.SetLogger(logbridge.New(ctx))
+	klog.SetLogger(logbridge.New(ctx).WithName("klog"))
 	o := &options{Addr: ":8443", Namespace: "default"}
 	fs := pflag.NewFlagSet("sandbox-envd-proxy", pflag.ExitOnError)
 	o.addFlags(fs)
