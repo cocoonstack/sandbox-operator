@@ -14,9 +14,10 @@ import (
 // ListOptions is the subset of client list parameters the aggregated store
 // honors when fanning out to node inventories.
 type ListOptions struct {
-	Namespace     string
-	LabelSelector string
-	FieldSelector string
+	Namespace         string
+	LabelSelector     string
+	FieldSelector     string
+	SendInitialEvents bool
 }
 
 // PoolKey identifies a warm pool by the claim axes the aggregated Create path

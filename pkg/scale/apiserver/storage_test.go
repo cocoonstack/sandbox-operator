@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -130,6 +131,24 @@ func TestTTLSecondsForSandbox(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestToScaleListOptions_CarriesWatchListMode(t *testing.T) {
+	yes, no := true, false
+	for name, tc := range map[string]struct {
+		options *metainternalversion.ListOptions
+		want    bool
+	}{
+		"no options":                         {},
+		"plain watch":                        {options: &metainternalversion.ListOptions{Watch: true}},
+		"watch list":                         {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: &yes, AllowWatchBookmarks: true}, want: true},
+		"initial events without bookmarks":   {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: &yes}},
+		"initial events explicitly declined": {options: &metainternalversion.ListOptions{Watch: true, SendInitialEvents: &no, AllowWatchBookmarks: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, toScaleListOptions(nsCtx(t, "ns"), tc.options).SendInitialEvents)
 		})
 	}
 }

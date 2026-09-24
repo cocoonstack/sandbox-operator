@@ -434,6 +434,9 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 
 	if list, err := s.List(ctx, opts); err != nil {
 		logger.Error(ctx, err, "initial watch list failed")
+		if opts.SendInitialEvents {
+			return
+		}
 	} else {
 		for i := range list.Items {
 			sb := list.Items[i].DeepCopy()
@@ -442,6 +445,9 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 				return
 			}
 		}
+	}
+	if opts.SendInitialEvents && !emit(watch.Bookmark, &sandboxv1beta1.Sandbox{Annotations: map[string]string{metav1.InitialEventsAnnotationKey: "true"}}) {
+		return
 	}
 
 	// A fixed cadence, deliberately: backing off while quiet would let a sandbox
