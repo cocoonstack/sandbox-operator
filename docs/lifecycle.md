@@ -100,9 +100,9 @@ claim time and the submitted object is the only place `Create` can hear it:
   a `400` before any warm microVM is spent.
 - The node clamps the ask to its own default and maximum, so the response
   carries the **granted** expiry as the `sandbox.cocoonstack.io/deadline`
-  annotation (RFC3339) — the submitted spec is echoed untouched. `Get`/`List`
-  stamp the same annotation once the owning node publishes the deadline in
-  its `NodeInventory`.
+  annotation (RFC3339) — the submitted spec is echoed untouched. `Get` and a
+  list pinned to one name stamp the same annotation at once, and other lists
+  stamp it once the owning node publishes the deadline in its `NodeInventory`.
 
 ## Behaviors callers must handle
 

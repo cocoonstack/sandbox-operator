@@ -932,9 +932,7 @@ func synthLabels(node string, e InventoryEntry) map[string]string {
 	return l
 }
 
-// synthAnnotations carries the node-reported facts that are not selector axes:
-// the sandboxd claim id Delete releases by, and the granted deadline. Neither is
-// stamped until the node publishes it, so Delete never guesses a claim by name.
+// synthAnnotations stamps only what the node reported, so Delete never guesses a claim by name.
 func synthAnnotations(e InventoryEntry) map[string]string {
 	a := map[string]string{}
 	if e.ID != "" {

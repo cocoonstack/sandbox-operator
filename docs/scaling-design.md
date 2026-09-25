@@ -216,7 +216,8 @@ API). Reads do not wait for it:
   `GET /v1/sandboxes?claim_ref=<namespace>/<name>` each, which a node answers
   from its own index with only the claims recorded under that ref. A name no
   node holds costs one such request per node, so a client-side `kubectl
-  apply`, which reads before it creates, pays it once per new object. The envd
+  apply`, which reads before it creates, pays it once per new object, and a
+  list or watch pinned to that name pays it when it opens. The envd
   proxy, which holds no fleet token, asks `GET /v1/sandboxes/{id}/owner` with
   the caller's sandbox token under a per-replica budget and keeps the answer
   for a minute, past the node's next publish. A node that has not answered
