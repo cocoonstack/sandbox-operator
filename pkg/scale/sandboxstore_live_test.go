@@ -271,6 +271,19 @@ func TestANamePinnedWatchSweepSkipsADuplicateItsSelectorsReject(t *testing.T) {
 	})
 }
 
+func TestANamePinnedListSkipsADuplicateItsSelectorsReject(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(inventoryWith("n1", InventoryEntry{Name: "ns/s2", ID: "sb_1", Phase: "Paused"}))
+	src.Put(inventoryWith("n2", InventoryEntry{Name: "ns/s2", ID: "sb_2", Phase: PhaseRunning}))
+	store := NewScatterGatherStore(src).(*scatterGatherStore)
+	store.concurrency = 1
+
+	list, err := store.List(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2", LabelSelector: PhaseLabel + "=" + PhaseRunning})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1, "a duplicate the selector rejects must not hide the one it accepts")
+	assert.Equal(t, "n2", list.Items[0].Status.NodeName)
+}
+
 type countingSource struct {
 	*StaticInventorySource
 	lists atomic.Int32

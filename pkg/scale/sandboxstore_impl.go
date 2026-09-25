@@ -449,6 +449,9 @@ func (s *scatterGatherStore) listInventories(ctx context.Context, namespace stri
 
 func (s *scatterGatherStore) listPinned(ctx context.Context, namespace, name string, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
 	sb, err := s.lookupName(ctx, namespace, name)
+	if sb != nil && !selected(sb, labelSel, fieldSel) {
+		return s.pollPinned(ctx, namespace, name, nil, labelSel, fieldSel)
+	}
 	return selectedOne(sb, err, labelSel, fieldSel)
 }
 
