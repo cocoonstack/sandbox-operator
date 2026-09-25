@@ -19,8 +19,8 @@
 // before copying it:
 //
 //   - Lists are eventually consistent. Sandbox objects are synthesized from
-//     per-node NodeInventory, which nodes republish on a ~30s cadence; a Get by
-//     name or claim id asks the nodes, so only List and Watch lag a create.
+//     per-node NodeInventory, which nodes republish on a ~30s cadence; a read by
+//     name or claim id asks the nodes, so only fleet List and Watch lag a create.
 //   - Latency is not uniform. resume takes cocoon's mmap restore fast path and
 //     fork clones a node-local snapshot, but pause and snapshot write the
 //     guest's memory out and therefore cost time proportional to its size.

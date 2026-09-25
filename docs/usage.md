@@ -51,8 +51,8 @@ The response is synthesized, never stored. It carries
 `status.nodeName`, a `Ready` condition, and the annotations
 `sandbox.cocoonstack.io/claim-id`, `/address`, `/token` and `/deadline` — the
 granted expiry, which the node may clamp below what was asked for. Its
-`metadata.creationTimestamp` is the apiserver's clock at claim time; reads
-after the node's next publish carry the claim time the node recorded.
+`metadata.creationTimestamp` is the apiserver's clock at claim time, and later
+reads carry the claim time the node recorded.
 
 `Create` is a claim, not an upsert: nothing checks `metadata.name` against the
 fleet, so a repeated `Create` under one name claims a second microVM, and the
@@ -74,7 +74,12 @@ a ~30 s cadence, so a list right after a create may not show it yet. Reads of
 one sandbox do not wait for that publish, on any apiserver replica: a `Get` by
 name asks the nodes for the claim recorded under `<namespace>/<name>`, and a
 lookup by claim id — the e2b surface and the envd proxy — asks them for that
-id. A deleted sandbox stays readable until its node publishes, so `kubectl
+id. A list or watch pinned to one name in a namespace
+(`fieldSelector=metadata.name=<name>`, what `kubectl wait` and `kubectl delete`
+send) reads like that `Get` when it opens: it includes a claim its node has not
+published yet, and the watch reports that claim deleted only once its node no
+longer holds it. A claim made after the watch opened appears at the next
+publish. A deleted sandbox stays readable until its node publishes, so `kubectl
 delete` returns only once that publish drops the entry. A fork child is
 recorded under `<namespace>/<claim id>`, so both lookups find it at once. A
 checkpoint branch carries no claim ref: by claim id it answers at once, by name

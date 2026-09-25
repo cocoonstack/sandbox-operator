@@ -162,7 +162,7 @@ v1beta1 the `APIService` hands to the aggregated server, which serves only
 | A node `inventory` object lost | Rebuilt from the node's own live state on next publish | No |
 | A node's `Node` object deleted | Its `NodeInventory` is garbage-collected with it: the node leaves the claim path and its sandboxes leave the read view, though sandboxd keeps serving them and their leases still expire there; restarting vk-sandbox registers the node again | No |
 | Aggregated server restart | Stateless; rebuilds from node fan-out | No |
-| Client reads before the owning node republishes inventory | Lookups by name and by claim id (e2b, envd proxy) ask the nodes; `list` and `watch` show it at the next publish | No — `list`, `watch`, and a deleted sandbox until its node publishes stay eventually consistent |
+| Client reads before the owning node republishes inventory | Lookups by name and by claim id (e2b, envd proxy), and a list or watch pinned to one name in a namespace, ask the nodes; other lists and watches show it at the next publish | No — fleet `list` and `watch`, and a deleted sandbox until its node publishes, stay eventually consistent |
 
 **Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
 sandboxes` returns the fanned-out list; per-sandbox `Get` only materializes the
@@ -216,7 +216,8 @@ API). Reads do not wait for it:
   `GET /v1/sandboxes?claim_ref=<namespace>/<name>` each, which a node answers
   from its own index with only the claims recorded under that ref. A name no
   node holds costs one such request per node, so a client-side `kubectl
-  apply`, which reads before it creates, pays it once per new object. The envd
+  apply`, which reads before it creates, pays it once per new object, and a
+  list or watch pinned to that name pays it when it opens. The envd
   proxy, which holds no fleet token, asks `GET /v1/sandboxes/{id}/owner` with
   the caller's sandbox token under a per-replica budget and keeps the answer
   for a minute, past the node's next publish. A node that has not answered
