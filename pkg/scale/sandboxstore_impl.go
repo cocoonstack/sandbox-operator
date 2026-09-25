@@ -923,7 +923,7 @@ func splitNamespacedName(s string) (namespace, name string) {
 	return metav1.NamespaceDefault, s
 }
 
-func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }
+func objKey(sb *sandboxv1beta1.Sandbox) string { return namespacedName(sb.Namespace, sb.Name) }
 
 // A timeout after the request went out may have delivered a microVM, so it is never retried elsewhere.
 func claimUndelivered(err error) bool {

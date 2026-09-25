@@ -35,15 +35,17 @@ func TestGetByClaimIDReadsTheOwningNodeBeforeItPublishes(t *testing.T) {
 }
 
 func TestASilentNodeBoundsAMiss(t *testing.T) {
-	f := &recordingFactory{silent: "n2:7777"}
-	store, _ := unpublishedStore(f)
+	synctest.Test(t, func(t *testing.T) {
+		f := &recordingFactory{silent: "n2:7777"}
+		store, _ := unpublishedStore(f)
 
-	start := time.Now()
-	_, err := store.GetByClaimID(t.Context(), "ns", "sb_gone", func(id string) bool { return id == "sb_gone" })
-	require.True(t, k8serrors.IsNotFound(err), "a node that never answers is a miss: %v", err)
-	_, err = store.Get(t.Context(), "ns", "gone")
-	require.True(t, k8serrors.IsNotFound(err), "a node that never answers is a miss by name too: %v", err)
-	assert.Less(t, time.Since(start), 2*liveLookupTimeout+time.Second, "a silent node must not hold a miss past the per-node bound")
+		start := time.Now()
+		_, err := store.GetByClaimID(t.Context(), "ns", "sb_gone", func(id string) bool { return id == "sb_gone" })
+		require.True(t, k8serrors.IsNotFound(err), "a node that never answers is a miss: %v", err)
+		_, err = store.Get(t.Context(), "ns", "gone")
+		require.True(t, k8serrors.IsNotFound(err), "a node that never answers is a miss by name too: %v", err)
+		assert.Less(t, time.Since(start), 2*liveLookupTimeout+time.Second, "a silent node must not hold a miss past the per-node bound")
+	})
 }
 
 func TestGetAsksTheClaimingNodeFirst(t *testing.T) {
@@ -222,13 +224,6 @@ func TestANamePinnedWatchAsksNoNodeForAnAbsentName(t *testing.T) {
 	})
 }
 
-func unpublishedStore(f *recordingFactory) (*scatterGatherStore, *countingSource) {
-	src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
-	src.Put(poolInv("n1", "n1:7777"))
-	src.Put(poolInv("n2", "n2:7777"))
-	return NewScatterGatherStore(src, WithClaimRouting("t", f.factory())).(*scatterGatherStore), src
-}
-
 type countingSource struct {
 	*StaticInventorySource
 	lists atomic.Int32
@@ -237,6 +232,13 @@ type countingSource struct {
 func (c *countingSource) ListNodes(ctx context.Context) ([]string, error) {
 	c.lists.Add(1)
 	return c.StaticInventorySource.ListNodes(ctx)
+}
+
+func unpublishedStore(f *recordingFactory) (*scatterGatherStore, *countingSource) {
+	src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
+	src.Put(poolInv("n1", "n1:7777"))
+	src.Put(poolInv("n2", "n2:7777"))
+	return NewScatterGatherStore(src, WithClaimRouting("t", f.factory())).(*scatterGatherStore), src
 }
 
 func drainEvents(w watch.Interface) []watch.EventType {
