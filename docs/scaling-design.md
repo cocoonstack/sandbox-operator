@@ -188,7 +188,10 @@ The watch path makes the opposite trade. Re-deriving the fleet view is
 poll tick at 200 nodes and 50k sandboxes — yet the poll cadence is fixed on
 purpose: a widened interval would let a sandbox created and deleted inside the
 gap produce neither an Added nor a Deleted event. One watcher per fleet is the
-supported shape.
+supported shape. A watch pinned to one name in a namespace, which every
+`kubectl wait` and `kubectl delete` opens, is the exception: while it holds its
+entry it reads only that entry's node on each tick, and it sweeps the
+inventories only while it holds none.
 
 ### L3 read after write without published inventory
 

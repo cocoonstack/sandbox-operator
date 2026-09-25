@@ -3,6 +3,7 @@ package scale
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	restclient "k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -42,6 +44,44 @@ func BenchmarkClientInventoryWarmCandidates(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func BenchmarkClientInventoryWatchTick(b *testing.B) {
+	for _, fleet := range benchFleets {
+		b.Run(fleet.name, func(b *testing.B) {
+			store, _ := benchCachedStore(b, fleet.nodes, fleet.perNode, true)
+			ns, name := splitNamespacedName(fmt.Sprintf("default/sb-%s-%d", benchNodeName(fleet.nodes-1), fleet.perNode-1))
+			labelSel, fieldSel, err := parseSelectors(ListOptions{Namespace: ns, FieldSelector: "metadata.name=" + name})
+			if err != nil {
+				b.Fatalf("parse selectors: %v", err)
+			}
+			held, err := store.lookupName(b.Context(), ns, name)
+			if err != nil || held == nil {
+				b.Fatalf("look up %s/%s: %v", ns, name, err)
+			}
+			for _, arm := range []struct {
+				name string
+				poll func(context.Context) ([]sandboxv1beta1.Sandbox, error)
+			}{
+				{"fleet", func(ctx context.Context) ([]sandboxv1beta1.Sandbox, error) {
+					return store.listInventories(ctx, ns, labelSel, fieldSel)
+				}},
+				{"pinned", func(ctx context.Context) ([]sandboxv1beta1.Sandbox, error) {
+					return store.pollPinned(ctx, ns, name, held, labelSel, fieldSel)
+				}},
+			} {
+				b.Run(arm.name, func(b *testing.B) {
+					ctx := b.Context()
+					b.ReportAllocs()
+					for b.Loop() {
+						if items, err := arm.poll(ctx); err != nil || len(items) != 1 {
+							b.Fatalf("poll: %d items, %v", len(items), err)
+						}
+					}
+				})
+			}
+		})
 	}
 }
 
