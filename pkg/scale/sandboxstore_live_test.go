@@ -224,6 +224,66 @@ func TestANamePinnedWatchAsksNoNodeForAnAbsentName(t *testing.T) {
 	})
 }
 
+func TestANamePinnedWatchPollsOnlyTheNodeThatHoldsItsEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
+		src.Put(inventoryWith("n1"))
+		src.Put(inventoryWith("n2", InventoryEntry{Name: "ns/s2", ID: "sb_2", Phase: "Running"}))
+		store := NewScatterGatherStore(src).(*scatterGatherStore)
+		w, err := store.Watch(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2"})
+		require.NoError(t, err)
+		defer w.Stop()
+
+		assert.Equal(t, []watch.EventType{watch.Added}, drainEvents(w))
+		opened := src.lists.Load()
+		time.Sleep(5 * time.Second)
+		assert.Empty(t, drainEvents(w))
+		assert.Equal(t, opened, src.lists.Load(), "a watch that holds its entry must not enumerate the fleet on a tick")
+
+		src.Put(inventoryWith("n2", InventoryEntry{Name: "ns/s2", ID: "sb_2", Phase: "Paused"}))
+		time.Sleep(2 * time.Second)
+		assert.Equal(t, []watch.EventType{watch.Modified}, drainEvents(w))
+		assert.Equal(t, opened, src.lists.Load(), "a change on the entry's node must not enumerate the fleet either")
+
+		src.Put(inventoryWith("n2"))
+		src.Put(inventoryWith("n1", InventoryEntry{Name: "ns/s2", ID: "sb_3", Phase: "Running"}))
+		time.Sleep(3 * time.Second)
+		assert.Equal(t, []watch.EventType{watch.Deleted, watch.Added}, drainEvents(w), "a name claimed again on another node is a delete, then an add")
+	})
+}
+
+func TestANamePinnedWatchSweepSkipsADuplicateItsSelectorsReject(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
+		src.Put(inventoryWith("n1"))
+		src.Put(inventoryWith("n2"))
+		store := NewScatterGatherStore(src).(*scatterGatherStore)
+		store.concurrency = 1
+		w, err := store.Watch(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2", LabelSelector: PhaseLabel + "=" + PhaseRunning})
+		require.NoError(t, err)
+		defer w.Stop()
+
+		assert.Empty(t, drainEvents(w))
+		src.Put(inventoryWith("n1", InventoryEntry{Name: "ns/s2", ID: "sb_1", Phase: "Paused"}))
+		src.Put(inventoryWith("n2", InventoryEntry{Name: "ns/s2", ID: "sb_2", Phase: PhaseRunning}))
+		time.Sleep(2 * time.Second)
+		assert.Equal(t, []watch.EventType{watch.Added}, drainEvents(w), "a duplicate the selector rejects must not hide the one it accepts")
+	})
+}
+
+func TestANamePinnedListSkipsADuplicateItsSelectorsReject(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(inventoryWith("n1", InventoryEntry{Name: "ns/s2", ID: "sb_1", Phase: "Paused"}))
+	src.Put(inventoryWith("n2", InventoryEntry{Name: "ns/s2", ID: "sb_2", Phase: PhaseRunning}))
+	store := NewScatterGatherStore(src).(*scatterGatherStore)
+	store.concurrency = 1
+
+	list, err := store.List(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2", LabelSelector: PhaseLabel + "=" + PhaseRunning})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1, "a duplicate the selector rejects must not hide the one it accepts")
+	assert.Equal(t, "n2", list.Items[0].Status.NodeName)
+}
+
 type countingSource struct {
 	*StaticInventorySource
 	lists atomic.Int32
@@ -239,6 +299,12 @@ func unpublishedStore(f *recordingFactory) (*scatterGatherStore, *countingSource
 	src.Put(poolInv("n1", "n1:7777"))
 	src.Put(poolInv("n2", "n2:7777"))
 	return NewScatterGatherStore(src, WithClaimRouting("t", f.factory())).(*scatterGatherStore), src
+}
+
+func inventoryWith(node string, entries ...InventoryEntry) *NodeInventory {
+	inv := poolInv(node, node+":7777")
+	inv.Entries = entries
+	return inv
 }
 
 func drainEvents(w watch.Interface) []watch.EventType {
