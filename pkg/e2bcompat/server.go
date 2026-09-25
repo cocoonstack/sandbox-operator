@@ -40,13 +40,9 @@ import (
 )
 
 const (
-	// DefaultEnvdVersion is reported to the SDK when no version is configured.
-	// The SDK version-compares this before choosing the envd auth style, so it
-	// must be a real semver at or above the modern-auth cutoff (0.4.0).
+	// DefaultEnvdVersion is the modern-auth floor the SDK version-compares when none is configured.
 	DefaultEnvdVersion = "0.4.0"
-	// DefaultTimeoutSeconds matches the node's own default lease. The e2b SDK
-	// defaults to 15s, which reaps a sandbox before a first exec on a cold
-	// client, so an omitted timeout takes the node's default instead.
+	// DefaultTimeoutSeconds is the node's default lease; the SDK's own 15s reaps a cold client's sandbox.
 	DefaultTimeoutSeconds = 300
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
@@ -59,34 +55,19 @@ var (
 
 // Options configures the compat server.
 type Options struct {
-	// Namespace is where a key that names no namespace claims, and where
-	// anonymous claims land.
+	// Namespace is where anonymous claims and claims by a key that names no namespace land.
 	Namespace string
-	// Domain is echoed as the sandbox `domain`, from which the SDK derives the
-	// envd host as "{port}-{sandboxID}.{domain}". It is required: a sandbox
-	// handed out without one has no address its client can reach.
-	//
-	// The sandbox ids published here are DNS-label safe (see sandboxid.go), so
-	// that host form is valid; wildcard DNS and a proxy must still route the host
-	// or the E2b-Sandbox-Id / E2b-Sandbox-Port headers the SDK sends.
+	// Domain is the required base domain the SDK derives the envd host from, as "{port}-{sandboxID}.{domain}".
 	Domain string
-	// EnvdVersion overrides DefaultEnvdVersion. It must name the envd actually
-	// installed in the pool's image: the SDK version-compares it and kills the
-	// sandbox when it cannot parse one.
+	// EnvdVersion overrides DefaultEnvdVersion and must name the envd installed in the pool's image.
 	EnvdVersion string
-	// DefaultTimeoutSeconds overrides DefaultTimeoutSeconds for a create that
-	// names no timeout, and is the lease a refresh grants.
+	// DefaultTimeoutSeconds overrides DefaultTimeoutSeconds for a create without a timeout and for a refresh.
 	DefaultTimeoutSeconds int
-	// APIKeys, when non-empty, is the set of accepted X-API-KEY values, each
-	// "key" or "key namespace" (Namespace when none is given); a key sees
-	// nothing outside its namespace. Empty is refused unless AllowAnonymous.
+	// APIKeys holds the accepted X-API-KEY values, each "key" or "key namespace"; empty requires AllowAnonymous.
 	APIKeys []string
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
-	// Inventory enumerates the fleet's nodes and their advertised pools. It is
-	// required by the surfaces that are fleet-wide rather than sandbox-scoped
-	// (template listing, snapshot listing); without it those report an error
-	// instead of an empty list, so a missing dependency cannot read as "none".
+	// Inventory enumerates the fleet's nodes; without it template and snapshot listing fail rather than report none.
 	Inventory scale.InventorySource
 }
 
@@ -449,9 +430,7 @@ func (f listFilter) keeps(d SandboxDetail) bool {
 	return true
 }
 
-// templateOf reports the pool template a sandbox was claimed from: the label the
-// store stamps, which is the only place it survives (a synthesized Sandbox holds
-// no pod spec).
+// templateOf reads the store's label because a synthesized Sandbox holds no pod spec.
 func templateOf(sb *sandboxv1beta1.Sandbox) string {
 	return sb.Labels[scale.TemplateLabel]
 }
@@ -464,9 +443,7 @@ func netFor(allowInternet *bool) string {
 	return scale.NetDefault
 }
 
-// unsupportedCreateOption names the first requested option this backend cannot
-// honor. Honoring it silently would hand back a different sandbox than asked
-// for, which is how an SDK ends up trusting a guarantee that does not hold.
+// unsupportedCreateOption names the first requested option this backend cannot honor.
 func unsupportedCreateOption(req NewSandbox) (string, bool) {
 	switch {
 	case req.Secure != nil && !*req.Secure:
