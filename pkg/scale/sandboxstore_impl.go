@@ -458,7 +458,10 @@ func (s *scatterGatherStore) pollPinned(ctx context.Context, namespace, name str
 		return selectedOne(s.matchOnNode(ctx, "watch", prev.Status.NodeName, match), nil, labelSel, fieldSel)
 	}
 	sb, err := FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, node string) *sandboxv1beta1.Sandbox {
-		return s.matchOnNode(gctx, "watch", node, match)
+		if sb := s.matchOnNode(gctx, "watch", node, match); sb != nil && selected(sb, labelSel, fieldSel) {
+			return sb
+		}
+		return nil
 	})
 	return selectedOne(sb, err, labelSel, fieldSel)
 }

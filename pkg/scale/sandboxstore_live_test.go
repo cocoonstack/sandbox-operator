@@ -252,6 +252,25 @@ func TestANamePinnedWatchPollsOnlyTheNodeThatHoldsItsEntry(t *testing.T) {
 	})
 }
 
+func TestANamePinnedWatchSweepSkipsADuplicateItsSelectorsReject(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
+		src.Put(inventoryWith("n1"))
+		src.Put(inventoryWith("n2"))
+		store := NewScatterGatherStore(src).(*scatterGatherStore)
+		store.concurrency = 1
+		w, err := store.Watch(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2", LabelSelector: PhaseLabel + "=" + PhaseRunning})
+		require.NoError(t, err)
+		defer w.Stop()
+
+		assert.Empty(t, drainEvents(w))
+		src.Put(inventoryWith("n1", InventoryEntry{Name: "ns/s2", ID: "sb_1", Phase: "Paused"}))
+		src.Put(inventoryWith("n2", InventoryEntry{Name: "ns/s2", ID: "sb_2", Phase: PhaseRunning}))
+		time.Sleep(2 * time.Second)
+		assert.Equal(t, []watch.EventType{watch.Added}, drainEvents(w), "a duplicate the selector rejects must not hide the one it accepts")
+	})
+}
+
 type countingSource struct {
 	*StaticInventorySource
 	lists atomic.Int32
