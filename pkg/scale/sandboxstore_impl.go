@@ -339,8 +339,14 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, lab
 	defer close(ch)
 
 	logger := log.WithFunc("scale.runWatch")
-	_, pinned := pinnedName(opts.Namespace, fieldSel)
+	name, pinned := pinnedName(opts.Namespace, fieldSel)
 	known := map[string]*sandboxv1beta1.Sandbox{}
+	poll := func() ([]sandboxv1beta1.Sandbox, error) {
+		if pinned {
+			return s.pollPinned(ctx, opts.Namespace, name, known[namespacedName(opts.Namespace, name)], labelSel, fieldSel)
+		}
+		return s.listInventories(ctx, opts.Namespace, labelSel, fieldSel)
+	}
 	emit := func(t watch.EventType, sb *sandboxv1beta1.Sandbox) bool {
 		select {
 		case ch <- watch.Event{Type: t, Object: sb}:
@@ -377,7 +383,7 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, lab
 		case <-w.StopChan():
 			return
 		case <-ticker.C:
-			items, err := s.listInventories(ctx, opts.Namespace, labelSel, fieldSel)
+			items, err := poll()
 			if err != nil {
 				logger.Error(ctx, err, "watch poll list failed")
 				continue
@@ -443,10 +449,18 @@ func (s *scatterGatherStore) listInventories(ctx context.Context, namespace stri
 
 func (s *scatterGatherStore) listPinned(ctx context.Context, namespace, name string, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
 	sb, err := s.lookupName(ctx, namespace, name)
-	if err != nil || sb == nil || !selected(sb, labelSel, fieldSel) {
-		return nil, err
+	return selectedOne(sb, err, labelSel, fieldSel)
+}
+
+func (s *scatterGatherStore) pollPinned(ctx context.Context, namespace, name string, prev *sandboxv1beta1.Sandbox, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
+	match := nameMatch(namespace, name)
+	if prev != nil {
+		return selectedOne(s.matchOnNode(ctx, "watch", prev.Status.NodeName, match), nil, labelSel, fieldSel)
 	}
-	return []sandboxv1beta1.Sandbox{*sb}, nil
+	sb, err := FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, node string) *sandboxv1beta1.Sandbox {
+		return s.matchOnNode(gctx, "watch", node, match)
+	})
+	return selectedOne(sb, err, labelSel, fieldSel)
 }
 
 func (s *scatterGatherStore) lookupName(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
@@ -890,6 +904,13 @@ func nameMatch(namespace, name string) inventoryMatch {
 
 func selected(sb *sandboxv1beta1.Sandbox, labelSel labels.Selector, fieldSel fields.Selector) bool {
 	return labelSel.Matches(labels.Set(sb.Labels)) && fieldSel.Matches(sandboxFields(sb))
+}
+
+func selectedOne(sb *sandboxv1beta1.Sandbox, err error, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
+	if err != nil || sb == nil || !selected(sb, labelSel, fieldSel) {
+		return nil, err
+	}
+	return []sandboxv1beta1.Sandbox{*sb}, nil
 }
 
 func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
