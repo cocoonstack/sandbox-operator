@@ -209,24 +209,12 @@ func NewScatterGatherStore(src InventorySource, opts ...StoreOption) SandboxStor
 	return s
 }
 
-// List assembles a SandboxList by fanning out to every node inventory with
-// bounded concurrency, flattening entries into Sandboxes and honoring the
-// namespace/label/field filters. A node whose inventory is unavailable
-// (partitioned, or its NodeInventory lost before the next publish) is logged and
-// omitted — eventual consistency, never a whole-list failure.
 func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandboxv1beta1.SandboxList, error) {
 	labelSel, fieldSel, err := parseSelectors(opts)
 	if err != nil {
 		return nil, err
 	}
-	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
-		inv, invErr := s.src.NodeInventory(gctx, node)
-		if invErr != nil {
-			log.WithFunc("scale.List").Debugf(gctx, "node inventory unavailable; omitting from list (eventual consistency) node=%s err=%v", node, invErr)
-			return nil
-		}
-		return s.materialize(inv, opts.Namespace, labelSel, fieldSel)
-	})
+	items, err := s.listItems(ctx, opts.Namespace, labelSel, fieldSel)
 	if err != nil {
 		return nil, err
 	}
@@ -236,18 +224,12 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	if list.Items == nil {
 		list.Items = []sandboxv1beta1.Sandbox{} // an empty list serializes as [], not null
 	}
-	slices.SortFunc(list.Items, func(a, b sandboxv1beta1.Sandbox) int {
-		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-	})
 	return list, nil
 }
 
 // Get resolves namespace/name from the inventories, then from the nodes by the claim ref it was claimed under.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.resolve(ctx, "get", nameKey(namespace, name), rowsByClaimRef(namespacedName(namespace, name)), func(inv *NodeInventory, i int) bool {
-		ens, ename := splitNamespacedName(inv.Entries[i].Name)
-		return ens == namespace && ename == name
-	})
+	found, err := s.lookupName(ctx, namespace, name)
 	if err != nil {
 		return nil, err
 	}
@@ -342,12 +324,13 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 
 // Watch re-derives the fanned-out list every watch poll interval and emits the diff as Added/Modified/Deleted events.
 func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) {
-	if _, _, err := parseSelectors(opts); err != nil {
+	labelSel, fieldSel, err := parseSelectors(opts)
+	if err != nil {
 		return nil, err
 	}
 	ch := make(chan watch.Event, 64)
 	w := watch.NewProxyWatcher(ch)
-	go s.runWatch(ctx, opts, w, ch)
+	go s.runWatch(ctx, opts, labelSel, fieldSel, w, ch)
 	return w, nil
 }
 
@@ -416,10 +399,11 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 	})
 }
 
-func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *watch.ProxyWatcher, ch chan watch.Event) {
+func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, labelSel labels.Selector, fieldSel fields.Selector, w *watch.ProxyWatcher, ch chan watch.Event) {
 	defer close(ch)
 
 	logger := log.WithFunc("scale.runWatch")
+	_, pinned := pinnedName(opts.Namespace, fieldSel)
 	known := map[string]*sandboxv1beta1.Sandbox{}
 	emit := func(t watch.EventType, sb *sandboxv1beta1.Sandbox) bool {
 		select {
@@ -432,11 +416,11 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		}
 	}
 
-	if list, err := s.List(ctx, opts); err != nil {
+	if items, err := s.listItems(ctx, opts.Namespace, labelSel, fieldSel); err != nil {
 		logger.Error(ctx, err, "initial watch list failed")
 	} else {
-		for i := range list.Items {
-			sb := list.Items[i].DeepCopy()
+		for i := range items {
+			sb := items[i].DeepCopy()
 			known[objKey(sb)] = sb
 			if !emit(watch.Added, sb) {
 				return
@@ -461,14 +445,14 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		case <-w.StopChan():
 			return
 		case <-ticker.C:
-			list, err := s.List(ctx, opts)
+			items, err := s.listInventories(ctx, opts.Namespace, labelSel, fieldSel)
 			if err != nil {
 				logger.Error(ctx, err, "watch poll list failed")
 				continue
 			}
-			cur := make(map[string]*sandboxv1beta1.Sandbox, len(list.Items))
-			for i := range list.Items {
-				sb := list.Items[i].DeepCopy()
+			cur := make(map[string]*sandboxv1beta1.Sandbox, len(items))
+			for i := range items {
+				sb := items[i].DeepCopy()
 				k := objKey(sb)
 				cur[k] = sb
 				prev, ok := known[k]
@@ -484,10 +468,15 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 				}
 			}
 			for k, prev := range known {
-				if _, ok := cur[k]; !ok {
-					if !emit(watch.Deleted, prev) {
-						return
-					}
+				if _, ok := cur[k]; ok {
+					continue
+				}
+				if pinned && s.heldByNode(ctx, prev, labelSel, fieldSel) {
+					cur[k] = prev
+					continue
+				}
+				if !emit(watch.Deleted, prev) {
+					return
 				}
 			}
 			known = cur
@@ -495,21 +484,57 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 	}
 }
 
-// materialize turns one node's inventory entries into filtered Sandboxes.
+func (s *scatterGatherStore) listItems(ctx context.Context, namespace string, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
+	if name, ok := pinnedName(namespace, fieldSel); ok {
+		return s.listPinned(ctx, namespace, name, labelSel, fieldSel)
+	}
+	return s.listInventories(ctx, namespace, labelSel, fieldSel)
+}
+
+func (s *scatterGatherStore) listInventories(ctx context.Context, namespace string, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
+	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
+		inv, invErr := s.src.NodeInventory(gctx, node)
+		if invErr != nil {
+			log.WithFunc("scale.listInventories").Debugf(gctx, "node inventory unavailable; omitting from list (eventual consistency) node=%s err=%v", node, invErr)
+			return nil
+		}
+		return s.materialize(inv, namespace, labelSel, fieldSel)
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, b sandboxv1beta1.Sandbox) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+	return items, nil
+}
+
+func (s *scatterGatherStore) listPinned(ctx context.Context, namespace, name string, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
+	sb, err := s.lookupName(ctx, namespace, name)
+	if err != nil || sb == nil || !selected(sb, labelSel, fieldSel) {
+		return nil, err
+	}
+	return []sandboxv1beta1.Sandbox{*sb}, nil
+}
+
+func (s *scatterGatherStore) lookupName(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
+	return s.resolve(ctx, "get", nameKey(namespace, name), rowsByClaimRef(namespacedName(namespace, name)), nameMatch(namespace, name))
+}
+
+func (s *scatterGatherStore) heldByNode(ctx context.Context, sb *sandboxv1beta1.Sandbox, labelSel labels.Selector, fieldSel fields.Selector) bool {
+	live := s.liveOnNode(ctx, "watch", sb.Status.NodeName, rowsByClaimRef(objKey(sb)), nameMatch(sb.Namespace, sb.Name))
+	return live != nil && selected(live, labelSel, fieldSel)
+}
+
 func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, labelSel labels.Selector, fieldSel fields.Selector) []sandboxv1beta1.Sandbox {
 	out := make([]sandboxv1beta1.Sandbox, 0, len(inv.Entries))
 	for i := range inv.Entries {
 		if ns, _ := splitNamespacedName(inv.Entries[i].Name); namespace != "" && ns != namespace {
 			continue
 		}
-		sb := entryToSandbox(inv.Node, inv.Entries[i])
-		if !labelSel.Matches(labels.Set(sb.Labels)) {
-			continue
+		if sb := entryToSandbox(inv.Node, inv.Entries[i]); selected(sb, labelSel, fieldSel) {
+			out = append(out, *sb)
 		}
-		if !fieldSel.Matches(sandboxFields(sb)) {
-			continue
-		}
-		out = append(out, *sb)
 	}
 	return out
 }
@@ -949,6 +974,22 @@ func claimedAtValue(e InventoryEntry) string {
 		return ""
 	}
 	return strconv.FormatInt(e.ClaimedAt.Unix(), 10)
+}
+
+func pinnedName(namespace string, fieldSel fields.Selector) (string, bool) {
+	name, ok := fieldSel.RequiresExactMatch("metadata.name")
+	return name, ok && name != "" && namespace != ""
+}
+
+func nameMatch(namespace, name string) inventoryMatch {
+	return func(inv *NodeInventory, i int) bool {
+		ens, ename := splitNamespacedName(inv.Entries[i].Name)
+		return ens == namespace && ename == name
+	}
+}
+
+func selected(sb *sandboxv1beta1.Sandbox, labelSel labels.Selector, fieldSel fields.Selector) bool {
+	return labelSel.Matches(labels.Set(sb.Labels)) && fieldSel.Matches(sandboxFields(sb))
 }
 
 func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {

@@ -111,9 +111,10 @@ claim time and the submitted object is the only place `Create` can hear it:
   `NodeInventory`, which nodes republish on a ~30s cadence, so a list right
   after a create may not show it yet. `Get` and the lifecycle verbs, by name
   or by claim id (the e2b surface), ask the nodes and answer at once on any
-  apiserver replica. A deleted sandbox stays readable until its node
-  publishes; a fork child is named by its claim id in the parent's namespace
-  and readable at once.
+  apiserver replica, and a list or watch pinned to one name in a namespace
+  reads like that `Get` when it opens. A deleted sandbox stays readable until
+  its node publishes; a fork child is named by its claim id in the parent's
+  namespace and readable at once.
 - **`Create` is a claim, not an upsert.** No Sandbox object is stored, so
   `metadata.name` is never checked against the fleet: a repeated `Create` under
   one name claims a second microVM, and the by-name verbs then reach whichever

@@ -56,12 +56,12 @@ type Assignment struct {
 // sandboxes, so object count drops from O(sandboxes) to O(pools+nodes) while
 // kubectl/RBAC/watch keep working.
 type SandboxStore interface {
-	// List assembles a SandboxList by fanning out to node inventories.
+	// List assembles a SandboxList from the node inventories. A list pinned to one name in a namespace resolves like Get.
 	List(ctx context.Context, opts ListOptions) (*sandboxv1beta1.SandboxList, error)
 	// Get resolves one sandbox from the cache-fed node inventories, or from its
 	// node when the node has not republished.
 	Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error)
-	// Watch emits sandbox events as the node inventories change.
+	// Watch emits sandbox events as the node inventories change. A watch pinned to one name in a namespace starts from Get.
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)
 	// Claim delivers a warm microVM for namespace/name from a node advertising warm
 	// capacity for pool, returning the node-local assignment (claim id, node,

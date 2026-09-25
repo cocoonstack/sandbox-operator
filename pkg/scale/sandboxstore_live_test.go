@@ -4,12 +4,14 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
@@ -145,6 +147,81 @@ func TestFirstHitReturnsTheFirstNonZeroAnswer(t *testing.T) {
 	assert.Empty(t, none)
 }
 
+func TestANamePinnedListFindsAClaimBeforeItsNodePublishes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		opts ListOptions
+		want []string
+	}{
+		"the claimed name":          {opts: ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2"}, want: []string{"n2"}},
+		"a label the claim lacks":   {opts: ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2", LabelSelector: PhaseLabel + "=" + PhaseHibernated}},
+		"an unclaimed name":         {opts: ListOptions{Namespace: "ns", FieldSelector: "metadata.name=gone"}},
+		"the fleet view":            {opts: ListOptions{Namespace: "ns"}},
+		"a name in every namespace": {opts: ListOptions{FieldSelector: "metadata.name=s2"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store, _ := unpublishedStore(liveClaimFactory())
+
+			list, err := store.List(t.Context(), tc.opts)
+			require.NoError(t, err)
+			var nodes []string
+			for i := range list.Items {
+				nodes = append(nodes, list.Items[i].Status.NodeName)
+			}
+			assert.Equal(t, tc.want, nodes)
+		})
+	}
+}
+
+func TestANamePinnedWatchKeepsAClaimOnlyWhileItsNodeHoldsIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		labels string
+		change func(f *recordingFactory)
+	}{
+		"the node releases it":   {change: func(f *recordingFactory) { delete(f.rows, "n2:7777") }},
+		"it leaves the selector": {labels: PhaseLabel + "=" + PhaseRunning, change: func(f *recordingFactory) { f.rows["n2:7777"][0].Hibernated = true }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := liveClaimFactory()
+				store, _ := unpublishedStore(f)
+				w, err := store.Watch(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=s2", LabelSelector: tc.labels, WatchList: true})
+				require.NoError(t, err)
+				defer w.Stop()
+
+				assert.Equal(t, []watch.EventType{watch.Added, watch.Bookmark}, drainEvents(w), "a live claim must be in the initial events")
+				time.Sleep(5 * time.Second)
+				assert.Empty(t, drainEvents(w), "a claim its node still holds must not read as deleted")
+
+				f.mu.Lock()
+				tc.change(f)
+				f.mu.Unlock()
+				time.Sleep(2 * time.Second)
+				assert.Equal(t, []watch.EventType{watch.Deleted}, drainEvents(w))
+			})
+		})
+	}
+}
+
+func TestANamePinnedWatchAsksNoNodeForAnAbsentName(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := &recordingFactory{}
+		store, _ := unpublishedStore(f)
+		w, err := store.Watch(t.Context(), ListOptions{Namespace: "ns", FieldSelector: "metadata.name=gone", WatchList: true})
+		require.NoError(t, err)
+		defer w.Stop()
+
+		assert.Equal(t, []watch.EventType{watch.Bookmark}, drainEvents(w))
+		f.mu.Lock()
+		f.rowReads = nil
+		f.mu.Unlock()
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		assert.Empty(t, f.rowReads, "polling an absent name must not ask the nodes")
+	})
+}
+
 func unpublishedStore(f *recordingFactory) (*scatterGatherStore, *countingSource) {
 	src := &countingSource{StaticInventorySource: NewStaticInventorySource()}
 	src.Put(poolInv("n1", "n1:7777"))
@@ -160,4 +237,17 @@ type countingSource struct {
 func (c *countingSource) ListNodes(ctx context.Context) ([]string, error) {
 	c.lists.Add(1)
 	return c.StaticInventorySource.ListNodes(ctx)
+}
+
+func drainEvents(w watch.Interface) []watch.EventType {
+	synctest.Wait()
+	var got []watch.EventType
+	for len(w.ResultChan()) > 0 {
+		got = append(got, (<-w.ResultChan()).Type)
+	}
+	return got
+}
+
+func liveClaimFactory() *recordingFactory {
+	return &recordingFactory{rows: map[string][]sandboxd.SandboxSummary{"n2:7777": {{ID: "sb_2", ClaimRef: "ns/s2"}}}}
 }

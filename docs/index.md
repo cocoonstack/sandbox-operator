@@ -44,8 +44,9 @@ microVMs while etcd saw ~2 writes/s.
 
 The cost of that design is a list view assembled from inventory nodes
 republish on a ~30 s cadence: `list` and `watch` are eventually consistent. A
-lookup of one sandbox the inventory does not list yet — by name, or by claim id
-from the e2b surface and the envd proxy — asks the nodes directly.
+lookup of one sandbox the inventory does not list yet — by name, by a list or
+watch pinned to one name in a namespace, or by claim id from the e2b surface
+and the envd proxy — asks the nodes directly.
 
 ## Guides
 

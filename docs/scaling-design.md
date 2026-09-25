@@ -162,7 +162,7 @@ v1beta1 the `APIService` hands to the aggregated server, which serves only
 | A node `inventory` object lost | Rebuilt from the node's own live state on next publish | No |
 | A node's `Node` object deleted | Its `NodeInventory` is garbage-collected with it: the node leaves the claim path and its sandboxes leave the read view, though sandboxd keeps serving them and their leases still expire there; restarting vk-sandbox registers the node again | No |
 | Aggregated server restart | Stateless; rebuilds from node fan-out | No |
-| Client reads before the owning node republishes inventory | Lookups by name and by claim id (e2b, envd proxy) ask the nodes; `list` and `watch` show it at the next publish | No — `list`, `watch`, and a deleted sandbox until its node publishes stay eventually consistent |
+| Client reads before the owning node republishes inventory | Lookups by name and by claim id (e2b, envd proxy), and a list or watch pinned to one name in a namespace, ask the nodes; other lists and watches show it at the next publish | No — fleet `list` and `watch`, and a deleted sandbox until its node publishes, stay eventually consistent |
 
 **Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
 sandboxes` returns the fanned-out list; per-sandbox `Get` only materializes the
