@@ -86,7 +86,9 @@ checkpoint branch carries no claim ref: by claim id it answers at once, by name
 only after its node publishes.
 
 `watch` is served by re-deriving that view and diffing it, so it inherits the
-same lag. A watch-list request (`sendInitialEvents=true`, what kubectl and
+same lag. Every watch opens with the current view as `ADDED` events, whatever
+`resourceVersion` it names, so a client that lists and then watches sees each
+object once from the list and once from the watch. A watch-list request (`sendInitialEvents=true`, what kubectl and
 client-go informers send) gets the `k8s.io/initial-events-end` bookmark after
 its initial events. Label selectors work against the axes the store stamps:
 `sandbox.cocoonstack.io/node`, `/phase`, `/claim` and `/template`. The
