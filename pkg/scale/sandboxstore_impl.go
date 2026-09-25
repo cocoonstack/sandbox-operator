@@ -227,7 +227,6 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	return list, nil
 }
 
-// Get resolves namespace/name from the inventories, then from the nodes by the claim ref it was claimed under.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
 	found, err := s.lookupName(ctx, namespace, name)
 	if err != nil {
@@ -239,11 +238,6 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 	return found, nil
 }
 
-// GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
-// fanning out per node and canceling on the first hit; only the matching entry
-// is materialized. An empty namespace matches every namespace. id is the
-// caller's spelling of the claim id and keys the owning-node index; match owns
-// which node-local id it accepts.
 func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
 	found, err := s.resolve(ctx, "claim-id get", claimKey(namespace, id), rowByID(id), func(inv *NodeInventory, i int) bool {
 		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
@@ -261,10 +255,6 @@ func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id str
 	return found, nil
 }
 
-// Claim samples two nodes advertising warm capacity for pool, takes the warmer,
-// and hands over one of its running microVMs via that node's sandboxd.
-// No per-sandbox object is written to etcd. It fails closed if claim routing is
-// not configured, and returns ErrNoWarmCapacity when no warm node is available.
 func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error) {
 	if s.sandboxdFactory == nil {
 		return Assignment{}, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
@@ -306,8 +296,6 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
 }
 
-// Release destroys the claimed microVM through the node's advertised sandboxd and
-// fails closed when claim routing is not configured.
 func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error {
 	if id == "" {
 		return fmt.Errorf("scale: release requires a claim id")
@@ -322,7 +310,6 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	return nil
 }
 
-// Watch re-derives the fanned-out list every watch poll interval and emits the diff as Added/Modified/Deleted events.
 func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) {
 	labelSel, fieldSel, err := parseSelectors(opts)
 	if err != nil {
