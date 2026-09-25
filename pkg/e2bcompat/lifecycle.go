@@ -22,18 +22,12 @@ import (
 // cannot serialize a handler into the minutes.
 const maxNodeConcurrency = 16
 
-// pauseSandbox hibernates the sandbox: its memory is written out and the VM
-// stops, so the cost is proportional to guest RAM. e2b's contract is specific
-// about the already-paused case — the SDK reads 409 as "already paused" and
-// returns false rather than raising — so that state is reported, not retried.
+// pauseSandbox answers 409 when already paused because the e2b SDK reads 409 as "already paused".
 func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	var req SandboxPauseRequest
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
-	// memory=false asks for a filesystem-only snapshot whose resume cold-boots.
-	// The node's hibernate always captures memory, so honoring it would mean
-	// silently giving back a different sandbox than asked for.
 	if req.Memory != nil && !*req.Memory {
 		writeError(w, http.StatusBadRequest,
 			"filesystem-only pause (memory=false) is not supported; this backend always snapshots memory")
@@ -61,10 +55,7 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// connectSandbox is the SDK's resume: it returns the sandbox's connection
-// details, restoring it first when paused. 200 means it was already running,
-// 201 that it was paused and got resumed — the SDK accepts either, and the
-// distinction is what tells an operator whether a restore actually happened.
+// connectSandbox is the e2b SDK's resume; the SDK accepts both 200 and 201.
 func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	var req ConnectSandbox
 	if !decodeOptionalBody(w, r, &req) {
@@ -114,12 +105,7 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// forkSandbox branches the sandbox into count children. The parent is
-// checkpointed in place and keeps running; every child is a fresh sandbox with
-// its own id and lease. Per e2b's contract a partial failure is still a 201
-// carrying per-child detail — a non-201 means nothing was attempted — so the
-// node's all-or-nothing fork is reported as a whole-request failure only when
-// it rejects the request outright.
+// forkSandbox sets no per-child error because the node fork is all-or-nothing.
 func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	var req SandboxForkRequest
 	if !decodeOptionalBody(w, r, &req) {
@@ -260,7 +246,7 @@ func (s *Server) snapshotsOf(r *http.Request) (snaps []scale.Snapshot, complete 
 		g.Go(func() error {
 			snaps, err := s.store.Snapshots(r.Context(), node)
 			if err != nil {
-				log.WithFunc("e2bcompat.snapshotsOf").Errorf(r.Context(), err, "e2b snapshots: node failed node=%s", node)
+				log.WithFunc("e2bcompat.snapshotsOf").Warnf(r.Context(), "e2b snapshots: node failed node=%s err=%v", node, err)
 				return nil
 			}
 			answered[i] = true
@@ -277,9 +263,6 @@ func (s *Server) snapshotsOf(r *http.Request) (snaps []scale.Snapshot, complete 
 	return slices.Concat(perNode...), !slices.Contains(answered, false), nil
 }
 
-// sandboxMetrics reports one sandbox's resource usage. e2b's schema requires
-// every field, so all are emitted; the ones this backend cannot measure are
-// reported as zero rather than invented (see SandboxStats).
 func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
@@ -305,10 +288,7 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
-// listTemplates reports the pools this fleet can serve claims from. e2b's
-// templates are build artifacts with their own lifecycle; the equivalent here
-// is the set of warm-pool keys nodes advertise, which is what a caller can
-// actually pass as templateID on create.
+// listTemplates reports the advertised warm-pool keys, the values create accepts as templateID.
 func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 	nodes, err := s.inventories(r)
 	if err != nil {
@@ -354,9 +334,7 @@ func (s *Server) inventories(r *http.Request) ([]*scale.NodeInventory, error) {
 	for _, node := range nodes {
 		inv, err := s.opts.Inventory.NodeInventory(r.Context(), node)
 		if err != nil {
-			// A partitioned node is skipped, not fatal — the same rule the
-			// aggregated read path applies.
-			log.WithFunc("e2bcompat.inventories").Errorf(r.Context(), err, "e2b: node inventory unavailable node=%s", node)
+			log.WithFunc("e2bcompat.inventories").Warnf(r.Context(), "e2b: node inventory unavailable node=%s err=%v", node, err)
 			continue
 		}
 		out = append(out, inv)
@@ -372,10 +350,7 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 	return s.opts.Inventory.ListNodes(r.Context())
 }
 
-// isPaused asks the owning node: the listed phase comes from NodeInventory,
-// which lags a pause by up to its publish cadence, and a stale Running would
-// turn e2b's 409 "already paused" into a second 204. An unreachable node falls
-// back to the cached label.
+// isPaused asks the owning node because the NodeInventory phase lags a pause by up to one publish.
 func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) (bool, error) {
 	if node, id := sb.Status.NodeName, claimIDOf(sb); node != "" && id != "" {
 		rec, err := s.store.Read(ctx, node, id)

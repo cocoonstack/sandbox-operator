@@ -29,10 +29,7 @@ type route struct {
 	port      uint16
 }
 
-// routeOf reads the destination from the two forms the SDK sends: the derived
-// host "{port}-{sandboxID}.{domain}", and the header pair used when every
-// sandbox shares one host. Headers win, because a client that sends them has
-// already decided the host does not carry the address.
+// routeOf prefers the header pair because a client that sends it does not address the sandbox by host.
 func routeOf(r *http.Request, domain string) (route, bool) {
 	if id := strings.TrimSpace(r.Header.Get(sandboxIDHeader)); id != "" {
 		port, ok := parsePort(r.Header.Get(sandboxPortHeader))

@@ -63,9 +63,7 @@ type options struct {
 	keep       bool
 }
 
-// e2bClient is a minimal client for the e2b REST contract. The real e2b SDKs
-// (JS and Python) speak exactly this and need no changes — point E2B_API_URL at
-// the server. This exists because there is no official Go SDK.
+// e2bClient hand-rolls the e2b REST contract because e2b has no official Go SDK.
 type e2bClient struct {
 	base string
 	key  string
@@ -214,9 +212,7 @@ func newScheme() (*runtime.Scheme, error) {
 	return scheme, nil
 }
 
-// newClient builds a controller-runtime client that knows this operator's
-// types. Any Kubernetes client works — client-go, the dynamic client, or
-// kubectl; nothing here is specific to controller-runtime.
+// newClient uses controller-runtime, but any Kubernetes client works.
 func newClient(kubeconfig string, scheme *runtime.Scheme) (client.Client, error) {
 	cfg, err := loadConfig(kubeconfig)
 	if err != nil {
@@ -225,9 +221,6 @@ func newClient(kubeconfig string, scheme *runtime.Scheme) (client.Client, error)
 	return client.New(cfg, client.Options{Scheme: scheme})
 }
 
-// discoverTemplate reads the fleet's advertised warm pools and returns a
-// template that actually has capacity, so the walk-through does not depend on
-// a hard-coded image.
 func discoverTemplate(ctx context.Context, c client.Client) (string, error) {
 	var inventories cocoonv1beta1.NodeInventoryList
 	if err := c.List(ctx, &inventories); err != nil {
@@ -325,15 +318,7 @@ func deleteCheckpoints(ctx context.Context, e *e2bClient, ids ...string) error {
 	return nil
 }
 
-// post invokes an action subresource. These are POST-only verbs (the
-// pods/eviction shape), which is why they are not fields on SandboxSpec: the
-// standard agent-sandbox schema stays untouched, so an unmodified upstream
-// client keeps working against this server.
-//
-// A raw REST client is used rather than controller-runtime's SubResource
-// helper because these actions have DIFFERENT request and response types
-// (SandboxForkOptions in, SandboxForkResult out); the helper decodes the reply
-// back into the object it was given, which cannot express that.
+// post uses a raw REST client because the SubResource helper decodes the reply into the request object.
 func post(ctx context.Context, rc rest.Interface, ns, name, sub string, body, out runtime.Object) error {
 	req := rc.Post().
 		Namespace(ns).

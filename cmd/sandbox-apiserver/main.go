@@ -43,10 +43,7 @@ const (
 	e2bShutdownTimeout   = 10 * time.Second
 )
 
-// options are the standard aggregated-apiserver options: secure serving plus
-// delegated authentication/authorization (token/SAR review against the host
-// kube-apiserver). There is deliberately no etcd option — this server stores
-// nothing. The sandboxd token wires the node-local claim/release write path.
+// options has no etcd option because this server stores nothing.
 type options struct {
 	SecureServing  *genericoptions.SecureServingOptionsWithLoopback
 	Authentication *genericoptions.DelegatingAuthenticationOptions
@@ -237,15 +234,7 @@ func run() error {
 	return err
 }
 
-// startWarmPoolDriver runs the SandboxWarmPool driver as a controller inside a
-// controller-runtime manager: it WATCHES SandboxWarmPool and NodeInventory, so a
-// `kubectl apply/patch/delete` reconciles in milliseconds instead of waiting for
-// a poll tick (the only latency that ever mattered — the node side fills a pool
-// in under a second). Leader election makes exactly one of the apiserver replicas
-// drive the pools. The manager's own metrics/health servers are disabled; the
-// aggregated apiserver owns the serving port. inv is the process-wide cache-fed
-// inventory source; the manager's own client would read NodeInventory
-// unstructured and so bypass its cache on every node read.
+// startWarmPoolDriver takes the cache-fed inv because the manager client reads NodeInventory unstructured, uncached.
 func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
