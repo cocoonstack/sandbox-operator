@@ -260,7 +260,7 @@ func (s *Server) snapshotsOf(r *http.Request) (snaps []scale.Snapshot, complete 
 		g.Go(func() error {
 			snaps, err := s.store.Snapshots(r.Context(), node)
 			if err != nil {
-				log.WithFunc("e2bcompat.snapshotsOf").Errorf(r.Context(), err, "e2b snapshots: node failed node=%s", node)
+				log.WithFunc("e2bcompat.snapshotsOf").Warnf(r.Context(), "e2b snapshots: node failed node=%s err=%v", node, err)
 				return nil
 			}
 			answered[i] = true
@@ -356,7 +356,7 @@ func (s *Server) inventories(r *http.Request) ([]*scale.NodeInventory, error) {
 		if err != nil {
 			// A partitioned node is skipped, not fatal — the same rule the
 			// aggregated read path applies.
-			log.WithFunc("e2bcompat.inventories").Errorf(r.Context(), err, "e2b: node inventory unavailable node=%s", node)
+			log.WithFunc("e2bcompat.inventories").Warnf(r.Context(), "e2b: node inventory unavailable node=%s err=%v", node, err)
 			continue
 		}
 		out = append(out, inv)
