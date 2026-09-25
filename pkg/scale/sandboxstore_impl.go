@@ -34,10 +34,7 @@ import (
 )
 
 const (
-	// Synthesized-Sandbox label keys. The aggregated store stamps these onto every
-	// Sandbox it materializes from a NodeInventory entry so label selectors (the
-	// `kubectl get sandboxes -l ...` path) have real axes to filter on without any
-	// per-sandbox etcd object.
+	// The store stamps these labels on synthesized Sandboxes, so label selectors have axes to filter on.
 	// NodeLabel carries the owning node of a synthesized Sandbox.
 	NodeLabel = "sandbox.cocoonstack.io/node"
 	// PhaseLabel carries the entry phase of a synthesized Sandbox.
@@ -46,23 +43,14 @@ const (
 	PhaseHibernated = "Hibernated"
 	// ClaimLabel carries the claim name a synthesized Sandbox is bound to.
 	ClaimLabel = "sandbox.cocoonstack.io/claim"
-	// TemplateLabel carries the pool template a synthesized Sandbox was claimed
-	// from; it is the only recoverable source, since no per-sandbox object holds
-	// the pod spec the template would otherwise be read off.
+	// TemplateLabel carries the pool template of a synthesized Sandbox, since no per-sandbox object holds its pod spec.
 	TemplateLabel = "sandbox.cocoonstack.io/template"
 
-	// ClaimIDAnnotation carries the owning node's sandboxd claim id ("sb_...") on a
-	// synthesized Sandbox. Unlike the label keys above it is an annotation — an
-	// opaque node-local handle, not a selector axis: the aggregated apiserver reads
-	// it on Delete to release exactly the microVM this Sandbox stands for (releasing
-	// by k8s name would target the wrong claim).
+	// ClaimIDAnnotation carries the sandboxd claim id Delete releases, since one name can hold several claims.
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
-	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339) of a
-	// Sandbox: stamped from inventory on reads and from the claim on Create.
+	// DeadlineAnnotation carries the node-granted lease expiry of a Sandbox, in RFC3339.
 	DeadlineAnnotation = "sandbox.cocoonstack.io/deadline"
-	// NetAnnotation selects the pool network mode. Create and the warm-pool
-	// driver must read the same key or a claim never matches provisioned warm
-	// capacity (perpetual 503).
+	// NetAnnotation selects the pool network mode for both Create and the warm-pool driver.
 	NetAnnotation = "sandbox.cocoonstack.io/net"
 	// TokenAnnotation carries the per-sandbox ownership token handed back on Create.
 	TokenAnnotation = "sandbox.cocoonstack.io/token"
@@ -72,62 +60,45 @@ const (
 	SelectorNetKey      = NetAnnotation
 	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
 
-	// Connection pooling for the node-local claim path. Idle conns per host are
-	// sized to the per-node claim fan-out so a burst reuses connections instead
-	// of handshaking; the timeout bounds a wedged sandboxd.
+	// Idle conns per host match the per-node claim fan-out, so a burst reuses connections.
 	sandboxdRequestTimeout      = 10 * time.Second
 	sandboxdMaxIdleConns        = 256
 	sandboxdMaxIdleConnsPerHost = 32
 	sandboxdIdleConnTimeout     = 90 * time.Second
 )
 
-// NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
-// publisher server-side-applies. It lives in this operator's own CRD group —
-// NOT in the aggregated agents.x-k8s.io group: the APIService hands that entire
-// group-version to the aggregated server, which serves only `sandboxes`, so a
-// NodeInventory registered there would 404 once the APIService cuts over.
 var (
+	// NodeInventoryGVK is in this operator's CRD group, since the APIService hands agents.x-k8s.io to the aggregated server.
 	NodeInventoryGVK = cocoonv1beta1.GroupVersion.WithKind("NodeInventory")
 
 	// ErrNoWarmCapacity lets the aggregated apiserver map an exhausted pool to a retryable 503 instead of writing an object.
 	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
 )
 
-// InventorySource enumerates the per-node NodeInventory objects that back the
-// aggregated store. It is a node enumeration plus a per-node fetch rather than
-// one cluster-wide read, so a partitioned node drops out of a List instead of
-// failing it and a Get reads its owning node alone. Production serves it from
-// the informer-fed ClientInventorySource; tests inject StaticInventorySource.
+// InventorySource enumerates nodes and fetches each one's NodeInventory, so a partitioned node drops out of a List instead of failing it.
 type InventorySource interface {
 	// ListNodes returns the nodes that publish inventory. O(nodes), cache-fed.
 	ListNodes(ctx context.Context) ([]string, error)
-	// NodeInventory returns one node's authoritative inventory. A partitioned or
-	// not-yet-published node returns an error, which List logs and skips.
+	// NodeInventory returns one node's inventory, or an error for an unreadable or unpublished node.
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
-	// NodeCapacity returns one node's advertise address and warm pools without
-	// decoding its entry list, which the claim and routing paths never read.
+	// NodeCapacity returns one node's advertise address and warm pools without decoding its entries.
 	NodeCapacity(ctx context.Context, node string) (address string, pools []PoolCapacity, err error)
 }
 
 // StoreOption configures a scatterGatherStore.
 type StoreOption func(*scatterGatherStore)
 
-// WithWatchPollInterval sets how often Watch re-derives node inventory to emit
-// deltas. Defaults to one second.
+// WithWatchPollInterval sets how often Watch re-derives the inventories, one second by default.
 func WithWatchPollInterval(d time.Duration) StoreOption {
 	return func(s *scatterGatherStore) { s.watchPoll = d }
 }
 
-// SandboxdClient is the subset of the sandboxd HTTP client the store needs,
-// kept as an interface so tests inject a fake without a live node. *sandboxd.Client
-// satisfies it.
+// SandboxdClient is the subset of the sandboxd HTTP client the store needs.
 type SandboxdClient interface {
 	Claim(ctx context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error)
 	Release(ctx context.Context, id, token string) error
 
-	// The lifecycle verbs address an already-delivered sandbox by id. They all
-	// take sandboxd's operator path, authorized by the fleet api_token the
-	// client already carries, so the control plane needs no per-sandbox secret.
+	// The lifecycle verbs use the fleet api_token, so the control plane holds no per-sandbox secret.
 	Hibernate(ctx context.Context, id string) error
 	Wake(ctx context.Context, id string) error
 	Renew(ctx context.Context, id string, spec sandboxd.RenewSpec) (time.Time, error)
@@ -142,15 +113,10 @@ type SandboxdClient interface {
 	SandboxesByClaimRef(ctx context.Context, ref string) ([]sandboxd.SandboxSummary, error)
 }
 
-// SandboxdClientFactory builds a sandboxd client for one node's advertise address
-// and the uniform fleet api_token. It is injected so tests need no live node and
-// production wires the real HTTP client (NewSandboxdClientFactory).
+// SandboxdClientFactory builds a sandboxd client for one node's advertise address and the fleet api_token.
 type SandboxdClientFactory func(addr, token string) SandboxdClient
 
-// WithClaimRouting enables the Create/Delete write path: token is the uniform
-// fleet-wide sandboxd api_token presented on claim/release, and factory builds a
-// per-node sandboxd client for a node's advertise address. Without it, Claim and
-// Release fail closed and the store stays read-only.
+// WithClaimRouting lets the store call nodes with the fleet api_token, and without it node calls fail closed and lookups read inventory alone.
 func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
 	return func(s *scatterGatherStore) {
 		s.sandboxdToken = token
@@ -158,8 +124,7 @@ func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
 	}
 }
 
-// NewSandboxdClientFactory returns the production SandboxdClientFactory: an HTTP
-// sandboxd client per node advertise address, over the shared client.
+// NewSandboxdClientFactory returns the production factory, whose clients share one HTTP client.
 func NewSandboxdClientFactory() SandboxdClientFactory {
 	hc := NewSandboxdHTTPClient()
 	return func(addr, token string) SandboxdClient {
@@ -169,7 +134,6 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 
 type inventoryMatch func(inv *NodeInventory, i int) bool
 
-// warmCandidate is one node advertising warm capacity for a requested pool.
 type warmCandidate struct {
 	node string
 	addr string
@@ -178,19 +142,12 @@ type warmCandidate struct {
 
 var _ SandboxStore = (*scatterGatherStore)(nil)
 
-// scatterGatherStore is the concrete SandboxStore: List/Get/Watch synthesize
-// Sandbox objects from live NodeInventory rather than reading any per-sandbox
-// etcd object, and Create/Delete are node-local claim/release — exactly the
-// metrics.k8s.io aggregation pattern extended with a synchronous write path.
 type scatterGatherStore struct {
 	src         InventorySource
 	concurrency int
 	watchPoll   time.Duration
 	index       *nodeIndex
 
-	// sandboxdToken is the uniform fleet api_token; sandboxdFactory builds a
-	// per-node sandboxd client. Both are nil/empty until WithClaimRouting is set,
-	// which is what gates the write path (Claim/Release).
 	sandboxdToken   string
 	sandboxdFactory SandboxdClientFactory
 }
@@ -267,10 +224,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		return Assignment{}, fmt.Errorf("scale: claim %s/%s: no node advertises warm capacity for template %q net %q size %q: %w", namespace, name, pool.Template, pool.Net, pool.Size, ErrNoWarmCapacity)
 	}
 
-	// Inventory is 5-30s stale, so a node can advertise warm capacity it no
-	// longer has. Reporting the whole fleet exhausted because one sampled node
-	// raced to zero would 503 a caller that other nodes could still serve, so
-	// each capacity miss drops that node and re-samples the rest.
+	// Inventory is 5-30s stale, so a capacity miss drops that node and re-samples the rest instead of failing.
 	for len(candidates) > 0 {
 		best, idx := pickPowerOfTwo(candidates)
 		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, sandboxd.ClaimSpec{
@@ -278,9 +232,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			Net:        pool.Net,
 			Size:       pool.Size,
 			TTLSeconds: ttlSeconds,
-			// Name the claim by the k8s object so the node's operator index echoes
-			// it back and the aggregated read path (List/Get) resolves this sandbox
-			// by "<namespace>/<name>".
+			// The claim ref is the object's namespace/name, which the read path resolves by.
 			ClaimRef: namespacedName(namespace, name),
 		})
 		if claimErr == nil {
@@ -321,8 +273,7 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 	return w, nil
 }
 
-// resolve looks in the indexed node's inventory, then asks that node itself,
-// then sweeps every inventory, and last asks every node. Nil, nil means no match.
+// resolve tries the indexed node's inventory, that node, every inventory, then every node, and returns nil, nil on a miss.
 func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows nodeRows, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
 		if sb := s.matchOnNode(ctx, op, node, match); sb != nil {
@@ -346,12 +297,10 @@ func (s *scatterGatherStore) resolve(ctx context.Context, op, key string, rows n
 	return found, err
 }
 
-// matchOnNode resolves match against one node's inventory, returning nil when
-// that node is unreadable or no longer holds the entry.
 func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
 	inv, err := s.src.NodeInventory(ctx, node)
 	if err != nil {
-		// A sibling's hit cancels ctx; reads failing from that are not unavailable nodes.
+		// A sibling's hit cancels ctx, so a read that fails from it is not an unavailable node.
 		if ctx.Err() == nil {
 			log.WithFunc("scale.matchOnNode").Debugf(ctx, "node inventory unavailable during %s; skipping node node=%s err=%v", op, node, err)
 		}
@@ -418,11 +367,7 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, lab
 		return
 	}
 
-	// A fixed cadence, deliberately: backing off while quiet would let a sandbox
-	// that is created and deleted inside the widened gap produce neither an Added
-	// nor a Deleted. Re-deriving the fleet view costs 6.5ms at 26 nodes and 2600
-	// sandboxes, and 1.2s at the 200x2000 projection, so one watcher per fleet is
-	// the supported shape.
+	// A fixed cadence, since backing off would let a sandbox created and deleted in the widened gap emit no event.
 	ticker := time.NewTicker(s.watchPoll)
 	defer ticker.Stop()
 	for {
@@ -526,16 +471,12 @@ func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, l
 	return out
 }
 
-// NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
-// L0 node-scoped cache — NOT a cluster-wide LIST. A lost NodeInventory object is
-// rebuilt from this on the next publish.
+// NodeLiveSource is a node's own live sandbox state, from which a lost NodeInventory is rebuilt.
 type NodeLiveSource interface {
 	LiveSandboxes(ctx context.Context) ([]InventoryEntry, error)
 }
 
-// InventoryApplier server-side-applies a NodeInventory object. The default
-// implementation resolves the resource through a RESTMapper (never a naive
-// kind+"s"); tests inject a fake.
+// InventoryApplier server-side-applies a NodeInventory object.
 type InventoryApplier interface {
 	Apply(ctx context.Context, inv *NodeInventory) error
 }
@@ -547,7 +488,7 @@ type ssaInventoryApplier struct {
 	fieldOwner string
 }
 
-// NewSSAInventoryApplier returns the default server-side-apply InventoryApplier.
+// NewSSAInventoryApplier returns the default InventoryApplier, which resolves the resource through a RESTMapper.
 func NewSSAInventoryApplier(c client.Client, fieldOwner string) InventoryApplier {
 	fieldOwner = cmp.Or(fieldOwner, "cocoon-node-inventory-publisher")
 	return &ssaInventoryApplier{c: c, fieldOwner: fieldOwner}
@@ -573,10 +514,7 @@ var (
 	_ InventoryApplier = (*StaticInventorySource)(nil)
 )
 
-// StaticInventorySource is an in-memory InventorySource that doubles as an
-// InventoryApplier: publishers Apply into it (the O(nodes) "etcd" writes) and the
-// store reads from it (the cache-fed NodeInventory reads). Production swaps in a
-// client-backed source listing NodeInventory objects at ResourceVersion=0.
+// StaticInventorySource is an in-memory InventorySource that is also an InventoryApplier.
 type StaticInventorySource struct {
 	mu        sync.RWMutex
 	inv       map[string]*NodeInventory
@@ -607,8 +545,7 @@ func (s *StaticInventorySource) Apply(_ context.Context, inv *NodeInventory) err
 	return nil
 }
 
-// Partition keeps node in ListNodes but makes NodeInventory(node) fail, modeling
-// a node partitioned from the aggregated server.
+// Partition keeps node in ListNodes but makes its NodeInventory fail, like a partitioned node.
 func (s *StaticInventorySource) Partition(node string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -655,8 +592,7 @@ func (s *StaticInventorySource) NodeCapacity(_ context.Context, node string) (st
 	return inv.Address, slices.Clone(inv.Pools), nil
 }
 
-// ObjectCount is the number of durable NodeInventory objects held — the O(nodes)
-// etcd object count backing every synthesized sandbox.
+// ObjectCount is the number of NodeInventory objects held, the O(nodes) etcd object count.
 func (s *StaticInventorySource) ObjectCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -672,17 +608,13 @@ func (s *StaticInventorySource) ApplyCount() int {
 
 var _ InventorySource = (*ClientInventorySource)(nil)
 
-// ClientInventorySource is the production InventorySource: it reads NodeInventory
-// objects through a controller-runtime reader. Back it with a cache-fed reader
-// (cmd/sandbox-apiserver builds one scoped to exactly this GVK) so the O(nodes)
-// enumeration is served from an informer, never a hot-path LIST off etcd.
-// Objects are read as unstructured and never mutated: NewInventoryCache hands out its cached objects themselves.
+// ClientInventorySource is the production InventorySource over a cache-fed NodeInventory reader.
+// It never mutates what it reads, since NewInventoryCache hands out its cached objects themselves.
 type ClientInventorySource struct {
 	reader client.Reader
 }
 
-// NewClientInventorySource builds a ClientInventorySource over reader (use a
-// cache-fed client in production).
+// NewClientInventorySource builds a ClientInventorySource over reader.
 func NewClientInventorySource(reader client.Reader) *ClientInventorySource {
 	return &ClientInventorySource{reader: reader}
 }
@@ -746,10 +678,7 @@ func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (
 // IsNoWarmCapacity reports whether err means Claim found no warm node.
 func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
 
-// NewSandboxdHTTPClient returns one HTTP client for the whole fleet. A per-call
-// client would fall back to http.DefaultTransport, whose MaxIdleConnsPerHost of
-// 2 forces a fresh TCP handshake on every concurrent claim past the second to
-// the same node.
+// NewSandboxdHTTPClient returns one HTTP client for the fleet, since the default transport keeps only 2 idle conns per host.
 func NewSandboxdHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: sandboxdRequestTimeout,
@@ -761,9 +690,7 @@ func NewSandboxdHTTPClient() *http.Client {
 	}
 }
 
-// SandboxdBaseURL renders a node advertise address as a sandboxd base URL: a
-// bare "host:port" is given the http scheme, an address that already carries
-// one is used verbatim.
+// SandboxdBaseURL gives a bare host:port the http scheme and keeps an address that already has one.
 func SandboxdBaseURL(addr string) string {
 	if strings.Contains(addr, "://") {
 		return addr
@@ -771,9 +698,7 @@ func SandboxdBaseURL(addr string) string {
 	return "http://" + addr
 }
 
-// AddressIPs strips the port from a "host:port" address, yielding the pod IP
-// list a synthesized Sandbox status carries. Shared with the aggregated
-// apiserver so both stamp identical PodIPs.
+// AddressIPs strips the port from a host:port address to give a synthesized Sandbox's pod IPs.
 func AddressIPs(addr string) []string {
 	if addr == "" {
 		return nil
@@ -784,8 +709,7 @@ func AddressIPs(addr string) []string {
 	return []string{addr}
 }
 
-// FirstHit runs find on every node src lists, concurrency at a time, and
-// returns the first non-zero result, canceling the rest.
+// FirstHit runs find on every node src lists, concurrency at a time, and returns the first non-zero result and cancels the rest.
 func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrency int, find func(ctx context.Context, node string) T) (T, error) {
 	var found T
 	nodes, err := src.ListNodes(ctx)
@@ -822,9 +746,7 @@ func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrenc
 	return found, nil
 }
 
-// fanOutNodes enumerates the node inventories and runs work per node with
-// List's bounded concurrency, concatenating per-node results in node order.
-// A node the work skips contributes nil.
+// fanOutNodes runs work on every node at the store's concurrency and concatenates the results in node order.
 func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ctx context.Context, node string) []T) ([]T, error) {
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
@@ -852,10 +774,7 @@ func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 		cmp.Or(pc.Size, SizeClassSmall) == cmp.Or(key.Size, SizeClassSmall)
 }
 
-// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
-// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
-// whichever node looked best in that snapshot; sampling spreads the burst while
-// still biasing toward warm capacity. A stale pick costs one gossip redirect.
+// pickPowerOfTwo keeps the warmer of two sampled candidates, so a burst spreads instead of funneling onto one node.
 func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
 	//nolint:gosec // load spreading, not a security decision
 	i := rand.IntN(len(candidates))
@@ -867,8 +786,6 @@ func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
 	return candidates[i], i
 }
 
-// parseSelectors turns the string selectors on ListOptions into matchers. Empty
-// strings become everything-matchers.
 func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {
 	labelSel, err := labels.Parse(opts.LabelSelector)
 	if err != nil {
@@ -887,9 +804,7 @@ func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) 
 	return labelSel, fieldSel, nil
 }
 
-// entryToSandbox synthesizes the Sandbox object served for one inventory entry.
-// The entry name is the sandbox's "<namespace>/<name>"; an unqualified name
-// lands in the default namespace.
+// entryToSandbox puts an entry name without a namespace in the default namespace.
 func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 	ns, name := splitNamespacedName(e.Name)
 	sb := &sandboxv1beta1.Sandbox{
@@ -992,9 +907,7 @@ func readyStatus(phase string) metav1.ConditionStatus {
 	return metav1.ConditionFalse
 }
 
-// resourceVersionFor derives a deterministic, content-sensitive ResourceVersion
-// so watch can detect a Modified entry and clients see a stable version for an
-// unchanged one. It is opaque, as the API contract requires.
+// resourceVersionFor hashes an entry's content, so watch sees a change as Modified and an unchanged entry keeps its version.
 func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + e.Template + "|" + deadlineValue(e) + "|" + claimedAtValue(e)))
