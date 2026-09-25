@@ -237,6 +237,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		})
 		if claimErr == nil {
 			s.index.remember(nameKey(namespace, name), best.node)
+			s.index.remember(claimKey(namespace, res.ID), best.node)
 			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
 		if !claimUndelivered(claimErr) {

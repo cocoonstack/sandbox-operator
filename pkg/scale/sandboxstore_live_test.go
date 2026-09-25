@@ -68,6 +68,44 @@ func TestGetAsksTheClaimingNodeFirst(t *testing.T) {
 	assert.Zero(t, src.lists.Load(), "a hit on the claiming node must not sweep the fleet's inventories")
 }
 
+func TestGetByClaimIDAsksTheClaimingNodeFirst(t *testing.T) {
+	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_1", Token: "tok"}}
+	store, src := unpublishedStore(f)
+	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
+
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	require.NoError(t, err)
+	f.rows = map[string][]sandboxd.SandboxSummary{
+		"n1:7777": {{ID: "sb_1", ClaimRef: "ns/s1"}},
+		"n2:7777": {{ID: "sb_2", ClaimRef: "ns/s2"}},
+	}
+	src.lists.Store(0)
+
+	got, err := store.GetByClaimID(t.Context(), "ns", "sb_1", func(id string) bool { return id == "sb_1" })
+	require.NoError(t, err)
+	assert.Equal(t, "n1", got.Status.NodeName)
+	assert.Equal(t, []string{"n1:7777"}, f.rowReads, "only the node that served the claim is asked")
+	assert.Zero(t, src.lists.Load(), "a hit on the claiming node must not sweep the fleet's inventories")
+}
+
+func TestAForkChildIsLookedUpOnItsNode(t *testing.T) {
+	f := &recordingFactory{forkResult: sandboxd.ForkResult{Children: []sandboxd.ClaimResult{{ID: "sb_c1"}}}}
+	store, src := unpublishedStore(f)
+
+	_, err := store.Fork(t.Context(), "ns", "n1", "sb_parent", 1, 0)
+	require.NoError(t, err)
+	f.rows = map[string][]sandboxd.SandboxSummary{"n1:7777": {{ID: "sb_c1", ClaimRef: "ns/sb_c1"}}}
+	src.lists.Store(0)
+
+	byID, err := store.GetByClaimID(t.Context(), "ns", "sb_c1", func(id string) bool { return id == "sb_c1" })
+	require.NoError(t, err)
+	byName, err := store.Get(t.Context(), "ns", "sb_c1")
+	require.NoError(t, err)
+	assert.Equal(t, "n1", byID.Status.NodeName)
+	assert.Equal(t, "n1", byName.Status.NodeName)
+	assert.Zero(t, src.lists.Load(), "a fork child must not sweep the fleet's inventories")
+}
+
 func TestGetFindsWhatAnotherReplicaClaimed(t *testing.T) {
 	claimed := time.Date(2026, 9, 23, 2, 47, 45, 0, time.UTC)
 	f := &recordingFactory{rows: map[string][]sandboxd.SandboxSummary{

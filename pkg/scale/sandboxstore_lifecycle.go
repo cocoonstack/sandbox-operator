@@ -65,6 +65,8 @@ func (s *scatterGatherStore) Fork(ctx context.Context, namespace, node, id strin
 	}
 	out := make([]Assignment, 0, len(res.Children))
 	for _, c := range res.Children {
+		s.index.remember(nameKey(namespace, c.ID), node)
+		s.index.remember(claimKey(namespace, c.ID), node)
 		out = append(out, Assignment{
 			SandboxName: c.ID,
 			Node:        node,

@@ -311,6 +311,7 @@ type recordingFactory struct {
 	releaseCalls int
 
 	claimResult sandboxd.ClaimResult
+	forkResult  sandboxd.ForkResult
 	claimErr    error
 	releaseErr  error
 	verbErr     error
@@ -362,7 +363,7 @@ func (c *recordingClient) Renew(context.Context, string, sandboxd.RenewSpec) (ti
 
 func (c *recordingClient) Fork(_ context.Context, _ string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
 	c.f.forkSpec = spec
-	return sandboxd.ForkResult{}, c.f.verbErr
+	return c.f.forkResult, c.f.verbErr
 }
 
 func (c *recordingClient) Checkpoint(context.Context, string, sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error) {
