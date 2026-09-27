@@ -143,7 +143,9 @@ pools. An empty sandboxd token leaves it fail-closed: it logs and sets no pools.
 A node that stops publishing, because it died or its vk-sandbox stopped,
 leaves every read and claim path once its `publishedAt` trails the newest
 publish by more than this. At vk-sandbox's default 30 s publish cadence that is
-three missed publishes. Keep it above vk-sandbox's `--publish-interval`.
+three missed publishes, and since the newest publish only advances when a live
+node publishes, a dead node leaves between this age and one publish interval
+later. Keep it above vk-sandbox's `--publish-interval`.
 
 The age is measured against the newest publish the process has seen, capped by
 its own clock. A control-plane write outage freezes every stamp together, so it
