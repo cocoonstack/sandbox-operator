@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -312,12 +313,28 @@ func TestNodeCapacitiesMatchesTheListAndPerNodeLookups(t *testing.T) {
 	assert.Len(t, got, 2)
 }
 
+func TestTheInventoryCarriesTheNodesPromotedTemplates(t *testing.T) {
+	a := newStubNode(t)
+	created := time.Date(2026, 9, 28, 1, 2, 3, 0, time.UTC)
+	a.set(func(n *stubNode) {
+		n.templates = []sandboxd.NodeTemplate{{Key: sandboxd.PoolKey{Template: "tpl:a", Net: "none", Size: "medium"}, ContentDigest: "sha256:aa", Tenant: "acme", CreatedAt: created, CPUCount: 2, MemTotalBytes: 1 << 30}}
+	})
+	s := newSource(t, a.addr())
+	inv, err := s.NodeInventory(t.Context(), a.addr())
+	require.NoError(t, err)
+	assert.Equal(t, []scale.PromotedTemplate{{
+		Template: "tpl:a", Net: "none", Size: "medium", ContentDigest: "sha256:aa", Tenant: "acme",
+		CreatedAt: &metav1.Time{Time: created}, CPUCount: 2, MemoryBytes: 1 << 30,
+	}}, inv.Templates)
+}
+
 type stubNode struct {
 	mu        sync.Mutex
 	srv       *httptest.Server
 	advertise string
 	peers     []string
 	rows      []sandboxd.SandboxSummary
+	templates []sandboxd.NodeTemplate
 	status    int
 	hang      bool
 	infoCalls int
@@ -366,6 +383,7 @@ func (n *stubNode) serve(w http.ResponseWriter, r *http.Request) {
 			AdvertiseAddr: n.advertise,
 			Peers:         n.peers,
 			Pools:         []sandboxd.NodePool{{Key: sandboxd.PoolKey{Template: "rt:24.04", Net: "none", Size: "small"}, Warm: 2, Refilling: 1, Target: 3}},
+			Templates:     n.templates,
 		})
 	case "/v1/sandboxes":
 		_ = json.MarshalWrite(w, map[string][]sandboxd.SandboxSummary{"sandboxes": n.rows})

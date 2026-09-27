@@ -173,7 +173,7 @@ func TestInfo(t *testing.T) {
 		assert.Equal(t, "/v1/info", r.URL.Path)
 		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "info is a root-token operator surface")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"claimed":2,"hibernated":1,"archived":0,"advertise_addr":"10.0.0.5:7777","peers":["10.0.0.6:7777"]}`))
+		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"templates":[{"key":{"template":"app:v1","net":"none","size":"medium"},"content_digest":"sha256:aa","created_at":"2026-09-28T01:02:03Z","cpu_count":2,"mem_total_bytes":1073741824}],"claimed":2,"hibernated":1,"archived":0,"advertise_addr":"10.0.0.5:7777","peers":["10.0.0.6:7777"]}`))
 	}))
 	defer srv.Close()
 
@@ -187,6 +187,10 @@ func TestInfo(t *testing.T) {
 	assert.Equal(t, 1, info.Hibernated)
 	assert.Equal(t, "10.0.0.5:7777", info.AdvertiseAddr)
 	assert.Equal(t, []string{"10.0.0.6:7777"}, info.Peers)
+	assert.Equal(t, []NodeTemplate{{
+		Key: PoolKey{Template: "app:v1", Net: "none", Size: "medium"}, ContentDigest: "sha256:aa",
+		CreatedAt: time.Date(2026, 9, 28, 1, 2, 3, 0, time.UTC), CPUCount: 2, MemTotalBytes: 1 << 30,
+	}}, info.Templates)
 }
 
 func TestSandboxesDecodesTheClaimTime(t *testing.T) {
@@ -270,6 +274,50 @@ func TestSetInstanceMetadataPutsTheDocumentVerbatim(t *testing.T) {
 	he, ok := errors.AsType[*HTTPError](err)
 	require.True(t, ok, "the node's refusal must surface as its status, got %v", err)
 	assert.Equal(t, http.StatusConflict, he.StatusCode)
+}
+
+func TestDeleteTemplateAsksThisNodeAloneAndTakesAMissAsGone(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+r.Header.Get("Authorization"))
+		switch r.URL.Query().Get("template") {
+		case "ns/gone":
+			w.WriteHeader(http.StatusNotFound)
+		case "ns/pooled":
+			w.WriteHeader(http.StatusConflict)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "root-token")
+
+	require.NoError(t, c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/app", Net: "none", Size: "medium"}))
+	require.NoError(t, c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/gone"}))
+	err := c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/pooled"})
+	he, ok := errors.AsType[*HTTPError](err)
+	require.True(t, ok, "the node's refusal must surface as its status, got %v", err)
+	assert.Equal(t, http.StatusConflict, he.StatusCode)
+	assert.Equal(t, "DELETE /v1/templates?net=none&no_redirect=1&size=medium&template=ns%2Fapp Bearer root-token", got[0])
+	assert.Equal(t, "DELETE /v1/templates?no_redirect=1&template=ns%2Fgone Bearer root-token", got[1])
+}
+
+func TestSetTemplateLabelsPutsTheWholeMap(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+string(b))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "root-token")
+
+	require.NoError(t, c.SetTemplateLabels(t.Context(), PoolKey{Template: "ns/app", Size: "medium"}, map[string]string{"v1": "sha256:aa"}))
+	require.NoError(t, c.SetTemplateLabels(t.Context(), PoolKey{Template: "ns/app"}, nil))
+	assert.Equal(t, []string{
+		`PUT /v1/templates/labels?size=medium&template=ns%2Fapp {"labels":{"v1":"sha256:aa"}}`,
+		`PUT /v1/templates/labels?template=ns%2Fapp {"labels":null}`,
+	}, got)
 }
 
 func TestSetPoolsReplacesTheNodeTargetsAndDecodesTheEcho(t *testing.T) {

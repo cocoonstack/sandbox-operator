@@ -157,21 +157,79 @@ type SandboxLogsV2 struct {
 	Logs []struct{} `json:"logs"`
 }
 
-// Template is the templates-listing entry.
+// Template is the templates-listing entry; createdBy and lastSpawnedAt are always null here.
 type Template struct {
-	TemplateID  string   `json:"templateID"`
-	BuildID     string   `json:"buildID"`
-	CPUCount    int32    `json:"cpuCount"`
-	MemoryMB    int32    `json:"memoryMB"`
-	DiskSizeMB  int32    `json:"diskSizeMB"`
-	Public      bool     `json:"public"`
-	Aliases     []string `json:"aliases"`
-	Names       []string `json:"names"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   string   `json:"updatedAt"`
-	SpawnCount  int64    `json:"spawnCount"`
-	BuildCount  int32    `json:"buildCount"`
-	EnvdVersion string   `json:"envdVersion"`
+	TemplateID    string    `json:"templateID"`
+	BuildID       string    `json:"buildID"`
+	CPUCount      int32     `json:"cpuCount"`
+	MemoryMB      int32     `json:"memoryMB"`
+	DiskSizeMB    int32     `json:"diskSizeMB"`
+	Public        bool      `json:"public"`
+	Aliases       []string  `json:"aliases"`
+	Names         []string  `json:"names"`
+	CreatedAt     string    `json:"createdAt"`
+	UpdatedAt     string    `json:"updatedAt"`
+	CreatedBy     *struct{} `json:"createdBy"`
+	LastSpawnedAt *string   `json:"lastSpawnedAt"`
+	SpawnCount    int64     `json:"spawnCount"`
+	BuildCount    int32     `json:"buildCount"`
+	EnvdVersion   string    `json:"envdVersion"`
+	BuildStatus   string    `json:"buildStatus"`
+}
+
+// TemplateWithBuilds is the GET /templates/{templateID} reply (spec: TemplateWithBuilds).
+type TemplateWithBuilds struct {
+	TemplateID    string          `json:"templateID"`
+	Public        bool            `json:"public"`
+	Aliases       []string        `json:"aliases"`
+	Names         []string        `json:"names"`
+	CreatedAt     string          `json:"createdAt"`
+	UpdatedAt     string          `json:"updatedAt"`
+	LastSpawnedAt *string         `json:"lastSpawnedAt"`
+	SpawnCount    int64           `json:"spawnCount"`
+	Builds        []TemplateBuild `json:"builds"`
+}
+
+// TemplateBuild is one build of a template; here one per content digest the fleet reports.
+type TemplateBuild struct {
+	BuildID     string `json:"buildID"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+	FinishedAt  string `json:"finishedAt"`
+	CPUCount    int32  `json:"cpuCount"`
+	MemoryMB    int32  `json:"memoryMB"`
+	EnvdVersion string `json:"envdVersion"`
+}
+
+// TemplateUpdateRequest is the PATCH /templates/{templateID} body; public is accepted and ignored.
+type TemplateUpdateRequest struct {
+	Public *bool `json:"public,omitempty"`
+}
+
+// AssignTemplateTagsRequest is the POST /templates/tags body; target is "name" or "name:tag".
+type AssignTemplateTagsRequest struct {
+	Target string   `json:"target"`
+	Tags   []string `json:"tags"`
+}
+
+// AssignedTemplateTags is the POST /templates/tags reply.
+type AssignedTemplateTags struct {
+	Tags    []string `json:"tags"`
+	BuildID string   `json:"buildID"`
+}
+
+// DeleteTemplateTagsRequest is the DELETE /templates/tags body.
+type DeleteTemplateTagsRequest struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags"`
+}
+
+// TemplateTag is one tag of a template (spec: TemplateTag).
+type TemplateTag struct {
+	Tag       string `json:"tag"`
+	BuildID   string `json:"buildID"`
+	CreatedAt string `json:"createdAt"`
 }
 
 // TemplateAliasResponse is the GET /templates/aliases/{alias} reply (spec: TemplateAliasResponse).

@@ -31,6 +31,9 @@ type PoolKey struct {
 // PoolCapacity is one node's warm capacity for a single pool.
 type PoolCapacity = cocoonv1beta1.PoolCapacity
 
+// PromotedTemplate is one promoted template a node holds.
+type PromotedTemplate = cocoonv1beta1.PromotedTemplate
+
 // ClaimOptions are the per-claim fields a Claim carries to the node alongside the pool; a zero TTLSeconds asks for the node default.
 type ClaimOptions struct {
 	TTLSeconds int
@@ -81,6 +84,12 @@ type SandboxLifecycle interface {
 	Snapshots(ctx context.Context, node string) ([]Snapshot, error)
 	// DeleteSnapshot removes a checkpoint. A missing checkpoint is success.
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
+	// DeleteTemplate removes a promoted template on node alone. A missing template is success.
+	DeleteTemplate(ctx context.Context, node string, key PoolKey) error
+	// SetTemplateLabels replaces a promoted template's labels on node alone.
+	SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error
+	// NodeTemplates reads the promoted templates node holds now, ahead of its next inventory publish.
+	NodeTemplates(ctx context.Context, node string) ([]PromotedTemplate, error)
 	// DialGuestPort opens a guest port of a running sandbox through its node's passive relay; a paused one answers Conflict and is never woken.
 	DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error)
 	// SetInstanceMetadata replaces the JSON object a running sandbox's guest reads from 169.254.169.254; a paused one answers Conflict.

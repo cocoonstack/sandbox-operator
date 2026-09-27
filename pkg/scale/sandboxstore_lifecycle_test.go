@@ -31,6 +31,8 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
 		"metadata": store.SetInstanceMetadata(ctx, "n1", "sb_gone", []byte(`{}`)),
+		"template": store.DeleteTemplate(ctx, "n1", PoolKey{Template: "tpl:gone"}),
+		"labels":   store.SetTemplateLabels(ctx, "n1", PoolKey{Template: "tpl:gone"}, nil),
 		"resume":   store.Resume(ctx, "n1", "sb_gone"),
 		"port":     portErr,
 		"fork":     forkErr,

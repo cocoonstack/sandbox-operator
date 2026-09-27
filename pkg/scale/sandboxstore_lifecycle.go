@@ -15,8 +15,8 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
-// maxCheckpointName is sandboxd's name budget (types.NameRe).
-const maxCheckpointName = 63
+// maxSandboxdName is sandboxd's name budget (types.NameRe).
+const maxSandboxdName = 63
 
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
@@ -141,6 +141,40 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 	return nil
 }
 
+func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, key PoolKey) error {
+	cl, err := s.nodeClient(ctx, node, "delete template", key.Template)
+	if err != nil {
+		return err
+	}
+	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}); err != nil {
+		return nodeVerbError(err, "delete template", key.Template, node)
+	}
+	return nil
+}
+
+func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error {
+	cl, err := s.nodeClient(ctx, node, "template labels", key.Template)
+	if err != nil {
+		return err
+	}
+	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, labels); err != nil {
+		return nodeVerbError(err, "template labels", key.Template, node)
+	}
+	return nil
+}
+
+func (s *scatterGatherStore) NodeTemplates(ctx context.Context, node string) ([]PromotedTemplate, error) {
+	cl, err := s.nodeClient(ctx, node, "templates", node)
+	if err != nil {
+		return nil, err
+	}
+	info, err := cl.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scale: sandboxd info on node %q: %w", node, err)
+	}
+	return TemplatesFromInfo(info), nil
+}
+
 func (s *scatterGatherStore) Read(ctx context.Context, node, id string) (SandboxRecord, error) {
 	cl, err := s.nodeClient(ctx, node, "read", id)
 	if err != nil {
@@ -174,9 +208,14 @@ func (s *scatterGatherStore) nodeClient(ctx context.Context, node, verb, id stri
 
 // CheckpointName stamps name with its namespace, the only per-checkpoint field a node keeps, within the node's name budget.
 func CheckpointName(namespace, name string) (string, error) {
-	stamped := namespace + "/" + name
-	if len(stamped) > maxCheckpointName {
-		return "", k8serrors.NewBadRequest(fmt.Sprintf("snapshot name %q: at most %d characters in namespace %q", name, maxCheckpointName-len(namespace)-1, namespace))
+	return StampedName("snapshot", "", namespace, name)
+}
+
+// StampedName stamps prefix and namespace onto name within sandboxd's name budget; kind names what a refusal is about.
+func StampedName(kind, prefix, namespace, name string) (string, error) {
+	stamped := prefix + namespace + "/" + name
+	if len(stamped) > maxSandboxdName {
+		return "", k8serrors.NewBadRequest(fmt.Sprintf("%s name %q: at most %d characters in namespace %q", kind, name, maxSandboxdName-len(prefix)-len(namespace)-1, namespace))
 	}
 	return stamped, nil
 }

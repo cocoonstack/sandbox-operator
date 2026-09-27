@@ -13,8 +13,8 @@
 //	POST/GET/DELETE /sandboxes                    -> claim, list, get, release
 //	POST /sandboxes/{id}/pause|connect|resume|fork -> pause, resume, fork
 //	POST /sandboxes/{id}/snapshots                -> create checkpoint
-//	GET /snapshots, DELETE /templates/{id}        -> list or delete checkpoints
-//	GET /templates, /v2/templates, aliases/{a}    -> warm-pool keys, alias lookup
+//	GET /snapshots, DELETE /templates/{id}        -> list or delete checkpoints and built templates
+//	GET/PATCH /templates[/{id}], aliases/{a}, tags -> warm-pool keys, built templates, alias lookup, tags
 //	GET /sandboxes/{id}/metrics|logs              -> node statistics, an empty log page
 //	POST timeout|refreshes, GET /health           -> lease renewal, liveness
 package e2bcompat
@@ -192,9 +192,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v2/sandboxes/{sandboxID}/logs", s.auth(s.sandboxLogs(SandboxLogsV2{Logs: []struct{}{}})))
 	mux.Handle("GET /templates", s.auth(http.HandlerFunc(s.listTemplates)))
 	mux.Handle("GET /v2/templates", s.auth(http.HandlerFunc(s.listTemplates)))
+	mux.Handle("GET /templates/{templateID}", s.auth(http.HandlerFunc(s.getTemplate)))
+	mux.Handle("PATCH /templates/{templateID}", s.auth(http.HandlerFunc(s.patchTemplate)))
 	mux.Handle("GET /templates/aliases/{alias}", s.auth(http.HandlerFunc(s.templateAlias)))
+	mux.Handle("GET /templates/{templateID}/{sub}", s.auth(http.HandlerFunc(s.templateSub)))
+	mux.Handle("POST /templates/tags", s.auth(http.HandlerFunc(s.assignTemplateTags)))
+	mux.Handle("DELETE /templates/tags", s.auth(http.HandlerFunc(s.deleteTemplateTags)))
 	// e2b addresses a snapshot as a template on delete.
-	mux.Handle("DELETE /templates/{snapshotID}", s.auth(http.HandlerFunc(s.deleteSnapshot)))
+	mux.Handle("DELETE /templates/{templateID}", s.auth(http.HandlerFunc(s.deleteTemplate)))
 	return mux
 }
 
@@ -293,6 +298,10 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, opts)
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
+			if !s.knownTemplate(r, req.TemplateID) {
+				writeError(w, http.StatusNotFound, fmt.Sprintf("template %q not found", req.TemplateID))
+				return
+			}
 			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf(
 				"no warm sandbox available for template %q; retry as warm capacity refills", req.TemplateID))
 			return

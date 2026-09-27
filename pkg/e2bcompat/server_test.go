@@ -567,6 +567,9 @@ type fakeStore struct {
 	snapshotsDownNode   string
 	deletedSnapshotNode string
 	deletedSnapshotID   string
+	deletedTemplates    []string
+	deleteTemplateErr   map[string]error
+	fleet               *scale.StaticInventorySource
 
 	envdCalls    []string
 	initStatus   int
@@ -649,6 +652,36 @@ func (f *fakeStore) Snapshots(_ context.Context, node string) ([]scale.Snapshot,
 func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 	f.deletedSnapshotNode, f.deletedSnapshotID = node, id
 	return nil
+}
+
+// SetTemplateLabels writes straight into the fleet the test serves, so a live read sees it at once.
+func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string) error {
+	inv, err := f.fleet.NodeInventory(ctx, node)
+	if err != nil {
+		return err
+	}
+	for i := range inv.Templates {
+		if inv.Templates[i].Template == key.Template {
+			inv.Templates[i].Labels = labels
+		}
+	}
+	f.fleet.Put(inv)
+	return nil
+}
+
+func (f *fakeStore) NodeTemplates(ctx context.Context, node string) ([]scale.PromotedTemplate, error) {
+	inv, err := f.fleet.NodeInventory(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	return inv.Templates, nil
+}
+
+func (f *fakeStore) DeleteTemplate(_ context.Context, node string, key scale.PoolKey) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletedTemplates = append(f.deletedTemplates, node+" "+key.Template+" "+key.Size)
+	return f.deleteTemplateErr[node]
 }
 
 func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (net.Conn, error) {

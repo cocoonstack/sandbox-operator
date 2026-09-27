@@ -243,7 +243,7 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	logger := log.WithFunc("e2bcompat.deleteSnapshot")
-	snapshotID := r.PathValue("snapshotID")
+	snapshotID := r.PathValue("templateID")
 	snaps, complete, err := s.snapshotsOf(r)
 	if err != nil {
 		logger.Errorf(r.Context(), err, "e2b delete snapshot: listing failed snapshotID=%s", snapshotID)
@@ -361,59 +361,6 @@ func (s *Server) sandboxLogs(reply any) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, reply)
 	}
-}
-
-// listTemplates reports the advertised warm-pool keys, the values create accepts as templateID.
-func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
-	nodes, err := s.inventories(r)
-	if err != nil {
-		log.WithFunc("e2bcompat.listTemplates").Error(r.Context(), err, "e2b list templates failed")
-		writeError(w, http.StatusInternalServerError, "failed to list templates")
-		return
-	}
-	seen := map[string]struct{}{}
-	out := []Template{}
-	for _, inv := range nodes {
-		for _, pc := range inv.Pools {
-			if pc.Template == "" {
-				continue
-			}
-			if _, dup := seen[pc.Template]; dup {
-				continue
-			}
-			seen[pc.Template] = struct{}{}
-			out = append(out, Template{
-				TemplateID:  pc.Template,
-				BuildID:     pc.Template,
-				Public:      true,
-				Aliases:     append([]string{}, s.imageAliases[pc.Template]...),
-				Names:       []string{pc.Template},
-				EnvdVersion: s.opts.EnvdVersion,
-			})
-		}
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) templateAlias(w http.ResponseWriter, r *http.Request) {
-	alias := r.PathValue("alias")
-	key, ok := s.aliases[alias]
-	image := key.Template
-	if !ok && s.advertised(r, alias) {
-		image, ok = alias, true
-	}
-	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("template alias %q not found", alias))
-		return
-	}
-	writeJSON(w, http.StatusOK, TemplateAliasResponse{TemplateID: image, Public: true})
-}
-
-func (s *Server) advertised(r *http.Request, image string) bool {
-	nodes, err := s.inventories(r)
-	return err == nil && slices.ContainsFunc(nodes, func(inv *scale.NodeInventory) bool {
-		return slices.ContainsFunc(inv.Pools, func(pc scale.PoolCapacity) bool { return pc.Template == image })
-	})
 }
 
 // inventories returns every node's published inventory, the fleet view the

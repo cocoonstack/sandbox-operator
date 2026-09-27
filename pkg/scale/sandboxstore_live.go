@@ -77,6 +77,18 @@ func PoolCapacityFromInfo(info *sandboxd.NodeInfo) []PoolCapacity {
 	return pools
 }
 
+// TemplatesFromInfo copies a node's promoted templates from its GET /v1/info into the inventory's shape.
+func TemplatesFromInfo(info *sandboxd.NodeInfo) []PromotedTemplate {
+	templates := make([]PromotedTemplate, 0, len(info.Templates))
+	for _, t := range info.Templates {
+		templates = append(templates, PromotedTemplate{
+			Template: t.Key.Template, Net: t.Key.Net, Size: t.Key.Size, ContentDigest: t.ContentDigest, Tenant: t.Tenant,
+			CreatedAt: optionalTime(t.CreatedAt), CPUCount: int32(t.CPUCount), MemoryBytes: t.MemTotalBytes, Labels: t.Labels,
+		})
+	}
+	return templates
+}
+
 func isPaused(row sandboxd.SandboxSummary) bool { return row.Hibernated || row.Archived }
 
 func rowsByClaimRef(ref string) nodeRows {
