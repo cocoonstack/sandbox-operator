@@ -14,8 +14,11 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
-// maxCheckpointName is sandboxd's name budget (types.NameRe).
-const maxCheckpointName = 63
+const (
+	// maxCheckpointName is sandboxd's name budget (types.NameRe).
+	maxCheckpointName = 63
+	metricsTimeout    = 2 * time.Second
+)
 
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
@@ -26,6 +29,27 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 		return nodeVerbError(err, "pause", id, node)
 	}
 	return nil
+}
+
+func (s *scatterGatherStore) Metrics(ctx context.Context, node, id string) (SandboxMetrics, bool, error) {
+	cl, err := s.nodeClient(ctx, node, "metrics", id)
+	if err != nil {
+		return SandboxMetrics{}, false, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, metricsTimeout)
+	defer cancel()
+	row, err := cl.Sandbox(ctx, id)
+	if err != nil {
+		return SandboxMetrics{}, false, nodeVerbError(err, "metrics", id, node)
+	}
+	if isPaused(row) {
+		return SandboxMetrics{}, false, nil
+	}
+	m, err := cl.EnvdMetrics(ctx, id, row.Token)
+	if err != nil {
+		return SandboxMetrics{}, false, nodeVerbError(err, "metrics", id, node)
+	}
+	return m, true, nil
 }
 
 func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error) {

@@ -3,13 +3,20 @@ package e2bcompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -462,6 +469,54 @@ func TestResumeAutoPauseSetsTheLeaseEndActionWithoutShorteningTheLease(t *testin
 	}
 }
 
+func TestMetricsReportEnvdsSampleAndNothingForAPausedSandbox(t *testing.T) {
+	store := &lifecycleStore{metrics: map[string]scale.SandboxMetrics{"sb_run": {Timestamp: 1790517471, CPUCount: 1, CPUUsedPct: 97.5, MemTotal: 490504192, MemUsed: 209805312, MemCache: 125820928, DiskUsed: 27705344, DiskTotal: 10464022528}}}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_run", "node-a", "img"), pausedSandbox("s2", "sb_paused", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	var got []SandboxMetric
+	w := do(t, h, http.MethodGet, "/sandboxes/sb-run/metrics", ``, testKey)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, []SandboxMetric{{
+		Timestamp: "2026-09-27T13:57:51Z", TimestampUnix: 1790517471, CPUCount: 1, CPUUsedPct: 97.5,
+		MemUsed: 209805312, MemTotal: 490504192, MemCache: 125820928, DiskUsed: 27705344, DiskTotal: 10464022528,
+	}}, got)
+
+	w = do(t, h, http.MethodGet, "/sandboxes/sb-paused/metrics", ``, testKey)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `[]`, w.Body.String())
+}
+
+func TestBatchMetricsKeepOnlyTheRunningSandboxesItCanRead(t *testing.T) {
+	store := &lifecycleStore{
+		metrics:    map[string]scale.SandboxMetrics{"sb_a": {CPUCount: 1, CPUUsedPct: 10}, "sb_b": {CPUCount: 1, CPUUsedPct: 20}},
+		metricsErr: map[string]error{"sb_bad": errors.New("relay reset")},
+	}
+	store.items = []sandboxv1beta1.Sandbox{
+		liveSandbox("a", "sb_a", "node-a", "img"), liveSandbox("b", "sb_b", "node-b", "img"),
+		pausedSandbox("p", "sb_paused", "node-a", "img"), liveSandbox("x", "sb_bad", "node-a", "img"),
+	}
+	h := newTestServer(t, store)
+
+	var got SandboxesWithMetrics
+	w := do(t, h, http.MethodGet, "/sandboxes/metrics?sandbox_ids=sb-a,sb-b,sb-paused,sb-bad,sb-unknown", ``, testKey)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, []string{"sb-a", "sb-b"}, slices.Sorted(maps.Keys(got.Sandboxes)))
+	assert.InDelta(t, 20, got.Sandboxes["sb-b"].CPUUsedPct, 0.001)
+
+	many := make([]string, maxMetricsIDs+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("sb-%d", i)
+	}
+	for _, q := range []string{"", "sandbox_ids=", "sandbox_ids=sb-a,,sb-b", "sandbox_ids=sb-a,sb-a", "sandbox_ids=" + strings.Join(many, ",")} {
+		if w := do(t, h, http.MethodGet, "/sandboxes/metrics?"+q, ``, testKey); w.Code != http.StatusBadRequest {
+			t.Errorf("?%.40s: status %d, want 400: %s", q, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestLogsAnswerAnEmptyPageForAKnownSandbox(t *testing.T) {
 	for path, want := range map[string]string{
 		"/sandboxes/sb-abc/logs":    `{"logs":[],"logEntries":[]}`,
@@ -503,6 +558,8 @@ type lifecycleStore struct {
 	readNode, readID       string
 	err                    error
 	statsErr               error
+	metrics                map[string]scale.SandboxMetrics
+	metricsErr             map[string]error
 
 	nodePaused   bool
 	nodeArchived bool
@@ -511,6 +568,14 @@ type lifecycleStore struct {
 func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.SandboxRecord, error) {
 	f.readNode, f.readID = node, id
 	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused || f.nodeArchived, Deadline: f.deadline}, f.statsErr
+}
+
+func (f *lifecycleStore) Metrics(_ context.Context, _, id string) (scale.SandboxMetrics, bool, error) {
+	if f.statsErr != nil {
+		return scale.SandboxMetrics{}, false, f.statsErr
+	}
+	m, live := f.metrics[id]
+	return m, live, f.metricsErr[id]
 }
 
 func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {

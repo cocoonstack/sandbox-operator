@@ -9,6 +9,8 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/projecteru2/core/log"
@@ -22,7 +24,10 @@ import (
 
 // maxNodeConcurrency bounds a fleet-wide fan-out so a handful of wedged nodes
 // cannot serialize a handler into the minutes.
-const maxNodeConcurrency = 16
+const (
+	maxNodeConcurrency = 16
+	maxMetricsIDs      = 100
+)
 
 // pauseSandbox answers 409 when already paused because the e2b SDK reads 409 as "already paused".
 func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
@@ -293,22 +298,50 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, "metrics")
 		return
 	}
-	st, err := s.store.Stats(r.Context(), sb.Status.NodeName, claimIDOf(sb))
+	m, live, err := s.store.Metrics(r.Context(), sb.Status.NodeName, claimIDOf(sb))
 	if err != nil {
 		s.writeVerbError(w, r, err, "metrics", "failed to read sandbox metrics")
 		return
 	}
-	at := st.MeasuredAt
-	if at.IsZero() {
-		at = time.Now()
+	out := []SandboxMetric{}
+	if live {
+		out = append(out, metricOf(m))
 	}
-	writeJSON(w, http.StatusOK, []SandboxMetric{{
-		Timestamp:     at.UTC().Format(time.RFC3339),
-		TimestampUnix: at.Unix(),
-		CPUCount:      int32(st.CPUCount),
-		MemUsed:       st.MemUsedBytes,
-		MemTotal:      st.MemTotalBytes,
-	}})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sandboxesMetrics answers for the running sandboxes among the ids; one the key cannot see, a paused one, or a failed read is left out.
+func (s *Server) sandboxesMetrics(w http.ResponseWriter, r *http.Request) {
+	ids, err := sandboxIDsOf(r.URL.Query().Get("sandbox_ids"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var mu sync.Mutex
+	out := make(map[string]SandboxMetric, len(ids))
+	var g errgroup.Group
+	g.SetLimit(maxNodeConcurrency)
+	for _, id := range ids {
+		g.Go(func() error {
+			sb, err := s.lookup(r, id)
+			if err != nil {
+				return nil
+			}
+			m, live, err := s.store.Metrics(r.Context(), sb.Status.NodeName, claimIDOf(sb))
+			if err != nil {
+				log.WithFunc("e2bcompat.sandboxesMetrics").Warnf(r.Context(), "metrics read failed sandboxID=%s err=%v", id, err)
+				return nil
+			}
+			if live {
+				mu.Lock()
+				out[id] = metricOf(m)
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	writeJSON(w, http.StatusOK, SandboxesWithMetrics{Sandboxes: out})
 }
 
 func (s *Server) sandboxLogs(reply any) http.HandlerFunc {
@@ -482,4 +515,40 @@ func expireFor(autoPause *bool) sandboxd.ExpireAction {
 		return sandboxd.ExpireArchive
 	}
 	return sandboxd.ExpireDestroy
+}
+
+func metricOf(m scale.SandboxMetrics) SandboxMetric {
+	at := time.Unix(m.Timestamp, 0)
+	if m.Timestamp == 0 {
+		at = time.Now()
+	}
+	return SandboxMetric{
+		Timestamp:     at.UTC().Format(time.RFC3339),
+		TimestampUnix: at.Unix(),
+		CPUCount:      m.CPUCount,
+		CPUUsedPct:    m.CPUUsedPct,
+		MemUsed:       m.MemUsed,
+		MemTotal:      m.MemTotal,
+		MemCache:      m.MemCache,
+		DiskUsed:      m.DiskUsed,
+		DiskTotal:     m.DiskTotal,
+	}
+}
+
+// sandboxIDsOf parses sandbox_ids, the spec's comma-separated list of up to 100 distinct ids.
+func sandboxIDsOf(raw string) ([]string, error) {
+	var ids []string
+	for id := range strings.SplitSeq(raw, ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			return nil, errors.New("sandbox_ids must list comma-separated sandbox ids")
+		}
+		if slices.Contains(ids, id) {
+			return nil, fmt.Errorf("sandbox_ids repeats %q", id)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) > maxMetricsIDs {
+		return nil, fmt.Errorf("sandbox_ids must list at most %d ids, got %d", maxMetricsIDs, len(ids))
+	}
+	return ids, nil
 }

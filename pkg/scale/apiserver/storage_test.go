@@ -311,6 +311,10 @@ func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error)
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
 
+func (f *fakeStore) Metrics(context.Context, string, string) (scale.SandboxMetrics, bool, error) {
+	return scale.SandboxMetrics{}, false, f.verbErr
+}
+
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
 }

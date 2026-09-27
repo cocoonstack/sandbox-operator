@@ -2,6 +2,7 @@ package scale
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +62,34 @@ func TestReadReportsTheClaimAsItsNodeHoldsIt(t *testing.T) {
 
 	_, err = store.Read(t.Context(), "n1", "sb_gone")
 	assert.True(t, k8serrors.IsNotFound(err), "a sandboxd 404 must surface as NotFound, got %v", err)
+}
+
+func TestMetricsReadsEnvdOnlyForARunningSandbox(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777"))
+	f := &recordingFactory{
+		rows: map[string][]sandboxd.SandboxSummary{"n1:7777": {{ID: "sb_run", Token: "tok-run"}, {ID: "sb_paused", Hibernated: true}, {ID: "sb_arch", Archived: true}}},
+		envd: sandboxd.EnvdMetrics{Timestamp: 1790517471, CPUCount: 1, CPUUsedPct: 97.5, MemTotal: 490504192},
+	}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+	ctx := t.Context()
+
+	m, live, err := store.Metrics(ctx, "n1", "sb_run")
+	require.NoError(t, err)
+	assert.True(t, live)
+	assert.Equal(t, f.envd, m)
+	for _, id := range []string{"sb_paused", "sb_arch"} {
+		_, live, err = store.Metrics(ctx, "n1", id)
+		require.NoError(t, err)
+		assert.False(t, live, "%s is paused: no live sample", id)
+	}
+	assert.Equal(t, []string{"sb_run tok-run"}, f.envdCalls, "only the running sandbox is dialed, with its own token")
+
+	_, _, err = store.Metrics(ctx, "n1", "sb_gone")
+	assert.True(t, k8serrors.IsNotFound(err), "an unknown claim is NotFound, got %v", err)
+	f.envdErr = fmt.Errorf("envd metrics of sb_run: %w", &sandboxd.HTTPError{StatusCode: http.StatusNotFound})
+	_, _, err = store.Metrics(ctx, "n1", "sb_run")
+	assert.True(t, k8serrors.IsNotFound(err), "a relay refused for an unknown claim is NotFound, got %v", err)
 }
 
 func TestCheckpointNamesCarryTheNamespaceWithinTheNodeBudget(t *testing.T) {

@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/projecteru2/core/log"
+
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
 const (
@@ -148,8 +150,8 @@ func (s *Server) sandboxHost(rt route) string {
 // answers 404 for both an unknown id and a wrong token; the id was just
 // resolved from inventory, so the token is what the caller can still fix.
 func (s *Server) writeUpstreamError(w http.ResponseWriter, r *http.Request, err error) {
-	if status, ok := errors.AsType[nodeStatusError](err); ok {
-		switch status.status {
+	if status, ok := errors.AsType[*sandboxd.HTTPError](err); ok {
+		switch status.StatusCode {
 		case http.StatusNotFound, http.StatusUnauthorized:
 			writeError(w, http.StatusUnauthorized, "invalid sandbox access token")
 			return

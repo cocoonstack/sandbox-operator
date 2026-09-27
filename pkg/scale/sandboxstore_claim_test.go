@@ -448,6 +448,9 @@ type recordingFactory struct {
 
 	rows      map[string][]sandboxd.SandboxSummary
 	rowReads  []string
+	envd      sandboxd.EnvdMetrics
+	envdErr   error
+	envdCalls []string
 	silent    string
 	ignoreRef bool
 }
@@ -508,6 +511,13 @@ func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { retu
 
 func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
 	return sandboxd.SandboxStats{}, c.f.verbErr
+}
+
+func (c *recordingClient) EnvdMetrics(_ context.Context, id, token string) (sandboxd.EnvdMetrics, error) {
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.envdCalls = append(c.f.envdCalls, id+" "+token)
+	return c.f.envd, c.f.envdErr
 }
 
 func (c *recordingClient) Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error) {
