@@ -173,9 +173,23 @@ next to its pools, so there is no separate record to keep in sync; it needs
 sandboxd built from 7e9f9a8 or later, which lists templates with their labels and
 takes `PUT /v1/templates/labels`. `<namespace>`,
 the slash and `<name>` together fit sandboxd's 63-character name budget after the
-`e2b/` prefix; a longer name is refused with `400` naming the room left. Claiming
-a built template is not served yet: a create naming one answers `503` as a
-drained pool does.
+`e2b/` prefix; a longer name is refused with `400` naming the room left.
+
+A create naming a built template claims it: when no warm pool serves the name,
+the create looks the name up among the namespace's built templates and claims
+that template's key. No pool serves a promoted key, so the store sends the claim
+to a node whose inventory advertises the key, with `require_promoted`: the node
+clones from the template, a node that no longer holds it answers 404 and the
+store tries the next advertiser, and a node that lost it to a peer redirects
+there. Every advertiser exhausted answers `503` as a drained pool does. A clone
+from a template is a cold clone — the export is fetched and the VM restored —
+where a pool claim takes a warm VM. The lookup runs only after the pool claim
+finds nothing, so a create naming a pool image pays nothing for it. A built
+template runs on the `none` lane; asking it for internet access is `400`. The
+inventory lags a template by one publish tick (vk-sandbox's
+`--publish-interval`, the mesh source's `--inventory-poll`), so a create right
+after a build can answer `404` until the next publish. Needs sandboxd built
+from 559f821 or later, which honors `require_promoted` on a plain claim.
 
 ## Template builds
 

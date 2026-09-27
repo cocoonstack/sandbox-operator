@@ -316,9 +316,22 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		opts.OnExpire = sandboxd.ExpireArchive
 	}
 	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, opts)
+	templateID, known := pool.Template, true
+	if scale.IsNoWarmCapacity(err) {
+		b, pooled, lookupErr := s.resolveTemplate(r, req.TemplateID)
+		known = lookupErr != nil || b != nil || pooled
+		if lookupErr == nil && b != nil {
+			if pool.Net != scale.NetDefault {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("template %q is a built template, which runs without internet access", req.TemplateID))
+				return
+			}
+			templateID = b.name
+			assignment, err = s.store.Claim(r.Context(), s.namespace(r), name, b.current().key, opts)
+		}
+	}
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
-			if !s.knownTemplate(r, req.TemplateID) {
+			if !known {
 				writeError(w, http.StatusNotFound, fmt.Sprintf("template %q not found", req.TemplateID))
 				return
 			}
@@ -344,8 +357,8 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, Sandbox{
-		TemplateID:      pool.Template,
-		Alias:           s.aliasOf(pool.Template),
+		TemplateID:      templateID,
+		Alias:           s.aliasOf(templateID),
 		SandboxID:       PublicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,
@@ -684,9 +697,13 @@ func (p listPage) compare(a, b pageKey) int {
 
 func keyOf(d SandboxDetail) pageKey { return pageKey{d.startedAtKey, d.SandboxID} }
 
-// templateOf reads the store's label because a synthesized Sandbox holds no pod spec.
+// templateOf is the template a sandbox was claimed from, a built template by its bare name.
 func templateOf(sb *sandboxv1beta1.Sandbox) string {
-	return sb.Labels[scale.TemplateLabel]
+	t := sb.Labels[scale.TemplateLabel]
+	if name, ok := strings.CutPrefix(t, templatePrefix+sb.Namespace+"/"); ok {
+		return name
+	}
+	return t
 }
 
 // netFor maps e2b's allow_internet_access onto the pool's network axis.

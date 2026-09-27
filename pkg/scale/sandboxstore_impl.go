@@ -85,15 +85,16 @@ type InventorySource interface {
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
 	// NodeCapacity returns one node's advertise address and warm pools without decoding its entries.
 	NodeCapacity(ctx context.Context, node string) (address string, pools []PoolCapacity, err error)
-	// NodeCapacities returns every readable node's address and warm pools in ListNodes order; a source may return its own shared slice, so callers never mutate it.
+	// NodeCapacities returns every readable node's address, warm pools and promoted templates in ListNodes order; a source may return its own shared slice, so callers never mutate it.
 	NodeCapacities(ctx context.Context) ([]NodePools, error)
 }
 
-// NodePools is one node's advertise address and warm pools.
+// NodePools is one node's advertise address, warm pools and promoted templates.
 type NodePools struct {
-	Node    string
-	Address string
-	Pools   []PoolCapacity
+	Node      string
+	Address   string
+	Pools     []PoolCapacity
+	Templates []PromotedTemplate
 }
 
 // StoreOption configures a scatterGatherStore.
@@ -236,6 +237,12 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	if err != nil {
 		return Assignment{}, err
 	}
+	promoted := len(candidates) == 0
+	if promoted {
+		if candidates, err = s.templateCandidates(ctx, pool); err != nil {
+			return Assignment{}, err
+		}
+	}
 	if len(candidates) == 0 {
 		return Assignment{}, fmt.Errorf("scale: claim %s/%s: no node advertises warm capacity for template %q net %q size %q: %w", namespace, name, pool.Template, pool.Net, pool.Size, ErrNoWarmCapacity)
 	}
@@ -246,9 +253,10 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		Size:       pool.Size,
 		TTLSeconds: opts.TTLSeconds,
 		// The claim ref is the object's namespace/name, which the read path resolves by.
-		ClaimRef: namespacedName(namespace, name),
-		Metadata: opts.Metadata,
-		OnExpire: opts.OnExpire,
+		ClaimRef:        namespacedName(namespace, name),
+		Metadata:        opts.Metadata,
+		OnExpire:        opts.OnExpire,
+		RequirePromoted: promoted,
 	}
 	// Inventory is 5-30s stale, so a capacity miss drops that node and re-samples the rest instead of failing.
 	for len(candidates) > 0 {
@@ -264,7 +272,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			s.index.remember(claimKey(namespace, res.ID), node)
 			return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
-		if !claimUndelivered(claimErr) {
+		if tryNext := claimUndelivered(claimErr) || promoted && templateGone(claimErr); !tryNext {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, node, claimErr)
 		}
 		candidates = slices.DeleteFunc(candidates, func(c warmCandidate) bool {
@@ -388,6 +396,23 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 			if pc.Warm > 0 && poolCapacityMatches(pc, pool) {
 				out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: pc.Warm})
 			}
+		}
+	}
+	return out, nil
+}
+
+// templateCandidates lists the nodes whose inventory holds pool as a promoted template, for a claim no warm pool serves.
+func (s *scatterGatherStore) templateCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
+	nodes, err := s.src.NodeCapacities(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scale: enumerate node capacity: %w", err)
+	}
+	var out []warmCandidate
+	for _, n := range nodes {
+		if n.Address != "" && slices.ContainsFunc(n.Templates, func(t PromotedTemplate) bool {
+			return poolCapacityMatches(PoolCapacity{Template: t.Template, Net: t.Net, Size: t.Size}, pool)
+		}) {
+			out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: 1})
 		}
 	}
 	return out, nil
@@ -651,7 +676,7 @@ func (s *StaticInventorySource) NodeCapacities(context.Context) ([]NodePools, er
 			continue
 		}
 		inv := s.inv[node]
-		out = append(out, NodePools{Node: node, Address: inv.Address, Pools: slices.Clone(inv.Pools)})
+		out = append(out, NodePools{Node: node, Address: inv.Address, Pools: slices.Clone(inv.Pools), Templates: slices.Clone(inv.Templates)})
 	}
 	return out, nil
 }
@@ -963,4 +988,10 @@ func claimUndelivered(err error) bool {
 	}
 	httpErr, ok := errors.AsType[*sandboxd.HTTPError](err)
 	return ok && httpErr.StatusCode >= http.StatusInternalServerError
+}
+
+// templateGone is an advertiser that no longer holds the template, which a stale inventory still lists.
+func templateGone(err error) bool {
+	httpErr, ok := errors.AsType[*sandboxd.HTTPError](err)
+	return ok && httpErr.StatusCode == http.StatusNotFound
 }

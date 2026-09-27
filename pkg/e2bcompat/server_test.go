@@ -572,6 +572,7 @@ type fakeStore struct {
 	fleet               *scale.StaticInventorySource
 	promoted            []string
 	promoteErr          error
+	firstClaimErr       error
 	live                map[string][]scale.PromotedTemplate
 
 	envdCalls    []string
@@ -618,6 +619,9 @@ func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, 
 func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey, opts scale.ClaimOptions) (scale.Assignment, error) {
 	f.claimNS, f.claimName, f.claimPool, f.claimTTL, f.claimOpts = ns, name, pool, opts.TTLSeconds, opts
 	f.claimCalls++
+	if f.firstClaimErr != nil && f.claimCalls == 1 {
+		return scale.Assignment{}, f.firstClaimErr
+	}
 	if f.claimErr != nil {
 		return scale.Assignment{}, f.claimErr
 	}

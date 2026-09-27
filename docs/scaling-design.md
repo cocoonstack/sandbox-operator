@@ -183,6 +183,11 @@ cold-provision on a single over-scheduled node.
 Node choice is instead power-of-two-choices: sample two candidates that
 advertise warm capacity for the requested pool and take the warmer one. That
 keeps the bias toward warm capacity while spreading a burst across the fleet.
+When no node is warm for the key but some node's inventory lists it among its
+promoted templates, the claim goes to one of those nodes with
+`require_promoted`, so the node clones from the template and never cold-boots an
+image named like it; an advertiser that answers 404 has lost the template since
+its last publish, and the next one is tried.
 A stale pick that lands on a node with no warm VM while a peer has one gets a
 redirect to that peer in place of a sandbox, because sandboxd's gossip is
 sub-second fresh where inventory is seconds old. The store then claims once at

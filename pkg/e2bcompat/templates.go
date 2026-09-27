@@ -300,12 +300,6 @@ func (s *Server) builtTemplate(w http.ResponseWriter, r *http.Request, name stri
 	return nil, false
 }
 
-// knownTemplate reports whether templateID names anything create could claim; only a failed claim asks.
-func (s *Server) knownTemplate(r *http.Request, templateID string) bool {
-	b, pool, err := s.resolveTemplate(r, templateID)
-	return err != nil || b != nil || pool
-}
-
 // resolveTemplate reports name's built template in the caller's namespace, and whether an alias or an advertised pool image names it.
 func (s *Server) resolveTemplate(r *http.Request, name string) (*builtTemplate, bool, error) {
 	_, aliased := s.aliases[name]
