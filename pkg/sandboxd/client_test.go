@@ -150,7 +150,7 @@ func TestInfo(t *testing.T) {
 		assert.Equal(t, "/v1/info", r.URL.Path)
 		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "info is a root-token operator surface")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"claimed":2,"hibernated":1,"archived":0,"peers":["10.0.0.6:7777"]}`))
+		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"claimed":2,"hibernated":1,"archived":0,"advertise_addr":"10.0.0.5:7777","peers":["10.0.0.6:7777"]}`))
 	}))
 	defer srv.Close()
 
@@ -162,6 +162,8 @@ func TestInfo(t *testing.T) {
 	assert.Equal(t, 4, info.Pools[0].Target)
 	assert.Equal(t, 2, info.Claimed)
 	assert.Equal(t, 1, info.Hibernated)
+	assert.Equal(t, "10.0.0.5:7777", info.AdvertiseAddr)
+	assert.Equal(t, []string{"10.0.0.6:7777"}, info.Peers)
 }
 
 func TestSandboxesDecodesTheClaimTime(t *testing.T) {
