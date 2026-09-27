@@ -6,9 +6,9 @@ import (
 )
 
 var benchFleets = []struct {
-	name    string
-	nodes   int
-	perNode int
+	Name    string
+	Nodes   int
+	PerNode int
 }{
 	{"26x100", 26, 100},
 	{"26x2000", 26, 2000},
@@ -17,10 +17,10 @@ var benchFleets = []struct {
 
 func BenchmarkStoreGet(b *testing.B) {
 	for _, fleet := range benchFleets {
-		b.Run(fleet.name, func(b *testing.B) {
-			store, _ := benchStore(b, fleet.nodes, fleet.perNode)
-			last := benchNodeName(fleet.nodes - 1)
-			target := fmt.Sprintf("default/sb-%s-%d", last, fleet.perNode-1)
+		b.Run(fleet.Name, func(b *testing.B) {
+			store, _ := benchStore(b, fleet.Nodes, fleet.PerNode)
+			last := benchNodeName(fleet.Nodes - 1)
+			target := fmt.Sprintf("default/sb-%s-%d", last, fleet.PerNode-1)
 			ns, name := splitNamespacedName(target)
 			ctx := b.Context()
 			b.ReportAllocs()
@@ -35,8 +35,8 @@ func BenchmarkStoreGet(b *testing.B) {
 
 func BenchmarkStoreWarmCandidates(b *testing.B) {
 	for _, fleet := range benchFleets {
-		b.Run(fleet.name, func(b *testing.B) {
-			store, pool := benchStore(b, fleet.nodes, fleet.perNode)
+		b.Run(fleet.Name, func(b *testing.B) {
+			store, pool := benchStore(b, fleet.Nodes, fleet.PerNode)
 			ctx := b.Context()
 			b.ReportAllocs()
 			for b.Loop() {
@@ -44,8 +44,8 @@ func BenchmarkStoreWarmCandidates(b *testing.B) {
 				if err != nil {
 					b.Fatalf("warm candidates: %v", err)
 				}
-				if len(candidates) != fleet.nodes {
-					b.Fatalf("got %d candidates, want %d", len(candidates), fleet.nodes)
+				if len(candidates) != fleet.Nodes {
+					b.Fatalf("got %d candidates, want %d", len(candidates), fleet.Nodes)
 				}
 			}
 		})

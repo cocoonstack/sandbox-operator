@@ -20,14 +20,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
@@ -502,34 +498,6 @@ type InventoryApplier interface {
 	Apply(ctx context.Context, inv *NodeInventory) error
 }
 
-var _ InventoryApplier = (*ssaInventoryApplier)(nil)
-
-type ssaInventoryApplier struct {
-	c          client.Client
-	fieldOwner string
-}
-
-// NewSSAInventoryApplier returns the default InventoryApplier, which resolves the resource through a RESTMapper.
-func NewSSAInventoryApplier(c client.Client, fieldOwner string) InventoryApplier {
-	fieldOwner = cmp.Or(fieldOwner, "cocoon-node-inventory-publisher")
-	return &ssaInventoryApplier{c: c, fieldOwner: fieldOwner}
-}
-
-func (a *ssaInventoryApplier) Apply(ctx context.Context, inv *NodeInventory) error {
-	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(inv)
-	if err != nil {
-		return fmt.Errorf("scale: encode node inventory: %w", err)
-	}
-	u := &unstructured.Unstructured{Object: raw}
-	u.SetGroupVersionKind(NodeInventoryGVK)
-	u.SetName(inv.Node)
-	ac := client.ApplyConfigurationFromUnstructured(u)
-	if err := a.c.Apply(ctx, ac, client.FieldOwner(a.fieldOwner), client.ForceOwnership); err != nil {
-		return fmt.Errorf("scale: server-side-apply node inventory: %w", err)
-	}
-	return nil
-}
-
 var (
 	_ InventorySource  = (*StaticInventorySource)(nil)
 	_ InventoryApplier = (*StaticInventorySource)(nil)
@@ -625,75 +593,6 @@ func (s *StaticInventorySource) ApplyCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.applies
-}
-
-var _ InventorySource = (*ClientInventorySource)(nil)
-
-// ClientInventorySource is the production InventorySource over a cache-fed NodeInventory reader.
-// It never mutates what it reads, since NewInventoryCache hands out its cached objects themselves.
-type ClientInventorySource struct {
-	reader client.Reader
-}
-
-// NewClientInventorySource builds a ClientInventorySource over reader.
-func NewClientInventorySource(reader client.Reader) *ClientInventorySource {
-	return &ClientInventorySource{reader: reader}
-}
-
-func (s *ClientInventorySource) ListNodes(ctx context.Context) ([]string, error) {
-	ul := &unstructured.UnstructuredList{}
-	ul.SetGroupVersionKind(NodeInventoryGVK.GroupVersion().WithKind(NodeInventoryGVK.Kind + "List"))
-	if err := s.reader.List(ctx, ul); err != nil {
-		return nil, fmt.Errorf("scale: list node inventories: %w", err)
-	}
-	nodes := make([]string, 0, len(ul.Items))
-	for i := range ul.Items {
-		nodes = append(nodes, ul.Items[i].GetName())
-	}
-	slices.Sort(nodes)
-	return nodes, nil
-}
-
-func (s *ClientInventorySource) NodeInventory(ctx context.Context, node string) (*NodeInventory, error) {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(NodeInventoryGVK)
-	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
-		return nil, fmt.Errorf("scale: get node %q inventory: %w", node, err)
-	}
-	inv := &NodeInventory{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, inv); err != nil {
-		return nil, fmt.Errorf("scale: decode node %q inventory: %w", node, err)
-	}
-	return inv, nil
-}
-
-func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (string, []PoolCapacity, error) {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(NodeInventoryGVK)
-	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
-		return "", nil, fmt.Errorf("scale: get node %q inventory: %w", node, err)
-	}
-	addr, _, err := unstructured.NestedString(u.Object, "address")
-	if err != nil {
-		return "", nil, fmt.Errorf("scale: decode node %q address: %w", node, err)
-	}
-	raw, _, err := unstructured.NestedSlice(u.Object, "pools")
-	if err != nil {
-		return "", nil, fmt.Errorf("scale: decode node %q pools: %w", node, err)
-	}
-	pools := make([]PoolCapacity, 0, len(raw))
-	for _, item := range raw {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		pc := PoolCapacity{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &pc); err != nil {
-			return "", nil, fmt.Errorf("scale: decode node %q pool capacity: %w", node, err)
-		}
-		pools = append(pools, pc)
-	}
-	return addr, pools, nil
 }
 
 // IsNoWarmCapacity reports whether err means Claim found no warm node.

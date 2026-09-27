@@ -34,6 +34,7 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/logbridge"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/kubeinventory"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
 	"github.com/cocoonstack/sandbox-operator/version"
 )
@@ -189,7 +190,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := scale.NewInventoryCache(ctx, restCfg)
+	reader, err := kubeinventory.NewCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
@@ -197,7 +198,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	invSource := scale.NewClientInventorySource(reader)
+	invSource := kubeinventory.New(reader)
 	store := scale.NewScatterGatherStore(
 		invSource,
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),

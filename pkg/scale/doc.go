@@ -6,8 +6,8 @@
 // providers, L1 (claim ownership transfer) to upstream's controller, and L2
 // (a node-local claim gateway) is designed there and not built.
 //
-// The scatter-gather store with its cache-fed inventory source lives in
-// sandboxstore_impl.go and is served by cmd/sandbox-apiserver via
+// The scatter-gather store lives in sandboxstore_impl.go, its inventory
+// source in pkg/scale/kubeinventory; cmd/sandbox-apiserver serves both via
 // pkg/scale/apiserver. The NodeInventory publisher is vk-sandbox's, built on
 // InventoryApplier, NodeLiveSource and EntryFromSummary.
 package scale
