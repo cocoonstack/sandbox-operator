@@ -57,6 +57,7 @@ type member struct {
 
 type snapshot struct {
 	nodes []string
+	caps  []scale.NodePools
 	byKey map[string]*scale.NodeInventory
 }
 
@@ -68,7 +69,7 @@ type answer struct {
 
 var _ scale.InventorySource = (*Source)(nil)
 
-// Source serves ListNodes, NodeInventory and NodeCapacity from memory; a background tick refreshes it.
+// Source serves ListNodes, NodeInventory, NodeCapacity and NodeCapacities from memory; a background tick refreshes it.
 type Source struct {
 	dial    DialFunc
 	opts    Options
@@ -112,6 +113,10 @@ func New(ctx context.Context, dial DialFunc, opts Options) (*Source, error) {
 
 func (s *Source) ListNodes(_ context.Context) ([]string, error) {
 	return s.snap.Load().nodes, nil
+}
+
+func (s *Source) NodeCapacities(_ context.Context) ([]scale.NodePools, error) {
+	return s.snap.Load().caps, nil
 }
 
 func (s *Source) NodeInventory(_ context.Context, node string) (*scale.NodeInventory, error) {
@@ -229,6 +234,11 @@ func (s *Source) publish() {
 		next.byKey[key] = m.inv
 	}
 	next.nodes = slices.Sorted(maps.Keys(next.byKey))
+	next.caps = make([]scale.NodePools, len(next.nodes))
+	for i, node := range next.nodes {
+		inv := next.byKey[node]
+		next.caps[i] = scale.NodePools{Node: node, Address: inv.Address, Pools: inv.Pools}
+	}
 	s.snap.Store(next)
 }
 
