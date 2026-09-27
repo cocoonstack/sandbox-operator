@@ -153,9 +153,13 @@ func TestAMeshWideSilenceKeepsTheDiscoveredPeersForMaxStale(t *testing.T) {
 	for _, n := range []*stubNode{a, b} {
 		n.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
 	}
+	for range defaultMaxStale {
+		s.tick(t.Context())
+		assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "no member answered, so nothing says the peer left")
+	}
 	s.tick(t.Context())
-	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "no member answered, so nothing says the peer left")
-	assert.Contains(t, s.members, b.addr())
+	assert.Empty(t, listNodes(t, s))
+	assert.Contains(t, s.members, b.addr(), "the peer stays a member while its inventory leaves the snapshot")
 }
 
 func TestAHungMemberCannotStallTheSnapshot(t *testing.T) {
@@ -189,6 +193,70 @@ func TestARepeatedSeedStillRunsTheDiscoveryTick(t *testing.T) {
 	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
 	s := newSource(t, a.addr(), a.addr())
 	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+}
+
+func TestAGossipedAddressKeepsANodeWhoseSeedTransportFails(t *testing.T) {
+	a, b, front := newStubNode(t), newStubNode(t), newStubNode(t)
+	front.set(func(n *stubNode) {
+		n.advertise = a.addr()
+		n.peers = []string{b.addr()}
+	})
+	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	b.set(func(n *stubNode) { n.peers = []string{a.addr()} })
+	s := newSource(t, front.addr())
+	require.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+
+	front.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
+	for range defaultMaxStale + 3 {
+		s.tick(t.Context())
+	}
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "node a answers at the address the mesh gossips")
+}
+
+func TestManyHungMembersDoNotStarveTheHealthyOnes(t *testing.T) {
+	s := &Source{dial: dial, opts: Options{PollInterval: 300 * time.Millisecond, MaxStale: defaultMaxStale}, members: map[string]*member{}}
+	var healthy []string
+	for range 24 {
+		n := newStubNode(t)
+		n.set(func(n *stubNode) { n.hang = true })
+		s.members[n.addr()] = &member{reader: dial(n.addr()), seed: true}
+	}
+	for range 12 {
+		n := newStubNode(t)
+		healthy = append(healthy, n.addr())
+		s.members[n.addr()] = &member{reader: dial(n.addr()), seed: true}
+	}
+
+	answers := s.poll(t.Context())
+	for _, addr := range healthy {
+		assert.NoError(t, answers[addr].err, addr)
+	}
+}
+
+func TestTwoGossipedSpellingsOfOneNodeEndUpPolledOnce(t *testing.T) {
+	b, c, old, fresh := newStubNode(t), newStubNode(t), newStubNode(t), newStubNode(t)
+	b.set(func(n *stubNode) { n.peers = []string{old.addr(), c.addr()} })
+	c.set(func(n *stubNode) { n.peers = []string{old.addr(), b.addr()} })
+	s := newSource(t, b.addr())
+	require.Equal(t, sortedAddrs(b, c, old), listNodes(t, s))
+
+	old.set(func(n *stubNode) {
+		n.status = http.StatusServiceUnavailable
+		n.advertise = fresh.addr()
+	})
+	b.set(func(n *stubNode) { n.peers = []string{fresh.addr(), c.addr()} })
+	s.tick(t.Context())
+	old.set(func(n *stubNode) { n.status = 0 })
+	c.set(func(n *stubNode) { n.peers = []string{fresh.addr(), b.addr()} })
+	for range 5 {
+		s.tick(t.Context())
+	}
+	oldBefore, freshBefore := old.calls(), fresh.calls()
+	s.tick(t.Context())
+	assert.Equal(t, 1, old.calls()-oldBefore+fresh.calls()-freshBefore, "one node is polled once per tick")
+	assert.Equal(t, sortedAddrs(b, c, fresh), listNodes(t, s))
+	assert.Contains(t, s.members, fresh.addr(), "the member dialed at the node's own key is the one kept")
+	assert.NotContains(t, s.members, old.addr())
 }
 
 type stubNode struct {

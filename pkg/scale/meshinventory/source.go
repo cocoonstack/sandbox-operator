@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/projecteru2/core/log"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -23,7 +22,6 @@ import (
 const (
 	defaultPollInterval = 10 * time.Second
 	defaultMaxStale     = 3
-	pollConcurrency     = 16
 )
 
 var (
@@ -33,7 +31,7 @@ var (
 
 // Options configures a Source.
 type Options struct {
-	// Seeds are the sandboxd addresses dialed at start; the node key is each node's own advertise_addr.
+	// Seeds are the sandboxd addresses dialed at start, each naming one node; the node key is each node's own advertise_addr.
 	Seeds []string
 	// PollInterval is the tick between polls, 10s by default.
 	PollInterval time.Duration
@@ -78,7 +76,7 @@ type Source struct {
 	snap    atomic.Pointer[snapshot]
 }
 
-// New runs the first tick before returning and fails when no seed answers, a seed refuses the token, or a seed has no advertise_addr.
+// New runs the first tick before returning and polls until ctx ends, so ctx is the process context; it fails when no seed answers, a seed refuses the token, or a seed has no advertise_addr.
 func New(ctx context.Context, dial DialFunc, opts Options) (*Source, error) {
 	if len(opts.Seeds) == 0 {
 		return nil, errors.New("meshinventory: at least one seed is required")
@@ -166,18 +164,29 @@ func (s *Source) tick(ctx context.Context) map[string]answer {
 			delete(s.members, addr)
 		}
 	}
-	keys := map[string]bool{}
-	for _, m := range s.members {
-		if m.inv == nil {
+	owner := map[string]string{}
+	for addr, m := range s.members {
+		if a, ok := answers[addr]; !ok || a.err != nil {
 			continue
 		}
-		keys[m.inv.Node] = true
-		if dup, ok := s.members[m.inv.Node]; ok && m.seed && !dup.seed {
-			delete(s.members, m.inv.Node)
+		key := m.inv.Node
+		other, dup := owner[key]
+		switch {
+		case !dup:
+			owner[key] = addr
+		case m.seed && s.members[other].seed:
+		case m.seed || (!s.members[other].seed && addr == key):
+			delete(s.members, other)
+			owner[key] = addr
+		default:
+			delete(s.members, addr)
 		}
 	}
 	for addr := range named {
-		if _, ok := s.members[addr]; !ok && !keys[addr] {
+		if _, ok := s.members[addr]; ok {
+			continue
+		}
+		if _, known := owner[addr]; !known {
 			s.members[addr] = &member{reader: s.dial(addr)}
 		}
 	}
@@ -188,29 +197,36 @@ func (s *Source) tick(ctx context.Context) map[string]answer {
 func (s *Source) poll(ctx context.Context) map[string]answer {
 	ctx, cancel := context.WithTimeout(ctx, s.opts.PollInterval)
 	defer cancel()
-	var mu sync.Mutex
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
 	answers := make(map[string]answer, len(s.members))
-	g := &errgroup.Group{}
-	g.SetLimit(pollConcurrency)
 	for addr, m := range s.members {
-		g.Go(func() error {
+		wg.Go(func() {
 			a := read(ctx, m.reader)
 			mu.Lock()
 			answers[addr] = a
 			mu.Unlock()
-			return nil
 		})
 	}
-	_ = g.Wait()
+	wg.Wait()
 	return answers
 }
 
 func (s *Source) publish() {
-	next := &snapshot{byKey: map[string]*scale.NodeInventory{}}
+	best := map[string]*member{}
 	for _, m := range s.members {
-		if m.inv != nil && m.fails <= s.opts.MaxStale {
-			next.byKey[m.inv.Node] = m.inv
+		if m.inv == nil || m.fails > s.opts.MaxStale {
+			continue
 		}
+		if b, ok := best[m.inv.Node]; !ok || m.fails < b.fails {
+			best[m.inv.Node] = m
+		}
+	}
+	next := &snapshot{byKey: make(map[string]*scale.NodeInventory, len(best))}
+	for key, m := range best {
+		next.byKey[key] = m.inv
 	}
 	next.nodes = slices.Sorted(maps.Keys(next.byKey))
 	s.snap.Store(next)
