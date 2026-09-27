@@ -140,6 +140,11 @@ type SandboxMetric struct {
 	DiskTotal     int64   `json:"diskTotal"`
 }
 
+// SandboxesWithMetrics is the GET /sandboxes/metrics reply, keyed by sandbox id.
+type SandboxesWithMetrics struct {
+	Sandboxes map[string]SandboxMetric `json:"sandboxes"`
+}
+
 // SandboxLogs is the GET /sandboxes/{id}/logs reply (spec: SandboxLogs).
 type SandboxLogs struct {
 	Logs       []struct{} `json:"logs"`

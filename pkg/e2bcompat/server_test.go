@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -539,6 +540,7 @@ func TestDeleteWithoutAnOwningNodeIs500(t *testing.T) {
 }
 
 type fakeStore struct {
+	mu         sync.Mutex
 	claimPool  scale.PoolKey
 	claimNS    string
 	claimName  string
@@ -580,7 +582,9 @@ func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbo
 }
 
 func (f *fakeStore) GetByClaimID(_ context.Context, ns, id string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
+	f.mu.Lock()
 	f.lookedUpID = id
+	f.mu.Unlock()
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -638,8 +642,8 @@ func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{}, nil
+func (f *fakeStore) Metrics(context.Context, string, string) (scale.SandboxMetrics, bool, error) {
+	return scale.SandboxMetrics{}, false, nil
 }
 
 func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {

@@ -2,6 +2,7 @@ package scale
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,13 +24,14 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 	ctx := t.Context()
 
-	_, statsErr := store.Stats(ctx, "n1", "sb_gone")
+	f.envdErr = &sandboxd.HTTPError{StatusCode: http.StatusNotFound}
+	_, _, metricsErr := store.Metrics(ctx, "n1", "sb_gone")
 	_, forkErr := store.Fork(ctx, "ns", "n1", "sb_gone", 1, 0)
 	_, snapErr := store.Snapshot(ctx, "n1", "sb_gone", "")
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
 		"resume":   store.Resume(ctx, "n1", "sb_gone"),
-		"stats":    statsErr,
+		"metrics":  metricsErr,
 		"fork":     forkErr,
 		"snapshot": snapErr,
 	} {
@@ -61,6 +63,35 @@ func TestReadReportsTheClaimAsItsNodeHoldsIt(t *testing.T) {
 
 	_, err = store.Read(t.Context(), "n1", "sb_gone")
 	assert.True(t, k8serrors.IsNotFound(err), "a sandboxd 404 must surface as NotFound, got %v", err)
+}
+
+func TestMetricsMapsTheNodesPassiveRelayAnswers(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777"))
+	f := &recordingFactory{
+		envd: sandboxd.EnvdMetrics{Timestamp: 1790517471, CPUCount: 1, CPUUsedPct: 97.5, MemTotal: 490504192},
+		envdErrs: map[string]error{
+			"sb_paused": fmt.Errorf("envd metrics of sb_paused: %w", &sandboxd.HTTPError{StatusCode: http.StatusConflict}),
+			"sb_gone":   fmt.Errorf("envd metrics of sb_gone: %w", &sandboxd.HTTPError{StatusCode: http.StatusNotFound}),
+			"sb_reset":  errors.New("envd metrics of sb_reset: connection reset"),
+		},
+	}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+	ctx := t.Context()
+
+	m, live, err := store.Metrics(ctx, "n1", "sb_run")
+	require.NoError(t, err)
+	assert.True(t, live)
+	assert.Equal(t, f.envd, m)
+	_, live, err = store.Metrics(ctx, "n1", "sb_paused")
+	require.NoError(t, err)
+	assert.False(t, live, "a paused sandbox's 409 is no live sample, not an error")
+	_, _, err = store.Metrics(ctx, "n1", "sb_gone")
+	assert.True(t, k8serrors.IsNotFound(err), "an unknown claim is NotFound, got %v", err)
+	_, _, err = store.Metrics(ctx, "n1", "sb_reset")
+	require.Error(t, err)
+	assert.False(t, k8serrors.IsNotFound(err), "a transport failure is not NotFound: %v", err)
+	assert.Empty(t, f.rowReads, "the read goes straight to the passive relay, with no by-id read first")
 }
 
 func TestCheckpointNamesCarryTheNamespaceWithinTheNodeBudget(t *testing.T) {

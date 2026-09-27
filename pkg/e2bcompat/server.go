@@ -173,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /sandboxes/{sandboxID}/snapshots", s.auth(http.HandlerFunc(s.createSnapshot)))
 	mux.Handle("GET /snapshots", s.auth(http.HandlerFunc(s.listSnapshots)))
 	mux.Handle("GET /sandboxes/{sandboxID}/metrics", s.auth(http.HandlerFunc(s.sandboxMetrics)))
+	mux.Handle("GET /sandboxes/metrics", s.auth(http.HandlerFunc(s.sandboxesMetrics)))
 	mux.Handle("GET /sandboxes/{sandboxID}/logs", s.auth(s.sandboxLogs(SandboxLogs{Logs: []struct{}{}, LogEntries: []struct{}{}})))
 	mux.Handle("GET /v2/sandboxes/{sandboxID}/logs", s.auth(s.sandboxLogs(SandboxLogsV2{Logs: []struct{}{}})))
 	mux.Handle("GET /templates", s.auth(http.HandlerFunc(s.listTemplates)))

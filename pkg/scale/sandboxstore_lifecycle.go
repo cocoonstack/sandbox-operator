@@ -14,8 +14,11 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
-// maxCheckpointName is sandboxd's name budget (types.NameRe).
-const maxCheckpointName = 63
+const (
+	// maxCheckpointName is sandboxd's name budget (types.NameRe).
+	maxCheckpointName = 63
+	metricsTimeout    = 2 * time.Second
+)
 
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
@@ -26,6 +29,23 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 		return nodeVerbError(err, "pause", id, node)
 	}
 	return nil
+}
+
+func (s *scatterGatherStore) Metrics(ctx context.Context, node, id string) (SandboxMetrics, bool, error) {
+	cl, err := s.nodeClient(ctx, node, "metrics", id)
+	if err != nil {
+		return SandboxMetrics{}, false, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, metricsTimeout)
+	defer cancel()
+	m, err := cl.EnvdMetrics(ctx, id)
+	if he, ok := errors.AsType[*sandboxd.HTTPError](err); ok && he.StatusCode == http.StatusConflict {
+		return SandboxMetrics{}, false, nil
+	}
+	if err != nil {
+		return SandboxMetrics{}, false, nodeVerbError(err, "metrics", id, node)
+	}
+	return m, true, nil
 }
 
 func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error) {
@@ -115,24 +135,6 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 		return fmt.Errorf("scale: sandboxd delete snapshot %q on node %q: %w", snapshotID, node, err)
 	}
 	return nil
-}
-
-func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (SandboxStats, error) {
-	cl, err := s.nodeClient(ctx, node, "stats", id)
-	if err != nil {
-		return SandboxStats{}, err
-	}
-	st, err := cl.Stats(ctx, id)
-	if err != nil {
-		return SandboxStats{}, nodeVerbError(err, "stats", id, node)
-	}
-	return SandboxStats{
-		CPUCount:        st.CPUCount,
-		MemTotalBytes:   st.MemTotalBytes,
-		MemUsedBytes:    st.MemUsedBytes,
-		MemUsedMeasured: st.MemUsedMeasured,
-		MeasuredAt:      st.MeasuredAt,
-	}, nil
 }
 
 func (s *scatterGatherStore) Read(ctx context.Context, node, id string) (SandboxRecord, error) {
