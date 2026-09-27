@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -470,7 +472,7 @@ func TestResumeAutoPauseSetsTheLeaseEndActionWithoutShorteningTheLease(t *testin
 }
 
 func TestMetricsReportEnvdsSampleAndNothingForAPausedSandbox(t *testing.T) {
-	store := &lifecycleStore{metrics: map[string]scale.SandboxMetrics{"sb_run": {Timestamp: 1790517471, CPUCount: 1, CPUUsedPct: 97.5, MemTotal: 490504192, MemUsed: 209805312, MemCache: 125820928, DiskUsed: 27705344, DiskTotal: 10464022528}}}
+	store := &lifecycleStore{metrics: map[string]envdMetrics{"sb_run": {Timestamp: 1790517471, CPUCount: 1, CPUUsedPct: 97.5, MemTotal: 490504192, MemUsed: 209805312, MemCache: 125820928, DiskUsed: 27705344, DiskTotal: 10464022528}}}
 	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_run", "node-a", "img"), pausedSandbox("s2", "sb_paused", "node-a", "img")}
 	h := newTestServer(t, store)
 
@@ -490,7 +492,7 @@ func TestMetricsReportEnvdsSampleAndNothingForAPausedSandbox(t *testing.T) {
 
 func TestBatchMetricsKeepOnlyTheRunningSandboxesItCanRead(t *testing.T) {
 	store := &lifecycleStore{
-		metrics:    map[string]scale.SandboxMetrics{"sb_a": {CPUCount: 1, CPUUsedPct: 10}, "sb_b": {CPUCount: 1, CPUUsedPct: 20}},
+		metrics:    map[string]envdMetrics{"sb_a": {CPUCount: 1, CPUUsedPct: 10}, "sb_b": {CPUCount: 1, CPUUsedPct: 20}},
 		metricsErr: map[string]error{"sb_bad": errors.New("relay reset")},
 	}
 	store.items = []sandboxv1beta1.Sandbox{
@@ -558,8 +560,10 @@ type lifecycleStore struct {
 	readNode, readID       string
 	err                    error
 	nodeErr                error
-	metrics                map[string]scale.SandboxMetrics
+	metrics                map[string]envdMetrics
 	metricsErr             map[string]error
+	envdDown               map[string]bool
+	dialPort               atomic.Uint32
 
 	nodePaused   bool
 	nodeArchived bool
@@ -570,12 +574,23 @@ func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.Sandbox
 	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused || f.nodeArchived, Deadline: f.deadline}, f.nodeErr
 }
 
-func (f *lifecycleStore) Metrics(_ context.Context, _, id string) (scale.SandboxMetrics, bool, error) {
+func (f *lifecycleStore) DialGuestPort(_ context.Context, _, id string, port uint16) (net.Conn, error) {
+	f.dialPort.Store(uint32(port))
 	if f.nodeErr != nil {
-		return scale.SandboxMetrics{}, false, f.nodeErr
+		return nil, f.nodeErr
+	}
+	if err := f.metricsErr[id]; err != nil {
+		return nil, err
+	}
+	if f.envdDown[id] {
+		return envdPipe(http.StatusNotFound, ""), nil
 	}
 	m, live := f.metrics[id]
-	return m, live, f.metricsErr[id]
+	if !live {
+		return nil, k8serrors.NewConflict(sandboxv1beta1.Resource("sandboxes"), id, errors.New("sandbox is paused"))
+	}
+	body, _ := json.Marshal(m)
+	return envdPipe(http.StatusOK, string(body)), nil
 }
 
 func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
