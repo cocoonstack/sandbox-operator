@@ -196,6 +196,7 @@ func TestStoreClaimSkipsANodeThatDeliveredNothing(t *testing.T) {
 		err  error
 	}{
 		{"sandboxd down", fmt.Errorf("claim: %w", dial)},
+		{"sandboxd unreachable", fmt.Errorf("claim: %w", &url.Error{Op: "Post", Err: &net.OpError{Op: "dial", Err: context.DeadlineExceeded}})},
 		{"sandboxd 500", fmt.Errorf("claim: %w", &sandboxd.HTTPError{StatusCode: 500, Message: "provisioning failed"})},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

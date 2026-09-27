@@ -57,6 +57,7 @@ const (
 
 	// Idle conns per host match the per-node claim fan-out, so a burst reuses connections.
 	sandboxdRequestTimeout      = 10 * time.Second
+	sandboxdDialTimeout         = time.Second
 	sandboxdMaxIdleConns        = 256
 	sandboxdMaxIdleConnsPerHost = 32
 	sandboxdIdleConnTimeout     = 90 * time.Second
@@ -645,6 +646,7 @@ func NewSandboxdHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: sandboxdRequestTimeout,
 		Transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: sandboxdDialTimeout}).DialContext,
 			MaxIdleConns:        sandboxdMaxIdleConns,
 			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
 			IdleConnTimeout:     sandboxdIdleConnTimeout,
