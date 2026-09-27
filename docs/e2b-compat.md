@@ -41,6 +41,49 @@ also fails without `--e2b-domain`: the SDK derives the sandbox host from it, so
 a deployment without one hands out sandboxes whose data plane no client can
 address.
 
+## Mesh mode (no Kubernetes)
+
+`sandbox-e2b` serves the same surface on a sandboxd mesh (memberlist, see the
+sandbox repo's `docs/cluster.md`) with no Kubernetes: no kubeconfig, no
+`NodeInventory`, no APIService. It dials the seeds, learns the rest of the mesh
+from each node's `GET /v1/info` peers, and reads every node's `GET
+/v1/sandboxes` on a tick. Reads and watches are served from that in-memory
+snapshot and claims are routed from it, as the aggregated apiserver does from
+its informer cache.
+
+```bash
+sandbox-e2b \
+  --sandboxd-seeds=172.20.0.5:7777,172.20.0.6:7777 \
+  --sandboxd-token-file=/etc/sandboxd/token \
+  --e2b-bind-address=:8080 --e2b-domain=sandbox.example.com \
+  --e2b-api-key-file=/etc/e2b/keys --e2b-template-aliases=/etc/e2b/aliases \
+  --envd-proxy-bind-address=:8443
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--sandboxd-seeds` | — | **Required.** Comma-separated sandboxd addresses dialed at start, each naming one node. A node is keyed by its own `advertise_addr` from `GET /v1/info`, so a seed written as a hostname and gossiped as an address is one node. |
+| `--sandboxd-token`, `--sandboxd-token-file` | — | The fleet root `api_token`: `GET /v1/info` and the full `GET /v1/sandboxes` need root. The file wins when both are set. |
+| `--inventory-poll` | `10s` | The tick between polls. A tick costs 2 requests per node, all nodes at once and bounded by the tick; List and Watch see a change within one tick. |
+| `--e2b-*` | | The flags above. The surface is always on, so there is no `--enable-e2b-api`. |
+| `--envd-proxy-bind-address` | — | When set, the [envd-proxy](envd-proxy.md) data plane listens here in the same process and shares the one poller, store and index. `--envd-proxy-tls-cert-file`, `--envd-proxy-tls-private-key-file` and `--envd-proxy-guest-http2` are its TLS and guest flags, and its domain is `--e2b-domain`. |
+
+- **The node key is the node's `advertise_addr` as `GET /v1/info` reports
+  it**, which is its `client_advertise` when that is set. The process must
+  reach every node at that address with the root token.
+- **The first sandboxd release carrying `advertise_addr` in `GET /v1/info`**
+  (sandbox main `acfca8b` today). A seed without it fails startup (`reports no
+  advertise_addr`); a discovered peer without it is skipped.
+- **Startup fails loud** when no seed answers or a seed refuses the token
+  (`GET /v1/info needs the fleet root api_token`).
+- **A silent node** keeps its last snapshot for 3 ticks and then leaves the
+  listing, while a peer the mesh no longer names leaves at once; its sandboxes
+  die with it, as on the Kubernetes path.
+- **Warm pools** are set through the sandbox SDK's `SetPoolsCluster` or
+  sandboxd's own config; mesh mode has no warm-pool driver.
+- **Claims follow sandboxd's redirects**: a warm miss at one node lands on the
+  warm peer it names, one extra call.
+
 ## Use it
 
 ```bash

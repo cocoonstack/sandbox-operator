@@ -1,4 +1,4 @@
-package main
+package envdproxy
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestServeOnDrainsInFlightRequestsBeforeReturning(t *testing.T) {
+func TestServeDrainsInFlightRequestsBeforeReturning(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -22,7 +22,7 @@ func TestServeOnDrainsInFlightRequestsBeforeReturning(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	served := make(chan error, 1)
-	go func() { served <- serveOn(ctx, &options{Addr: ln.Addr().String()}, ln, h) }()
+	go func() { served <- (&Flags{Addr: ln.Addr().String()}).Serve(ctx, ln, h) }()
 	status := make(chan int, 1)
 	go func() {
 		resp, getErr := http.Get("http://" + ln.Addr().String() + "/files")
@@ -38,12 +38,12 @@ func TestServeOnDrainsInFlightRequestsBeforeReturning(t *testing.T) {
 	cancel()
 	select {
 	case serveErr := <-served:
-		t.Fatalf("serveOn returned (%v) with a request still in flight", serveErr)
+		t.Fatalf("Serve returned (%v) with a request still in flight", serveErr)
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(release)
 	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serveOn: %v", serveErr)
+		t.Fatalf("Serve: %v", serveErr)
 	}
 	if got := <-status; got != http.StatusNoContent {
 		t.Fatalf("in-flight request answered %d, want 204", got)

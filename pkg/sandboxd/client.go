@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -257,6 +259,18 @@ func (c *Client) authenticate(req *http.Request, token string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+}
+
+// TokenFrom returns the api_token read from file (a Secret mount) when file is set, else literal.
+func TokenFrom(literal, file string) (string, error) {
+	if file == "" {
+		return literal, nil
+	}
+	b, err := os.ReadFile(filepath.Clean(file))
+	if err != nil {
+		return "", fmt.Errorf("sandboxd: read token file %q: %w", file, err)
+	}
+	return strings.TrimSpace(string(b)), nil
 }
 
 // statusError reads the {"error": "..."} body and returns a typed *HTTPError.

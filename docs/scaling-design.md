@@ -179,9 +179,16 @@ cold-provision on a single over-scheduled node.
 
 Node choice is instead power-of-two-choices: sample two candidates that
 advertise warm capacity for the requested pool and take the warmer one. That
-keeps the bias toward warm capacity while spreading a burst across the fleet,
-and a stale pick still costs at most one gossip redirect inside sandboxd, so
-correctness is unchanged.
+keeps the bias toward warm capacity while spreading a burst across the fleet.
+A stale pick that lands on a node with no warm VM while a peer has one gets a
+redirect to that peer in place of a sandbox, because sandboxd's gossip is
+sub-second fresh where inventory is seconds old. The store then claims once at
+the named peer with `no_redirect`, records the node that delivered, and only
+drops the picked node and re-samples when no named peer delivers. A warm hit
+stays one call, and the hop costs one call where a drop-and-re-sample used to
+(0.57 ms across two hosts on the testbed). A target is mapped to a node only
+through the inventory's advertised addresses, so on the Kubernetes path a
+fleet that sets `client_advertise` gets no hop and falls back to re-sampling.
 
 The watch path makes the opposite trade. Re-deriving the fleet view is
 `O(nodes × sandboxes)` — measured at 124 ms for the list and 173 ms for a full
