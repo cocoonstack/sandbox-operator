@@ -220,27 +220,35 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		return Assignment{}, fmt.Errorf("scale: claim %s/%s: no node advertises warm capacity for template %q net %q size %q: %w", namespace, name, pool.Template, pool.Net, pool.Size, ErrNoWarmCapacity)
 	}
 
+	spec := sandboxd.ClaimSpec{
+		Template:   pool.Template,
+		Net:        pool.Net,
+		Size:       pool.Size,
+		TTLSeconds: ttlSeconds,
+		// The claim ref is the object's namespace/name, which the read path resolves by.
+		ClaimRef: namespacedName(namespace, name),
+	}
 	// Inventory is 5-30s stale, so a capacity miss drops that node and re-samples the rest instead of failing.
 	for len(candidates) > 0 {
-		best, idx := pickPowerOfTwo(candidates)
-		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, sandboxd.ClaimSpec{
-			Template:   pool.Template,
-			Net:        pool.Net,
-			Size:       pool.Size,
-			TTLSeconds: ttlSeconds,
-			// The claim ref is the object's namespace/name, which the read path resolves by.
-			ClaimRef: namespacedName(namespace, name),
-		})
+		best := pickPowerOfTwo(candidates)
+		node := best.node
+		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, spec)
+		redirect, _ := errors.AsType[*sandboxd.RedirectError](claimErr)
+		if redirect != nil {
+			node, res, claimErr = s.claimRedirected(ctx, node, redirect, candidates, spec)
+		}
 		if claimErr == nil {
-			s.index.remember(nameKey(namespace, name), best.node)
-			s.index.remember(claimKey(namespace, res.ID), best.node)
-			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
+			s.index.remember(nameKey(namespace, name), node)
+			s.index.remember(claimKey(namespace, res.ID), node)
+			return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
 		if !claimUndelivered(claimErr) {
-			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, best.node, claimErr)
+			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, node, claimErr)
 		}
-		log.WithFunc("scale.Claim").Debugf(ctx, "node delivered nothing for the claim; trying another node node=%s err=%v remaining=%d", best.node, claimErr, len(candidates)-1)
-		candidates = slices.Delete(candidates, idx, idx+1)
+		candidates = slices.DeleteFunc(candidates, func(c warmCandidate) bool {
+			return c.node == best.node || redirect != nil && slices.Contains(redirect.Targets, c.addr)
+		})
+		log.WithFunc("scale.Claim").Debugf(ctx, "node delivered nothing for the claim; trying another node node=%s err=%v remaining=%d", node, claimErr, len(candidates))
 	}
 	return Assignment{}, fmt.Errorf("scale: claim %s/%s: no warm node delivered: %w", namespace, name, ErrNoWarmCapacity)
 }
@@ -309,6 +317,37 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, m
 		}
 	}
 	return nil
+}
+
+func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, redirect *sandboxd.RedirectError, candidates []warmCandidate, spec sandboxd.ClaimSpec) (string, sandboxd.ClaimResult, error) {
+	logger := log.WithFunc("scale.claimRedirected")
+	spec.NoRedirect = true
+	for _, target := range redirect.Targets {
+		node := s.nodeForAddress(ctx, target, candidates)
+		if node == "" {
+			logger.Debugf(ctx, "redirect target is no known node; skipping from=%s target=%s", from, target)
+			continue
+		}
+		res, err := s.sandboxdFactory(target, s.sandboxdToken).Claim(ctx, spec)
+		if err == nil || !claimUndelivered(err) {
+			return node, res, err
+		}
+		logger.Debugf(ctx, "redirect target delivered nothing; skipping from=%s node=%s err=%v", from, node, err)
+	}
+	return from, sandboxd.ClaimResult{}, redirect
+}
+
+func (s *scatterGatherStore) nodeForAddress(ctx context.Context, addr string, candidates []warmCandidate) string {
+	if i := slices.IndexFunc(candidates, func(c warmCandidate) bool { return c.addr == addr }); i >= 0 {
+		return candidates[i].node
+	}
+	node, _ := FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, n string) string {
+		if got, _, err := s.src.NodeCapacity(gctx, n); err == nil && got == addr {
+			return n
+		}
+		return ""
+	})
+	return node
 }
 
 // warmCandidates fans out per node like List, skipping (not failing) a node whose inventory is unavailable.
@@ -695,15 +734,15 @@ func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 }
 
 // pickPowerOfTwo keeps the warmer of two sampled candidates, so a burst spreads instead of funneling onto one node.
-func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
+func pickPowerOfTwo(candidates []warmCandidate) warmCandidate {
 	//nolint:gosec // load spreading, not a security decision
 	i := rand.IntN(len(candidates))
 	//nolint:gosec // load spreading, not a security decision
 	j := rand.IntN(len(candidates))
 	if candidates[j].warm > candidates[i].warm {
-		return candidates[j], j
+		return candidates[j]
 	}
-	return candidates[i], i
+	return candidates[i]
 }
 
 func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {

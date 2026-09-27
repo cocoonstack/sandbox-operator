@@ -21,9 +21,8 @@ import (
 
 // ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
 // at max_claims, the calling tenant is at its own max_claims, or the node is
-// draining), or when a 200 carries only a peer redirect rather than a delivered
-// sandbox. In every case this node handed over no VM, so the store tries another
-// node or reports no warm capacity.
+// draining) or a 200 that delivers no sandbox. In every case this node handed
+// over no VM, so the store tries another node or reports no warm capacity.
 var ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
 
 // HTTPError carries a non-2xx sandboxd status that is not otherwise typed (e.g.
@@ -40,6 +39,17 @@ func (e *HTTPError) Error() string {
 	}
 	return fmt.Sprintf("sandboxd: http %d", e.StatusCode)
 }
+
+// RedirectError is a 200 claim answer naming warm peers instead of a delivered sandbox; it matches ErrNodeAtCapacity.
+type RedirectError struct {
+	Targets []string
+}
+
+func (e *RedirectError) Error() string {
+	return "sandboxd: claim redirected to " + strings.Join(e.Targets, ", ")
+}
+
+func (e *RedirectError) Is(target error) bool { return target == ErrNodeAtCapacity }
 
 // Option configures a Client.
 type Option func(*Client)
@@ -58,12 +68,13 @@ type ClaimSpec struct {
 	Template   string `json:"template"`
 	Net        string `json:"net,omitempty"`
 	Size       string `json:"size,omitempty"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	TTLSeconds int    `json:"ttl_seconds,omitzero"`
 	// ClaimRef is the k8s "<namespace>/<name>" of the Sandbox this claim is
 	// created for. sandboxd records it on the claim and echoes it in its
 	// operator index, so the aggregated read path can map a listed sandbox back
 	// to the name it was claimed under. Empty for claims with no k8s identity.
-	ClaimRef string `json:"claim_ref,omitempty"`
+	ClaimRef   string `json:"claim_ref,omitempty"`
+	NoRedirect bool   `json:"no_redirect,omitzero"`
 }
 
 // ClaimResult is the POST /v1/claim success body.
@@ -75,7 +86,7 @@ type ClaimResult struct {
 	// FromCheckpoint is the lineage edge when the claim branched from a checkpoint.
 	FromCheckpoint string `json:"from_checkpoint,omitempty"`
 	// Redirect, when non-empty on a 200, names warm peers to retry at instead of a
-	// delivered sandbox. Claim treats this as a capacity miss (see ErrNodeAtCapacity).
+	// delivered sandbox. Claim returns it as a *RedirectError.
 	Redirect []string `json:"redirect,omitempty"`
 }
 
@@ -131,7 +142,7 @@ func New(baseURL, token string, opts ...Option) *Client {
 }
 
 // Claim performs POST /v1/claim, returning the delivered sandbox on success.
-// A 429, or a 200 that carries only a peer redirect, yields ErrNodeAtCapacity.
+// A 429 or an empty 200 yields ErrNodeAtCapacity, a redirect-only 200 a *RedirectError.
 func (c *Client) Claim(ctx context.Context, spec ClaimSpec) (ClaimResult, error) {
 	body, err := json.Marshal(spec)
 	if err != nil {
@@ -156,9 +167,10 @@ func (c *Client) Claim(ctx context.Context, spec ClaimSpec) (ClaimResult, error)
 		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 			return ClaimResult{}, fmt.Errorf("sandboxd: decode claim response: %w", err)
 		}
+		if r.ID == "" && len(r.Redirect) > 0 {
+			return ClaimResult{}, &RedirectError{Targets: r.Redirect}
+		}
 		if r.ID == "" {
-			// A redirect-only body (warm miss, or node at max_claims with a warm
-			// peer) or an empty body: this node delivered no sandbox.
 			return ClaimResult{}, ErrNodeAtCapacity
 		}
 		return r, nil
