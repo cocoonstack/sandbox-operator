@@ -356,6 +356,7 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 
 // deleteSandbox releases the claim, which destroys its microVM on the owning node.
 func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
+	logger := log.WithFunc("e2bcompat.deleteSandbox")
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {
@@ -364,13 +365,13 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	node := sb.Status.NodeName
 	if node == "" {
-		log.WithFunc("e2bcompat.deleteSandbox").Errorf(r.Context(), errNoOwningNode, "e2b delete: release failed sandboxID=%s", id)
+		logger.Errorf(r.Context(), errNoOwningNode, "e2b delete: release failed sandboxID=%s", id)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
 	claimID := claimIDOf(sb)
 	if err := s.store.Release(r.Context(), node, claimID); err != nil {
-		log.WithFunc("e2bcompat.deleteSandbox").Errorf(r.Context(), err, "e2b delete: release failed sandboxID=%s claimID=%s node=%s", id, claimID, node)
+		logger.Errorf(r.Context(), err, "e2b delete: release failed sandboxID=%s claimID=%s node=%s", id, claimID, node)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
