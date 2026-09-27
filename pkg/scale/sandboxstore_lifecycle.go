@@ -38,14 +38,10 @@ func (s *scatterGatherStore) Metrics(ctx context.Context, node, id string) (Sand
 	}
 	ctx, cancel := context.WithTimeout(ctx, metricsTimeout)
 	defer cancel()
-	row, err := cl.Sandbox(ctx, id)
-	if err != nil {
-		return SandboxMetrics{}, false, nodeVerbError(err, "metrics", id, node)
-	}
-	if isPaused(row) {
+	m, err := cl.EnvdMetrics(ctx, id)
+	if he, ok := errors.AsType[*sandboxd.HTTPError](err); ok && he.StatusCode == http.StatusConflict {
 		return SandboxMetrics{}, false, nil
 	}
-	m, err := cl.EnvdMetrics(ctx, id, row.Token)
 	if err != nil {
 		return SandboxMetrics{}, false, nodeVerbError(err, "metrics", id, node)
 	}

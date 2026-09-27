@@ -43,25 +43,26 @@ type bufConn struct {
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
-// PortTransport carries HTTP to port inside sandbox id through this client's node, one relay per request, since a kept relay holds the sandbox awake.
-func (c *Client) PortTransport(id, token string, port uint16) http.RoundTripper {
-	addr := c.nodeAddr()
+// EnvdMetrics reads envd's GET /metrics inside sandbox id over one relay opened with the node api_token,
+// which the node keeps passive: a paused sandbox answers 409 unwoken and the read stamps no activity.
+func (c *Client) EnvdMetrics(ctx context.Context, id string) (EnvdMetrics, error) {
+	u, _ := url.Parse(c.baseURL)
 	var d net.Dialer
-	return &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return DialPort(ctx, &d, addr, id, token, port)
-		},
+	conn, err := DialPort(ctx, &d, u.Host, id, c.token, EnvdPort)
+	if err != nil {
+		return EnvdMetrics{}, fmt.Errorf("envd metrics of %s: %w", id, err)
 	}
-}
-
-// EnvdMetrics reads envd's GET /metrics inside sandbox id through the node's relay; the envd token is not sent.
-func (c *Client) EnvdMetrics(ctx context.Context, id, token string) (EnvdMetrics, error) {
+	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+envdHostAlias+"/metrics", nil)
 	if err != nil {
 		return EnvdMetrics{}, err
 	}
-	resp, err := c.PortTransport(id, token, EnvdPort).RoundTrip(req)
+	if err = req.Write(conn); err != nil {
+		return EnvdMetrics{}, fmt.Errorf("envd metrics of %s: %w", id, err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
 		return EnvdMetrics{}, fmt.Errorf("envd metrics of %s: %w", id, err)
 	}
@@ -76,14 +77,7 @@ func (c *Client) EnvdMetrics(ctx context.Context, id, token string) (EnvdMetrics
 	return out, nil
 }
 
-func (c *Client) nodeAddr() string {
-	if u, err := url.Parse(c.baseURL); err == nil && u.Host != "" {
-		return u.Host
-	}
-	return c.baseURL
-}
-
-// DialPort opens the node's GET /v1/sandboxes/{id}/ports/{port} relay with the sandbox's own token; the node wakes a paused sandbox for it.
+// DialPort opens the node's GET /v1/sandboxes/{id}/ports/{port} relay; with the sandbox's own token the node wakes a paused sandbox for it.
 func DialPort(ctx context.Context, d *net.Dialer, addr, id, token string, port uint16) (net.Conn, error) {
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -113,8 +107,9 @@ func DialPort(ctx context.Context, d *net.Dialer, addr, id, token string, port u
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusSwitchingProtocols {
+		refused := statusError(resp)
 		_ = conn.Close()
-		return nil, statusError(resp)
+		return nil, refused
 	}
 	// The handshake reader may already hold bytes the guest sent.
 	return &bufConn{Conn: conn, r: io.MultiReader(io.LimitReader(br, int64(br.Buffered())), conn)}, nil

@@ -542,13 +542,13 @@ func sandboxIDsOf(raw string) ([]string, error) {
 		if id = strings.TrimSpace(id); id == "" {
 			return nil, errors.New("sandbox_ids must list comma-separated sandbox ids")
 		}
+		if len(ids) == maxMetricsIDs {
+			return nil, fmt.Errorf("sandbox_ids must list at most %d ids", maxMetricsIDs)
+		}
 		if slices.Contains(ids, id) {
 			return nil, fmt.Errorf("sandbox_ids repeats %q", id)
 		}
 		ids = append(ids, id)
-	}
-	if len(ids) > maxMetricsIDs {
-		return nil, fmt.Errorf("sandbox_ids must list at most %d ids, got %d", maxMetricsIDs, len(ids))
 	}
 	return ids, nil
 }

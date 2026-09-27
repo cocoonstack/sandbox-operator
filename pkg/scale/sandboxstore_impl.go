@@ -125,7 +125,7 @@ type SandboxdClient interface {
 	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
-	EnvdMetrics(ctx context.Context, id, token string) (sandboxd.EnvdMetrics, error)
+	EnvdMetrics(ctx context.Context, id string) (sandboxd.EnvdMetrics, error)
 
 	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.
 	Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error)

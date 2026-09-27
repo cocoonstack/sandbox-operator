@@ -80,7 +80,7 @@ type SandboxLifecycle interface {
 	Snapshots(ctx context.Context, node string) ([]Snapshot, error)
 	// DeleteSnapshot removes a checkpoint. A missing checkpoint is success.
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
-	// Metrics reads envd's metrics inside a running sandbox through its node; live is false for a paused one, which is never woken.
+	// Metrics reads envd's metrics inside a running sandbox through its node's passive relay; live is false for a paused one, which is never woken.
 	Metrics(ctx context.Context, node, id string) (m SandboxMetrics, live bool, err error)
 	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.
 	Read(ctx context.Context, node, id string) (SandboxRecord, error)

@@ -119,7 +119,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | `DELETE /templates/{snapshotID}` | `store.DeleteSnapshot` on the holding node | e2b addresses snapshot deletion through the templates path. The id is looked up among the key's checkpoints first, so `404` for one in another namespace, then deleted on the node that holds it; `500` when the id is not listed and a node did not answer, so an outage never reads as already gone. |
 | `GET /templates`, `GET /v2/templates` | advertised warm-pool keys | Lists the distinct templates the fleet can currently claim; these are pool-derived entries, not e2b-hosted template builds. Each entry's `aliases` lists the aliases that name its image. |
 | `GET /templates/aliases/{alias}` | the alias table, then the fleet's pools | `200 {"templateID": "<pool image>", "public": true}` for an alias the table names or an image a pool advertises (the `names` the template list reports), else `404`. The SDKs call this to check whether a template exists. |
-| `GET /sandboxes/{id}/metrics` | `store.Metrics` | One live sample read from envd's `/metrics` inside the guest through the owning node's guest-port relay: `cpuCount`, `cpuUsedPct`, `memUsed`, `memTotal`, `memCache`, `diskUsed` and `diskTotal` as the guest reports them. A paused or archived sandbox answers `[]` and is not woken. `start` and `end` are ignored: there is no history. |
+| `GET /sandboxes/{id}/metrics` | `store.Metrics` | One live sample read from envd's `/metrics` inside the guest through the owning node's passive guest-port relay (sandboxd built from 288103d or later): `cpuCount`, `cpuUsedPct`, `memUsed`, `memTotal`, `memCache`, `diskUsed` and `diskTotal` as the guest reports them. A paused or archived sandbox, or one mid pause, answers `[]` and is not woken. `start` and `end` are ignored: there is no history. |
 | `GET /sandboxes/metrics` | `store.Metrics` per id | `sandbox_ids` is 1 to 100 distinct comma-separated ids (else `400`). Answers `{"sandboxes": {id: sample}}` for the running ones among them; a paused sandbox, an id the key cannot see, or one whose read fails is left out. |
 | `GET /sandboxes/{id}/logs`, `GET /v2/sandboxes/{id}/logs` | `store.GetByClaimID` | This backend keeps no sandbox logs. A sandbox the key can see answers `200` with an empty page: `{"logs":[],"logEntries":[]}` on the legacy route, `{"logs":[]}` on `/v2`. `e2b sandbox logs` then prints no log lines and exits `0`. With `-f` it polls until the sandbox is released, then exits `1` on the `404`; a paused sandbox makes it report "not found". An unknown id is `404`. |
 | `GET /health` | — | Unauthenticated, for probes. |
@@ -159,7 +159,8 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 - **Metrics are the guest's own view.** envd measures inside the VM, so
   `memTotal` is what the guest kernel sees, a little under the size tier's
   memory. Each read opens one relay through the owning node and closes it,
-  so metrics polling adds no standing connection.
+  and the node counts it as no activity, so polling neither holds a
+  connection nor keeps a sandbox from idling.
 - **List/detail schema fields are compatibility values.** `startedAt` is the
   claim time the owning node publishes; a node that does not publish it makes
   `startedAt` the time of the read. `endAt` is the node-granted deadline when

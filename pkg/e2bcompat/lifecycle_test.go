@@ -356,7 +356,7 @@ func TestLifecycleVerbsOnAReapedSandboxAre404(t *testing.T) {
 		{http.MethodGet, "/sandboxes/sb-abc/metrics", ``},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
-			store := &lifecycleStore{err: gone, statsErr: gone}
+			store := &lifecycleStore{err: gone, nodeErr: gone}
 			sb := liveSandbox("s1", "sb_abc", "node-a", "img")
 			sb.Labels[scale.PhaseLabel] = "Running"
 			store.items = []sandboxv1beta1.Sandbox{sb}
@@ -557,7 +557,7 @@ type lifecycleStore struct {
 	deadline, wakeDeadline time.Time
 	readNode, readID       string
 	err                    error
-	statsErr               error
+	nodeErr                error
 	metrics                map[string]scale.SandboxMetrics
 	metricsErr             map[string]error
 
@@ -567,12 +567,12 @@ type lifecycleStore struct {
 
 func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.SandboxRecord, error) {
 	f.readNode, f.readID = node, id
-	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused || f.nodeArchived, Deadline: f.deadline}, f.statsErr
+	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused || f.nodeArchived, Deadline: f.deadline}, f.nodeErr
 }
 
 func (f *lifecycleStore) Metrics(_ context.Context, _, id string) (scale.SandboxMetrics, bool, error) {
-	if f.statsErr != nil {
-		return scale.SandboxMetrics{}, false, f.statsErr
+	if f.nodeErr != nil {
+		return scale.SandboxMetrics{}, false, f.nodeErr
 	}
 	m, live := f.metrics[id]
 	return m, live, f.metricsErr[id]

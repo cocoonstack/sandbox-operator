@@ -44,11 +44,11 @@ func TestEnvdMetricsSpeaksHTTPToEnvdThroughTheRelay(t *testing.T) {
 	}))
 	defer node.Close()
 
-	got, err := New(node.URL, "root-token").EnvdMetrics(t.Context(), "sb_1", "sandbox-token")
+	got, err := New(node.URL, "root-token").EnvdMetrics(t.Context(), "sb_1")
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
 	assert.Equal(t, "/v1/sandboxes/sb_1/ports/49983", gotPath)
-	assert.Equal(t, "Bearer sandbox-token", gotAuth, "the relay takes the sandbox's own token, never the node api_token")
+	assert.Equal(t, "Bearer root-token", gotAuth, "the node api_token makes the relay passive")
 	assert.Equal(t, "tcp", gotUpgrade)
 	assert.Equal(t, "/metrics", gotEnvdPath)
 }
@@ -82,7 +82,7 @@ func TestEnvdMetricsReportsAnEnvdFailureAsNoNodeStatus(t *testing.T) {
 	}))
 	defer node.Close()
 
-	_, err := New(node.URL, "root-token").EnvdMetrics(t.Context(), "sb_1", "tok")
+	_, err := New(node.URL, "root-token").EnvdMetrics(t.Context(), "sb_1")
 	require.Error(t, err)
 	_, isNode := errors.AsType[*HTTPError](err)
 	assert.False(t, isNode, "an envd 404 must not read as the node not knowing the sandbox: %v", err)
