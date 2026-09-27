@@ -47,8 +47,7 @@ const (
 	DefaultEnvdVersion = "0.4.0"
 	// DefaultTimeoutSeconds is the node's default lease; the SDK's own 15s reaps a cold client's sandbox.
 	DefaultTimeoutSeconds = 300
-	// apiKeyHeader is the header the e2b SDKs authenticate with.
-	apiKeyHeader = "X-API-KEY"
+	apiKeyHeader          = "X-API-KEY"
 
 	autoPauseRefusal = "autoPause is not supported; pause explicitly, or let the lease expire"
 	maxListLimit     = 100

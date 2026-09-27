@@ -30,7 +30,6 @@ import (
 )
 
 const (
-	// The store stamps these labels on synthesized Sandboxes, so label selectors have axes to filter on.
 	// NodeLabel carries the owning node of a synthesized Sandbox.
 	NodeLabel = "sandbox.cocoonstack.io/node"
 	// PhaseLabel carries the entry phase of a synthesized Sandbox.
@@ -89,6 +88,14 @@ func WithWatchPollInterval(d time.Duration) StoreOption {
 	return func(s *scatterGatherStore) { s.watchPoll = d }
 }
 
+// WithClaimRouting lets the store call nodes with the fleet api_token, and without it node calls fail closed and lookups read inventory alone.
+func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
+	return func(s *scatterGatherStore) {
+		s.sandboxdToken = token
+		s.sandboxdFactory = factory
+	}
+}
+
 // SandboxdClient is the subset of the sandboxd HTTP client the store needs.
 type SandboxdClient interface {
 	Claim(ctx context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error)
@@ -111,14 +118,6 @@ type SandboxdClient interface {
 
 // SandboxdClientFactory builds a sandboxd client for one node's advertise address and the fleet api_token.
 type SandboxdClientFactory func(addr, token string) SandboxdClient
-
-// WithClaimRouting lets the store call nodes with the fleet api_token, and without it node calls fail closed and lookups read inventory alone.
-func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
-	return func(s *scatterGatherStore) {
-		s.sandboxdToken = token
-		s.sandboxdFactory = factory
-	}
-}
 
 // NewSandboxdClientFactory returns the production factory, whose clients share one HTTP client.
 func NewSandboxdClientFactory() SandboxdClientFactory {

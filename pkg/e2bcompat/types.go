@@ -2,8 +2,6 @@ package e2bcompat
 
 import "encoding/json"
 
-// Field names and JSON casing are fixed by the e2b OpenAPI contract the SDKs unmarshal.
-
 // Sandbox states reported to the SDK (spec: SandboxState).
 const (
 	StateRunning = "running"
