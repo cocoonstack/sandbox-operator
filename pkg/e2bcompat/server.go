@@ -24,6 +24,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -39,6 +40,7 @@ import (
 	"k8s.io/apiserver/pkg/storage/names"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -49,10 +51,9 @@ const (
 	DefaultTimeoutSeconds = 300
 	apiKeyHeader          = "X-API-KEY"
 
-	autoPauseRefusal = "autoPause is not supported; pause explicitly, or let the lease expire"
-	connectFailure   = "failed to connect the sandbox"
-	maxListLimit     = 100
-	nextTokenHeader  = "X-Next-Token"
+	connectFailure  = "failed to connect the sandbox"
+	maxListLimit    = 100
+	nextTokenHeader = "X-Next-Token"
 
 	readHeaderTimeout = 10 * time.Second
 	shutdownTimeout   = 10 * time.Second
@@ -274,11 +275,19 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		Net:      netFor(req.AllowInternetAccess),
 		Size:     scale.SizeClassSmall,
 	}
-	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, s.timeoutSeconds(req.Timeout))
+	opts := scale.ClaimOptions{TTLSeconds: s.timeoutSeconds(req.Timeout), Metadata: req.Metadata}
+	if req.AutoPause != nil && *req.AutoPause {
+		opts.OnExpire = sandboxd.ExpireArchive
+	}
+	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, opts)
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			writeError(w, http.StatusServiceUnavailable, fmt.Sprintf(
 				"no warm sandbox available for template %q; retry as warm capacity refills", req.TemplateID))
+			return
+		}
+		if he, ok := errors.AsType[*sandboxd.HTTPError](err); ok && (he.StatusCode == http.StatusBadRequest || he.StatusCode == http.StatusConflict) {
+			writeError(w, he.StatusCode, he.Message)
 			return
 		}
 		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: claim failed template=%s name=%s", req.TemplateID, name)
@@ -336,7 +345,7 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail
 	}
 	out := make([]SandboxDetail, 0, len(list.Items))
 	for i := range list.Items {
-		if d := s.detailFor(&list.Items[i]); filter.keeps(d) {
+		if d := s.detailFor(&list.Items[i]); filter.keeps(d) && filter.matchesMetadata(&list.Items[i]) {
 			out = append(out, d)
 		}
 	}
@@ -416,7 +425,7 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request, op string, ttlSec
 		s.writeLookupError(w, r, err, op)
 		return
 	}
-	if _, err := s.store.Renew(r.Context(), sb.Status.NodeName, claimIDOf(sb), ttlSeconds); err != nil {
+	if _, err := s.store.Renew(r.Context(), sb.Status.NodeName, claimIDOf(sb), ttlSeconds, ""); err != nil {
 		s.writeVerbError(w, r, err, op, "failed to extend the sandbox lease")
 		return
 	}
@@ -481,23 +490,31 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 		EndAt:        endAt.UTC().Format(time.RFC3339),
 		State:        state,
 		EnvdVersion:  s.opts.EnvdVersion,
+		CPUCount:     int32(annotationInt(sb, scale.CPUCountAnnotation)),
+		MemoryMB:     int32(annotationInt(sb, scale.MemoryBytesAnnotation) >> 20),
+		Metadata:     json.RawMessage(sb.Annotations[scale.MetadataAnnotation]),
 		Domain:       s.opts.Domain,
 		startedAtKey: sb.CreationTimestamp.UTC().Format(time.RFC3339),
 	}
 }
 
-// listFilter is the GET /v2/sandboxes query the read view can answer; metadata is not stored, so it is refused.
+// listFilter is the GET /v2/sandboxes query the read view can answer.
 type listFilter struct {
 	states       []string
 	template     string
 	startedAfter time.Time
+	metadata     map[string]string
 }
 
 func listFilterOf(q url.Values) (listFilter, error) {
-	if q.Get("metadata") != "" {
-		return listFilter{}, errors.New("metadata filters are not supported: metadata is not stored")
-	}
 	f := listFilter{template: q.Get("template")}
+	if v := q.Get("metadata"); v != "" {
+		md, err := metadataFilterOf(v)
+		if err != nil {
+			return listFilter{}, err
+		}
+		f.metadata = md
+	}
 	for _, v := range q["state"] {
 		for state := range strings.SplitSeq(v, ",") {
 			if state != StateRunning && state != StatePaused {
@@ -526,6 +543,19 @@ func (f listFilter) keeps(d SandboxDetail) bool {
 	if !f.startedAfter.IsZero() {
 		started, err := time.Parse(time.RFC3339, d.StartedAt)
 		if err != nil || started.Before(f.startedAfter.Truncate(time.Second)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (f listFilter) matchesMetadata(sb *sandboxv1beta1.Sandbox) bool {
+	if len(f.metadata) == 0 {
+		return true
+	}
+	md := scale.MetadataOf(sb)
+	for k, v := range f.metadata {
+		if got, ok := md[k]; !ok || got != v {
 			return false
 		}
 	}
@@ -609,8 +639,8 @@ func unsupportedCreateOption(req NewSandbox) (string, bool) {
 		return "secure=false is not supported; every sandbox this backend hands out is reachable only with its own access token", true
 	case len(req.EnvVars) > 0:
 		return "envVars is not supported; set the environment inside the sandbox after it starts", true
-	case req.AutoPause != nil && *req.AutoPause:
-		return autoPauseRefusal, true
+	case req.AutoPause != nil && *req.AutoPause && req.AllowInternetAccess != nil && *req.AllowInternetAccess:
+		return "autoPause is not supported with allow_internet_access: the internet lane cannot pause", true
 	case len(req.Network) > 0:
 		return "network rules are not supported; allow_internet_access picks the pool's lane and nothing else is enforced", true
 	case len(req.VolumeMounts) > 0:
@@ -625,4 +655,39 @@ func unsupportedCreateOption(req NewSandbox) (string, bool) {
 		return "iam is not supported", true
 	}
 	return "", false
+}
+
+// metadataFilterOf parses e2b's metadata query: key=value pairs joined by &, each part URL-encoded twice as the SDKs send it.
+func metadataFilterOf(query string) (map[string]string, error) {
+	md := map[string]string{}
+	for pair := range strings.SplitSeq(query, "&") {
+		rawKey, rawValue, ok := strings.Cut(pair, "=")
+		key, keyErr := unescapeTwice(rawKey)
+		value, valueErr := unescapeTwice(rawValue)
+		if !ok || key == "" || keyErr != nil || valueErr != nil {
+			return nil, fmt.Errorf("metadata filter %q must be URL-encoded key=value pairs joined by &", query)
+		}
+		if _, dup := md[key]; dup {
+			return nil, fmt.Errorf("metadata filter repeats key %q", key)
+		}
+		md[key] = value
+	}
+	return md, nil
+}
+
+func unescapeTwice(s string) (string, error) {
+	once, err := url.QueryUnescape(s)
+	if err != nil {
+		return "", err
+	}
+	return url.PathUnescape(once)
+}
+
+func annotationInt(sb *sandboxv1beta1.Sandbox, key string) int64 {
+	raw := sb.Annotations[key]
+	if raw == "" {
+		return 0
+	}
+	v, _ := strconv.ParseInt(raw, 10, 64)
+	return v
 }

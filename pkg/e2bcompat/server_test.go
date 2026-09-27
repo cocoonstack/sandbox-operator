@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -138,7 +142,7 @@ func TestCreateRefusesGuaranteesThisBackendCannotGive(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{
 		{"secure false", `{"templateID":"t","secure":false}`},
 		{"envVars", `{"templateID":"t","envVars":{"A":"1"}}`},
-		{"autoPause", `{"templateID":"t","autoPause":true}`},
+		{"autoPause on the internet lane", `{"templateID":"t","autoPause":true,"allow_internet_access":true}`},
 		{"network rules", `{"templateID":"t","network":{"denyOut":["10.0.0.0/8"]}}`},
 		{"volume mounts", `{"templateID":"t","volumeMounts":[{"name":"v","path":"/data"}]}`},
 		{"auto pause memory", `{"templateID":"t","autoPauseMemory":true}`},
@@ -164,7 +168,8 @@ func TestCreateAcceptsTheHonorableForms(t *testing.T) {
 		{"secure true", `{"templateID":"t","secure":true}`},
 		{"empty envVars", `{"templateID":"t","envVars":{}}`},
 		{"autoPause false", `{"templateID":"t","autoPause":false}`},
-		{"metadata is accepted and dropped", `{"templateID":"t","metadata":{"a":"b"}}`},
+		{"metadata", `{"templateID":"t","metadata":{"a":"b"}}`},
+		{"autoPause on the isolated lane", `{"templateID":"t","autoPause":true}`},
 		{"auto resume off", `{"templateID":"t","autoResume":{"enabled":false}}`},
 		{"empty network", `{"templateID":"t","network":{}}`},
 	} {
@@ -185,6 +190,49 @@ func TestCreateWithoutATimeoutTakesTheConfiguredDefault(t *testing.T) {
 	}
 	if store.claimTTL != 900 {
 		t.Errorf("claimed with ttl %ds, want the configured 900s default", store.claimTTL)
+	}
+}
+
+func TestCreateCarriesMetadataAndAutoPauseOnTheClaim(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       scale.ClaimOptions
+	}{
+		{"plain", `{"templateID":"t","timeout":60}`, scale.ClaimOptions{TTLSeconds: 60}},
+		{"autoPause false", `{"templateID":"t","timeout":60,"autoPause":false}`, scale.ClaimOptions{TTLSeconds: 60}},
+		{
+			"metadata and autoPause", `{"templateID":"t","timeout":60,"autoPause":true,"metadata":{"user":"u1"}}`,
+			scale.ClaimOptions{TTLSeconds: 60, Metadata: map[string]string{"user": "u1"}, OnExpire: sandboxd.ExpireArchive},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{}
+			if w := do(t, newTestServer(t, store), http.MethodPost, "/sandboxes", tc.body, testKey); w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+			}
+			if !reflect.DeepEqual(store.claimOpts, tc.want) {
+				t.Errorf("claim options = %+v, want %+v", store.claimOpts, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreatePassesTheNodeRefusalThrough(t *testing.T) {
+	for _, tc := range []struct {
+		status, want int
+	}{
+		{http.StatusBadRequest, http.StatusBadRequest},
+		{http.StatusConflict, http.StatusConflict},
+		{http.StatusUnauthorized, http.StatusInternalServerError},
+	} {
+		store := &fakeStore{claimErr: fmt.Errorf("scale: claim: %w", &sandboxd.HTTPError{StatusCode: tc.status, Message: "node says no"})}
+		w := do(t, newTestServer(t, store), http.MethodPost, "/sandboxes", `{"templateID":"t"}`, testKey)
+		if w.Code != tc.want {
+			t.Errorf("node %d: status = %d, want %d: %s", tc.status, w.Code, tc.want, w.Body.String())
+		}
+		if tc.want != http.StatusInternalServerError && !strings.Contains(w.Body.String(), "node says no") {
+			t.Errorf("node %d: body %s does not carry the node's message", tc.status, w.Body.String())
+		}
 	}
 }
 
@@ -251,6 +299,20 @@ func TestGetReportsDetail(t *testing.T) {
 
 	if got.StartedAt == "" || got.EndAt == "" {
 		t.Errorf("startedAt/endAt = %q/%q, want RFC3339 timestamps", got.StartedAt, got.EndAt)
+	}
+}
+
+func TestDetailReportsMetadataAndTheSizeTier(t *testing.T) {
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "img")
+	sb.Annotations[scale.MetadataAnnotation] = `{"user":"u1"}`
+	sb.Annotations[scale.CPUCountAnnotation] = "2"
+	sb.Annotations[scale.MemoryBytesAnnotation] = strconv.Itoa(1 << 30)
+	got := getDetail(t, sb)
+	if string(got.Metadata) != `{"user":"u1"}` || got.CPUCount != 2 || got.MemoryMB != 1024 {
+		t.Errorf("detail metadata %v cpu %d mem %d MB, want {user:u1}, 2, 1024", got.Metadata, got.CPUCount, got.MemoryMB)
+	}
+	if bare := getDetail(t, liveSandbox("e2b-bbb", "sb_one", "node-a", "img")); bare.Metadata != nil || bare.CPUCount != 0 || bare.MemoryMB != 0 {
+		t.Errorf("a sandbox without the annotations reports %+v", bare)
 	}
 }
 
@@ -477,12 +539,14 @@ func TestDeleteWithoutAnOwningNodeIs500(t *testing.T) {
 }
 
 type fakeStore struct {
-	claimPool scale.PoolKey
-	claimNS   string
-	claimName string
-	claimTTL  int
-	claimErr  error
-	assign    scale.Assignment
+	claimPool  scale.PoolKey
+	claimNS    string
+	claimName  string
+	claimTTL   int
+	claimOpts  scale.ClaimOptions
+	claimErr   error
+	claimCalls int
+	assign     scale.Assignment
 
 	items      []sandboxv1beta1.Sandbox
 	lookedUpID string
@@ -532,8 +596,9 @@ func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, 
 	return nil, nil
 }
 
-func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey, ttlSeconds int) (scale.Assignment, error) {
-	f.claimNS, f.claimName, f.claimPool, f.claimTTL = ns, name, pool, ttlSeconds
+func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey, opts scale.ClaimOptions) (scale.Assignment, error) {
+	f.claimNS, f.claimName, f.claimPool, f.claimTTL, f.claimOpts = ns, name, pool, opts.TTLSeconds, opts
+	f.claimCalls++
 	if f.claimErr != nil {
 		return scale.Assignment{}, f.claimErr
 	}
@@ -549,7 +614,7 @@ func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
 
-func (f *fakeStore) Renew(context.Context, string, string, int) (time.Time, error) {
+func (f *fakeStore) Renew(context.Context, string, string, int, sandboxd.ExpireAction) (time.Time, error) {
 	return time.Time{}, nil
 }
 
@@ -613,7 +678,7 @@ func newRenewStore() *renewStore {
 	return s
 }
 
-func (f *renewStore) Renew(_ context.Context, node, id string, ttlSeconds int) (time.Time, error) {
+func (f *renewStore) Renew(_ context.Context, node, id string, ttlSeconds int, _ sandboxd.ExpireAction) (time.Time, error) {
 	if f.err != nil {
 		return time.Time{}, f.err
 	}

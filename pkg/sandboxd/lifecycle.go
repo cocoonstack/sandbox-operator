@@ -35,7 +35,8 @@ type ForkResult struct {
 // RenewSpec is the POST /v1/sandboxes/{id}/renew body. TTLSeconds 0 asks for
 // the node default.
 type RenewSpec struct {
-	TTLSeconds int `json:"ttl_seconds,omitempty"`
+	TTLSeconds int          `json:"ttl_seconds,omitempty"`
+	OnExpire   ExpireAction `json:"on_expire,omitempty"`
 }
 
 // RenewResult carries the lease deadline the node granted.
@@ -76,7 +77,11 @@ type SandboxSummary struct {
 	FromCheckpoint string    `json:"from_checkpoint,omitempty"`
 	ClaimRef       string    `json:"claim_ref,omitempty"`
 	// Token is the claim's own bearer token; only the by-id read reports it.
-	Token string `json:"token,omitempty"`
+	Token    string            `json:"token,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	// CPUCount and MemTotalBytes are the size tier the VM was booted with.
+	CPUCount      int32 `json:"cpu_count,omitzero"`
+	MemTotalBytes int64 `json:"mem_total_bytes,omitzero"`
 }
 
 // SandboxStats is one sandbox's resource usage. CPUCount and MemTotalBytes are

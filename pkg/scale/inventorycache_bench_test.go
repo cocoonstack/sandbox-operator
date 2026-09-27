@@ -93,7 +93,7 @@ func BenchmarkClientInventoryWatchTick(b *testing.B) {
 // benchCachedStore serves the fleet through a real informer-fed cache reader, the production read path.
 func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scale.ScatterGatherStore, scale.PoolKey) {
 	b.Helper()
-	invs, pool := scale.BenchInventories(nodes, perNode)
+	invs, pool := scale.BenchInventories(nodes, perNode, 0)
 	list := &cocoonv1beta1.NodeInventoryList{}
 	for _, inv := range invs {
 		inv.PublishedAt = metav1.Now().Rfc3339Copy()

@@ -13,6 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
 func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
@@ -185,6 +187,24 @@ func TestEntryToSandbox_StampsDeadlineAnnotation(t *testing.T) {
 
 	_, ok := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", Phase: "Running"}).Annotations[DeadlineAnnotation]
 	assert.False(t, ok, "expected no deadline annotation when the node published none")
+}
+
+func TestEntryToSandbox_StampsMetadataAndTheSizeTierOnlyWhenReported(t *testing.T) {
+	md := map[string]string{"user": "u1", "app": "a b&c=d", "b": "2", "a": "1"}
+	entry := EntryFromSummary(sandboxd.SandboxSummary{ID: "sb_abc", ClaimRef: "ns/s1", Metadata: md, CPUCount: 2, MemTotalBytes: 1 << 30})
+	assert.Equal(t, `{"a":"1","app":"a b&c=d","b":"2","user":"u1"}`, entry.Metadata, "the encoding is deterministic, so a republish never churns it")
+	with := entryToSandbox("n1", entry)
+	assert.Equal(t, entry.Metadata, with.Annotations[MetadataAnnotation])
+	assert.Equal(t, md, MetadataOf(with))
+	assert.Equal(t, "2", with.Annotations[CPUCountAnnotation])
+	assert.Equal(t, "1073741824", with.Annotations[MemoryBytesAnnotation])
+
+	bare := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running"})
+	for _, key := range []string{MetadataAnnotation, CPUCountAnnotation, MemoryBytesAnnotation} {
+		_, ok := bare.Annotations[key]
+		assert.False(t, ok, "expected no %s annotation when the node reported none", key)
+	}
+	assert.Nil(t, MetadataOf(bare))
 }
 
 func TestEntryToSandbox_StampsCreationTimestamp(t *testing.T) {

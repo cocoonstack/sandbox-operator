@@ -19,6 +19,7 @@ import (
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -278,9 +279,9 @@ func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, 
 	return watch.NewFake(), nil
 }
 
-func (f *fakeStore) Claim(_ context.Context, _, _ string, _ scale.PoolKey, ttlSeconds int) (scale.Assignment, error) {
+func (f *fakeStore) Claim(_ context.Context, _, _ string, _ scale.PoolKey, opts scale.ClaimOptions) (scale.Assignment, error) {
 	f.claimCalls++
-	f.claimTTL = ttlSeconds
+	f.claimTTL = opts.TTLSeconds
 	return f.claimAssign, nil
 }
 
@@ -293,7 +294,7 @@ func (f *fakeStore) Pause(context.Context, string, string) error { return f.verb
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return f.verbErr }
 
-func (f *fakeStore) Renew(context.Context, string, string, int) (time.Time, error) {
+func (f *fakeStore) Renew(context.Context, string, string, int, sandboxd.ExpireAction) (time.Time, error) {
 	return time.Time{}, f.verbErr
 }
 

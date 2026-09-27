@@ -21,11 +21,21 @@ import (
 	"time"
 )
 
+const (
+	// ExpireDestroy destroys the claim at lease end; it is the node default.
+	ExpireDestroy ExpireAction = "destroy"
+	// ExpireArchive hibernates and archives the claim at lease end, so a later wake resumes it.
+	ExpireArchive ExpireAction = "archive"
+)
+
 // ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
 // at max_claims, the calling tenant is at its own max_claims, or the node is
 // draining) or a 200 that delivers no sandbox. In every case this node handed
 // over no VM, so the store tries another node or reports no warm capacity.
 var ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
+
+// ExpireAction is what the node does with a claim whose lease ends; empty keeps the claim's current action, destroy on a new claim.
+type ExpireAction string
 
 // HTTPError carries a non-2xx sandboxd status that is not otherwise typed (e.g.
 // 400 bad body, 401 bad api token, 409 egress mismatch, 500 provisioning failed).
@@ -75,8 +85,10 @@ type ClaimSpec struct {
 	// created for. sandboxd records it on the claim and echoes it in its
 	// operator index, so the aggregated read path can map a listed sandbox back
 	// to the name it was claimed under. Empty for claims with no k8s identity.
-	ClaimRef   string `json:"claim_ref,omitempty"`
-	NoRedirect bool   `json:"no_redirect,omitzero"`
+	ClaimRef   string            `json:"claim_ref,omitempty"`
+	NoRedirect bool              `json:"no_redirect,omitzero"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	OnExpire   ExpireAction      `json:"on_expire,omitempty"`
 }
 
 // ClaimResult is the POST /v1/claim success body.

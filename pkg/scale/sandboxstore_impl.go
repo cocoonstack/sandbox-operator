@@ -3,6 +3,7 @@ package scale
 import (
 	"cmp"
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -49,6 +50,11 @@ const (
 	NetAnnotation = "sandbox.cocoonstack.io/net"
 	// TokenAnnotation carries the per-sandbox ownership token handed back on Create.
 	TokenAnnotation = "sandbox.cocoonstack.io/token"
+	// MetadataAnnotation carries the claim's caller metadata as one JSON object.
+	MetadataAnnotation = "sandbox.cocoonstack.io/metadata"
+	// CPUCountAnnotation and MemoryBytesAnnotation carry the size tier the VM was booted with.
+	CPUCountAnnotation    = "sandbox.cocoonstack.io/cpu-count"
+	MemoryBytesAnnotation = "sandbox.cocoonstack.io/memory-bytes"
 
 	// Selector keys are the pod annotations the vk-sandbox provider reads its claim axes from.
 	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
@@ -217,7 +223,7 @@ func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id str
 	return found, nil
 }
 
-func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error) {
+func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey, opts ClaimOptions) (Assignment, error) {
 	if s.sandboxdFactory == nil {
 		return Assignment{}, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
 	}
@@ -233,9 +239,11 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		Template:   pool.Template,
 		Net:        pool.Net,
 		Size:       pool.Size,
-		TTLSeconds: ttlSeconds,
+		TTLSeconds: opts.TTLSeconds,
 		// The claim ref is the object's namespace/name, which the read path resolves by.
 		ClaimRef: namespacedName(namespace, name),
+		Metadata: opts.Metadata,
+		OnExpire: opts.OnExpire,
 	}
 	// Inventory is 5-30s stale, so a capacity miss drops that node and re-samples the rest instead of failing.
 	for len(candidates) > 0 {
@@ -695,6 +703,19 @@ func AddressIPs(addr string) []string {
 	return []string{addr}
 }
 
+// MetadataOf decodes a synthesized Sandbox's caller metadata, nil when it carries none.
+func MetadataOf(sb *sandboxv1beta1.Sandbox) map[string]string {
+	raw := sb.Annotations[MetadataAnnotation]
+	if raw == "" {
+		return nil
+	}
+	var md map[string]string
+	if json.Unmarshal([]byte(raw), &md) != nil {
+		return nil
+	}
+	return md
+}
+
 // FirstHit runs find on every node src lists, concurrency at a time, and returns the first non-zero result and cancels the rest.
 func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrency int, find func(ctx context.Context, node string) T) (T, error) {
 	var found T
@@ -841,6 +862,15 @@ func synthAnnotations(e InventoryEntry) map[string]string {
 	}
 	if d := deadlineValue(e); d != "" {
 		a[DeadlineAnnotation] = d
+	}
+	if e.Metadata != "" {
+		a[MetadataAnnotation] = e.Metadata
+	}
+	if e.CPUCount > 0 {
+		a[CPUCountAnnotation] = strconv.FormatInt(int64(e.CPUCount), 10)
+	}
+	if e.MemoryBytes > 0 {
+		a[MemoryBytesAnnotation] = strconv.FormatInt(e.MemoryBytes, 10)
 	}
 	if len(a) == 0 {
 		return nil

@@ -104,15 +104,15 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
-| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
-| `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored; `metadata` is refused with `400`, since metadata is not stored. `/v2` pages as the spec says: `limit` (1 to 100, default 100), `order` by start time (`desc`, newest first, by default, or `asc`) and `nextToken`, the opaque cursor the previous page returned in `X-Next-Token`. The cursor names the last sandbox served, so a sandbox created or released between pages neither repeats nor skips the rest. An out-of-range `limit`, an unknown `order` or a malformed `nextToken` is `400`. The legacy `GET /sandboxes` takes no page parameters and returns every match. |
+| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane; `metadata` → the claim's metadata; `autoPause: true` → the claim is paused (hibernated and archived) at lease end instead of destroyed, and connect resumes it. Both ride on the same claim call and need sandboxd built from 3fd7af2 or later. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
+| `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored, and so is `metadata`: `key=value` pairs joined by `&`, each key and value URL-encoded as the JS and Python SDKs send `query.metadata`; every pair must match; a pair without `=`, an empty key or a repeated key is `400`. Each item carries its `metadata`, `cpuCount` and `memoryMB`. `/v2` pages as the spec says: `limit` (1 to 100, default 100), `order` by start time (`desc`, newest first, by default, or `asc`) and `nextToken`, the opaque cursor the previous page returned in `X-Next-Token`. The cursor names the last sandbox served, so a sandbox created or released between pages neither repeats nor skips the rest. An out-of-range `limit`, an unknown `order` or a malformed `nextToken` is `400`. The legacy `GET /sandboxes` takes no page parameters and returns every match. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |
 | `POST /sandboxes/{id}/timeout` | `store.Renew` | Moves the owning node's lease to `timeout` seconds from now. `204` once the node has renewed; a node's refusal keeps its 4xx status (`409` for an archived sandbox), and any other failure is `500`. |
 | `POST /sandboxes/{id}/refreshes` | `store.Renew` | The SDK keepalive. Renews for the body's `duration` when it carries one, otherwise `--e2b-default-timeout`. |
 | `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
 | `POST /sandboxes/{id}/connect`, `POST /v2/sandboxes/{id}/connect` | `store.Resume` when paused | The SDK's resume operation. Returns `200` when already running or `201` after restoring a paused or archived sandbox, carrying the sandbox's `envdAccessToken` read from the owning node (a sandboxd with sandbox#229, whose root by-id read carries the token). `timeout` (default `--e2b-default-timeout`) extends the lease to that many seconds from now when the node's deadline is nearer and never shortens it; `memory: false` (the SDK's `onResume: 'reboot'`) is refused with `400`, since a paused sandbox here resumes from its memory snapshot. |
-| `POST /sandboxes/{id}/resume` | `store.Resume` | The legacy resume, deprecated in the e2b spec. It restores a paused or archived sandbox exactly as connect does and answers `201` with its `envdAccessToken`. `timeout` follows connect's rule: it only extends the lease, and an omitted value means `--e2b-default-timeout`, not the spec's 15. A running sandbox answers `409`, the spec's refusal. `autoPause: true` is `400` as on create, and `memory: false` is `400` as on connect. |
+| `POST /sandboxes/{id}/resume` | `store.Resume` | The legacy resume, deprecated in the e2b spec. It restores a paused or archived sandbox exactly as connect does and answers `201` with its `envdAccessToken`. `timeout` follows connect's rule: it only extends the lease, and an omitted value means `--e2b-default-timeout`, not the spec's 15. A running sandbox answers `409`, the spec's refusal. `autoPause` sets the claim's lease-end action (`true` pauses, `false` destroys) and then renews the lease to the larger of `timeout` and what is left, so it never shortens. `memory: false` is `400` as on connect. |
 | `POST /sandboxes/{id}/fork` | `store.Fork` | Creates `count` children (`1` by default), each with its own id and requested claim-time TTL. A paused source returns `409`; resume it first. |
 | `POST /sandboxes/{id}/snapshots` | `store.Snapshot` | Captures a checkpoint while the source keeps running; `201` with its `snapshotID`. The name plus its namespace stamp must fit the node's 63-character name budget; longer is `400`. |
 | `GET /snapshots` | `store.Snapshots` across nodes | Lists the key's checkpoints: create stamps the namespace on the checkpoint name (`<namespace>/<name>`), listing keeps only that prefix and strips it; the `sandboxID` and `name` filters are honored, `limit` and `nextToken` are ignored. One unreachable node is skipped rather than blanking the whole result. |
@@ -162,8 +162,8 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   claim time the owning node publishes; a node that does not publish it makes
   `startedAt` the time of the read. `endAt` is the node-granted deadline when
   the owning node published one, and `startedAt + --e2b-default-timeout`
-  otherwise. `cpuCount`, `memoryMB`, and `diskSizeMB` are reported as zero on
-  these responses.
+  otherwise. `cpuCount` and `memoryMB` are the size tier the owning node
+  reports with each entry; `diskSizeMB` is reported as zero.
 - **`envdAccessToken` is minted once, at claim time, by the owning node.**
   `POST /sandboxes` and `POST /sandboxes/{id}/fork` carry the token the node
   just issued, and `POST /sandboxes/{id}/connect` reads it back from the owning
@@ -184,12 +184,13 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   selector.
 - **Options this backend cannot honor are refused, not dropped.** `secure:
   false` (every sandbox here is reachable only with its own access token), a
-  non-empty `envVars`, `autoPause: true`, and the `/v2` fields `network` (any
-  rule), `volumeMounts`, `autoPauseMemory`, `autoResume: {enabled: true}`,
-  `mcp` and `iam` each return `400`. Honoring them silently would hand back a
-  different sandbox than the caller asked for. `metadata` is still accepted and
-  discarded — it changes no behavior, and the node-local claim path takes no
-  per-sandbox copy.
+  non-empty `envVars`, `autoPause: true` with `allow_internet_access: true`
+  (the internet lane cannot pause, so a timeout would destroy what autoPause
+  asks to keep), and the `/v2` fields `network` (any rule), `volumeMounts`,
+  `autoPauseMemory`, `autoResume: {enabled: true}`, `mcp` and `iam` each return
+  `400`. Honoring them silently would hand back a different sandbox than the
+  caller asked for. `metadata` rides on the claim; the owning node caps it at
+  16 pairs and 4 KiB and answers more with `400`, which create passes through.
 - **No internet unless asked.** A create without `allow_internet_access: true`
   lands on the `none` lane, whatever the SDK's own default: JS SDKs 2.3 to 2.50
   send `true` unless told otherwise, 2.51 sends nothing. A fleet that serves

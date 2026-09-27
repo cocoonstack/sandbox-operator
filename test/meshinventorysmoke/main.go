@@ -65,7 +65,7 @@ func run(seeds []string, tokenFile, template string) error {
 
 	store := scale.NewScatterGatherStore(src, scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()))
 	t1 := time.Now()
-	a, err := store.Claim(ctx, "default", "meshinventorysmoke", scale.PoolKey{Template: template}, 120)
+	a, err := store.Claim(ctx, "default", "meshinventorysmoke", scale.PoolKey{Template: template}, scale.ClaimOptions{TTLSeconds: 120})
 	if err != nil {
 		return err
 	}

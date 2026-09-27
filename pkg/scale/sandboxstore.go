@@ -9,6 +9,7 @@ import (
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
 // ListOptions is the subset of client list and watch parameters the aggregated store honors.
@@ -28,6 +29,13 @@ type PoolKey struct {
 
 // PoolCapacity is one node's warm capacity for a single pool.
 type PoolCapacity = cocoonv1beta1.PoolCapacity
+
+// ClaimOptions are the per-claim fields a Claim carries to the node alongside the pool; a zero TTLSeconds asks for the node default.
+type ClaimOptions struct {
+	TTLSeconds int
+	Metadata   map[string]string
+	OnExpire   sandboxd.ExpireAction
+}
 
 // Assignment is a successful claim: the sandbox, the node serving it and its address.
 type Assignment struct {
@@ -49,8 +57,8 @@ type SandboxStore interface {
 	// Watch emits sandbox events as the node inventories change. A watch pinned to one name in a namespace starts from Get.
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)
 	// Claim delivers a warm microVM for namespace/name from a node with warm capacity for pool, and writes no etcd object.
-	// With no warm node it returns an error that IsNoWarmCapacity reports, and a ttlSeconds of 0 asks for the node default.
-	Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error)
+	// With no warm node it returns an error that IsNoWarmCapacity reports.
+	Claim(ctx context.Context, namespace, name string, pool PoolKey, opts ClaimOptions) (Assignment, error)
 	// Release destroys the claimed microVM on its owning node, for an owner-authorized delete only.
 	Release(ctx context.Context, node, id string) error
 
@@ -76,8 +84,8 @@ type SandboxLifecycle interface {
 	Stats(ctx context.Context, node, id string) (SandboxStats, error)
 	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.
 	Read(ctx context.Context, node, id string) (SandboxRecord, error)
-	// Renew resets the lease to ttlSeconds from now, 0 for the node default, and returns the granted deadline.
-	Renew(ctx context.Context, node, id string, ttlSeconds int) (time.Time, error)
+	// Renew resets the lease to ttlSeconds from now, 0 for the node default, and returns the granted deadline; an empty onExpire keeps the claim's action.
+	Renew(ctx context.Context, node, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error)
 }
 
 // ClaimIDResolver resolves one sandbox by its node-local claim id without materializing the fleet.

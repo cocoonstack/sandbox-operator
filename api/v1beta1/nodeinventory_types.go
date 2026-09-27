@@ -56,6 +56,15 @@ type InventoryEntry struct {
 	// or a wake moves deadline, never this.
 	// +optional
 	ClaimedAt *metav1.Time `json:"claimedAt,omitempty"`
+	// claimMetadata is the claim's caller metadata as one JSON object, at most 4 KiB.
+	// +optional
+	Metadata string `json:"claimMetadata,omitempty"`
+	// cpuCount is the vCPU count of the size tier the VM was booted with.
+	// +optional
+	CPUCount int32 `json:"cpuCount,omitempty"`
+	// memoryBytes is the memory of the size tier the VM was booted with.
+	// +optional
+	MemoryBytes int64 `json:"memoryBytes,omitempty"`
 }
 
 // +kubebuilder:object:root=true

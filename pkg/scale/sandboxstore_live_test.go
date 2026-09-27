@@ -53,7 +53,7 @@ func TestGetAsksTheClaimingNodeFirst(t *testing.T) {
 	store, src := unpublishedStore(f)
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
 
-	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, ClaimOptions{})
 	require.NoError(t, err)
 	f.rows = map[string][]sandboxd.SandboxSummary{
 		"n1:7777": {{ID: "sb_1", ClaimRef: "ns/s1"}},
@@ -73,7 +73,7 @@ func TestGetByClaimIDAsksTheClaimingNodeFirst(t *testing.T) {
 	store, src := unpublishedStore(f)
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
 
-	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, ClaimOptions{})
 	require.NoError(t, err)
 	f.rows = map[string][]sandboxd.SandboxSummary{
 		"n1:7777": {{ID: "sb_1", ClaimRef: "ns/s1"}},
@@ -178,6 +178,11 @@ func TestEntryFromSummaryIsWhatANodePublishes(t *testing.T) {
 
 	archived := EntryFromSummary(sandboxd.SandboxSummary{ID: "sb_3", Archived: true})
 	assert.Equal(t, PhaseHibernated, archived.Phase, "an archived claim has no VM on the node; it is paused, not running")
+
+	labeled := EntryFromSummary(sandboxd.SandboxSummary{ID: "sb_4", Metadata: map[string]string{"user": "u1"}, CPUCount: 2, MemTotalBytes: 1 << 30})
+	assert.Equal(t, `{"user":"u1"}`, labeled.Metadata)
+	assert.Equal(t, int32(2), labeled.CPUCount)
+	assert.Equal(t, int64(1<<30), labeled.MemoryBytes)
 }
 
 func TestFirstHitReturnsTheFirstNonZeroAnswer(t *testing.T) {

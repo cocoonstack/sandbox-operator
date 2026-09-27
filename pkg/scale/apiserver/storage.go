@@ -122,7 +122,7 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	if err != nil {
 		return nil, apierrors.NewBadRequest(err.Error())
 	}
-	assignment, err := r.store.Claim(ctx, namespace, name, pool, ttlSeconds)
+	assignment, err := r.store.Claim(ctx, namespace, name, pool, scale.ClaimOptions{TTLSeconds: ttlSeconds})
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			return nil, apierrors.NewServiceUnavailable(fmt.Sprintf(
