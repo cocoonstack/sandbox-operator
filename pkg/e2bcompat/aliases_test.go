@@ -90,7 +90,7 @@ func TestTheTemplateListCarriesEachPoolsAliases(t *testing.T) {
 
 func TestNewServerRefusesAMalformedAliasTable(t *testing.T) {
 	for _, entries := range [][]string{{"base"}, {"base reg/rt:24.04 extra"}, {"base reg/rt:24.04", "base reg/py:3.12"}} {
-		_, err := NewServer(&fakeStore{}, Options{Domain: testDomain, APIKeys: []string{testKey}, TemplateAliases: entries})
+		_, err := NewServer(&fakeStore{}, Options{EnvdSecret: []byte(testEnvdSecret), Domain: testDomain, APIKeys: []string{testKey}, TemplateAliases: entries})
 		assert.Error(t, err, strings.Join(entries, " | "))
 	}
 }

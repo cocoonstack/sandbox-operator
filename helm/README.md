@@ -28,14 +28,16 @@ and supply both a serving-cert Secret named in `certManager.servingCertSecret`
 and its CA in `certManager.caBundle`.
 
 The e2b-compatible REST surface is off by default, and the proxy renders only
-with it. Enabling it requires a domain and a Secret of API keys:
+with it. Enabling it requires a domain, a Secret of API keys and the envd
+secret:
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
   --namespace sandbox-system \
   --set apiserver.e2b.enabled=true \
   --set apiserver.e2b.domain=sandbox.example.com \
-  --set apiserver.e2b.apiKeySecret.name=e2b-api-keys
+  --set apiserver.e2b.apiKeySecret.name=e2b-api-keys \
+  --set apiserver.e2b.envdSecret.secretName=e2b-envd-secret
 ```
 
 Wildcard DNS for `*.{domain}` must resolve to the `sandbox-envd-proxy` Service:
@@ -84,6 +86,9 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `apiserver.e2b.apiKeySecret.name` | Secret of accepted API keys; required once enabled | `""` |
 | `apiserver.e2b.apiKeySecret.key` | Key within that Secret | `keys` |
 | `apiserver.e2b.templateAliases` | Template aliases, one per line as `alias pool-image`; `base` makes `Sandbox.create()` work | `""` |
+| `apiserver.e2b.envdSecret.value` | Key every sandbox's envd access token derives from; the chart renders it into a Secret. Set this or `secretName` once enabled | `""` |
+| `apiserver.e2b.envdSecret.secretName` | Existing Secret holding that key, used when `value` is empty; mounted into the apiserver and the envd-proxy | `""` |
+| `apiserver.e2b.envdSecret.key` | Key within that Secret | `secret` |
 | `apiserver.resources` | Apiserver requests and limits | 100m/128Mi, limit 512Mi |
 | `envdProxy.image.repository` | Proxy image | `ghcr.io/cocoonstack/sandbox-envd-proxy` |
 | `envdProxy.image.tag` | Image tag; pin a release | `latest` |

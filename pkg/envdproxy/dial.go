@@ -16,7 +16,6 @@ var errNoTarget = errors.New("envdproxy: request carries no target")
 type target struct {
 	owner Owner
 	port  uint16
-	token string
 	h2    bool
 }
 
@@ -30,7 +29,7 @@ type guestDialer func(ctx context.Context, t target) (net.Conn, error)
 // connection as a plain net.Conn.
 func dialGuest(dialer *net.Dialer) guestDialer {
 	return func(ctx context.Context, t target) (net.Conn, error) {
-		return sandboxd.DialPort(ctx, dialer, t.owner.Address, t.owner.ClaimID, t.token, t.port)
+		return sandboxd.DialPort(ctx, dialer, t.owner.Address, t.owner.ClaimID, t.owner.Token, t.port)
 	}
 }
 

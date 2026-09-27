@@ -126,6 +126,7 @@ type SandboxdClient interface {
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
 	DialPort(ctx context.Context, id string, port uint16) (net.Conn, error)
+	SetInstanceMetadata(ctx context.Context, id string, doc []byte) error
 
 	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.
 	Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error)

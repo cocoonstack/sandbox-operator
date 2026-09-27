@@ -83,6 +83,8 @@ type SandboxLifecycle interface {
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
 	// DialGuestPort opens a guest port of a running sandbox through its node's passive relay; a paused one answers Conflict and is never woken.
 	DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error)
+	// SetInstanceMetadata replaces the JSON object a running sandbox's guest reads from 169.254.169.254; a paused one answers Conflict.
+	SetInstanceMetadata(ctx context.Context, node, id string, doc []byte) error
 	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.
 	Read(ctx context.Context, node, id string) (SandboxRecord, error)
 	// Renew resets the lease to ttlSeconds from now, 0 for the node default, and returns the granted deadline; an empty onExpire keeps the claim's action.

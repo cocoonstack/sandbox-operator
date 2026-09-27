@@ -34,6 +34,13 @@ apiserver:
     # per line as "alias pool-image". Sandbox.create() with no template asks
     # for base, so name it here for that call to work.
     templateAliases: ""
+    # envdSecret keys every sandbox's envd access token, which this surface
+    # hands the SDK and the envd-proxy verifies. Required once enabled: set
+    # value and the chart renders the Secret, or name an existing one.
+    envdSecret:
+      value: ""
+      secretName: ""
+      key: secret
   resources:
     requests:
       cpu: 100m

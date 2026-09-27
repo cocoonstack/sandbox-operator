@@ -45,8 +45,8 @@ import (
 )
 
 const (
-	// DefaultEnvdVersion is the modern-auth floor the SDK version-compares when none is configured.
-	DefaultEnvdVersion = "0.4.0"
+	// DefaultEnvdVersion is the envd the e2b flavors ship, which the SDK version-compares.
+	DefaultEnvdVersion = "0.8.0"
 	// DefaultTimeoutSeconds is the node's default lease; the SDK's own 15s reaps a cold client's sandbox.
 	DefaultTimeoutSeconds = 300
 	apiKeyHeader          = "X-API-KEY"
@@ -82,6 +82,8 @@ type Options struct {
 	Inventory scale.InventorySource
 	// TemplateAliases maps a templateID to a pool image, each entry "alias image"; the SDK's default "base" is one.
 	TemplateAliases []string
+	// EnvdSecret keys every sandbox's envd access token, AccessToken(EnvdSecret, claim token); the edge shares it.
+	EnvdSecret []byte
 }
 
 type namespaceKey struct{}
@@ -129,6 +131,9 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	}
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("e2bcompat: no domain configured; the SDK cannot reach a sandbox without one")
+	}
+	if len(opts.EnvdSecret) == 0 {
+		return nil, errors.New("e2bcompat: an envd secret is required: every sandbox's access token derives from it")
 	}
 	aliases, imageAliases := map[string]string{}, map[string][]string{}
 	for _, entry := range opts.TemplateAliases {
@@ -296,13 +301,21 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token := AccessToken(s.opts.EnvdSecret, assignment.Token)
+	init := envdInit{AccessToken: token, EnvVars: req.EnvVars, DefaultUser: envdDefaultUser, DefaultWorkdir: envdDefaultWorkdir}
+	if err := s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, init); err != nil {
+		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: envd init failed sandboxID=%s node=%s", assignment.SandboxName, assignment.Node)
+		s.releaseAll(r.Context(), []scale.Assignment{assignment})
+		writeError(w, http.StatusInternalServerError, "failed to start the sandbox")
+		return
+	}
 	writeJSON(w, http.StatusCreated, Sandbox{
 		TemplateID:      image,
 		Alias:           s.aliasOf(image),
 		SandboxID:       PublicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: assignment.Token,
+		EnvdAccessToken: token,
 		Domain:          s.opts.Domain,
 	})
 }
@@ -651,8 +664,6 @@ func unsupportedCreateOption(req NewSandbox) (string, bool) {
 	switch {
 	case req.Secure != nil && !*req.Secure:
 		return "secure=false is not supported; every sandbox this backend hands out is reachable only with its own access token", true
-	case len(req.EnvVars) > 0:
-		return "envVars is not supported; set the environment inside the sandbox after it starts", true
 	case req.AutoPause != nil && *req.AutoPause && req.AllowInternetAccess != nil && *req.AllowInternetAccess:
 		return "autoPause is not supported with allow_internet_access: the internet lane cannot pause", true
 	case len(req.Network) > 0:

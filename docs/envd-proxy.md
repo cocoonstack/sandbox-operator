@@ -40,6 +40,8 @@ sandbox-envd-proxy \
   --bind-address=:8443 \
   --domain=sandbox.example.com \
   --namespace=sandboxes \
+  --e2b-envd-secret-file=/etc/e2b/envd-secret \
+  --sandboxd-token-file=/etc/sandboxd/token \
   --tls-cert-file=/etc/tls/tls.crt \
   --tls-private-key-file=/etc/tls/tls.key
 ```
@@ -52,6 +54,8 @@ sandbox-envd-proxy \
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Key for the above; the two must be set together. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. `envd` 0.8.0 does not serve it. |
+| `--e2b-envd-secret-file` | — | **Required.** The file the e2b surface reads: access tokens are verified against it. |
+| `--sandboxd-token-file` | — | Fleet sandboxd `api_token`, which reads a sandbox's claim token by id. Needed whenever the nodes require one. |
 
 The deployment needs wildcard DNS for `*.{domain}` pointing at the proxy, and a
 certificate covering it. `GET /healthz` is unauthenticated, for probes.
@@ -62,9 +66,11 @@ becomes a LIST against the kube-apiserver; RBAC needs `get`/`list`/`watch` on
 
 A sandbox created after its node last published inventory is not in the
 informer yet. For such an id the proxy asks every node's
-`GET /v1/sandboxes/{id}/owner` with the caller's `X-Access-Token`: only the
-owning node answers, and only for that sandbox's own token. The owner is kept
-for a minute, past the node's next publish. These asks share one budget per
+`GET /v1/sandboxes/{id}`: only the owning node answers, and the caller is
+admitted only when its token derives from the claim token that answer carries
+(see Authorization). A wrong token here answers `502`, so an unpublished id
+stays unprovable. The owner is kept for a minute, past the node's next
+publish. These asks share one budget per
 proxy replica, 200 a second with a burst of 400, which is also what bounds the
 node traffic unknown ids can cause: each ask costs every node one lookup. Past
 the budget, any id the inventory does not list answers `502` until its node
@@ -92,20 +98,26 @@ reached the same way.
 
 ## Authorization
 
-The client sends `X-Access-Token`, the per-sandbox token minted at claim time
-and returned by `POST /sandboxes` — the e2b SDK does this on its own. The proxy
-presents it to the owning node as `Authorization: Bearer`, and **sandboxd** is
-what verifies it, against the same claim the silkd relay checks.
+The client sends `X-Access-Token`, the sandbox's `envd` access token that
+`POST /sandboxes` returns — the e2b SDK does this on its own. The token is
+`hex(HMAC-SHA256(secret, claim token))` (see
+[e2b-compat](e2b-compat.md#limits-worth-knowing)). The proxy reads the claim
+token from the owning node's `GET /v1/sandboxes/{id}` with the fleet token,
+derives the value and compares it in constant time. It then opens the node's
+guest-port relay with the claim token. The owner and the derived value are
+cached for a minute, so a steady stream costs one node read per sandbox per
+minute and an HMAC compare per request.
 
-The proxy holds no per-sandbox secret and mints nothing. Node inventory
-deliberately carries none either, which is why a reconnecting client must keep
-the token from its create response (see
-[e2b-compat](e2b-compat.md#limits-worth-knowing)).
+A signed file URL — the SDK's `downloadUrl`/`uploadUrl`, a `/files` request
+whose query carries `signature` — comes without the header, since a browser or
+`curl` fetches it. The proxy places the sandbox without checking a token and
+relays it; `envd` verifies the signature against the sandbox's access token.
+Any other request without `X-Access-Token` is `401`.
 
-Host-side credentials are **stripped** before the request crosses into the
-guest: `X-Access-Token` authorizes the proxy→node hop only, and a guest that
-learned it could drive its own sandbox's control plane. `X-API-KEY` never
-belongs to `envd` either.
+`X-Access-Token` is forwarded to every guest port unchanged: it is the guest's
+own `envd` credential, which `envd` checks and which the code interpreter on
+`49999` passes on to `envd`. The claim token never leaves the proxy, and
+`X-API-KEY` is stripped: it never belongs to the guest.
 
 `envd`'s own internal endpoints — the ones its spec marks `x-internal`:
 `/init`, `/freeze`, `/unfreeze`, `/fsfreeze`, `/fsthaw`, `/collapse` — are refused
@@ -132,7 +144,7 @@ an unused sandbox from ever hibernating.
 
 ## Proving it
 
-`pkg/envdproxy`'s tests cover the routing, stripping and error mapping against a
+`pkg/envdproxy`'s tests cover the routing, credential handling and error mapping against a
 fake node. The hardware half is `test/envdproxysmoke` (build tag
 `envdproxysmoke`), which serves the real proxy in-process and reaches an HTTP
 listener inside a live microVM:
@@ -149,8 +161,8 @@ go run -tags envdproxysmoke ./test/envdproxysmoke \
 `-guest envd` swaps the assertions for the real daemon (health, a ConnectRPC
 unary) when the sandbox came from the `e2b-rt` flavor; `envdsmoke -hold` in the
 sandbox repo prepares that one. Default `-guest echo` expects `guestserver`,
-which reports back what the guest received and is what proves the credential
-stripping. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
+which reports back what the guest received and is what proves which
+credentials cross. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
 `scripts/port-e2e.sh` runs the node half alone.
 
 ## Failures
@@ -158,7 +170,7 @@ stripping. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
 | Status | Meaning |
 |---|---|
 | `400` | The host and headers name no sandbox, or the port is outside 1-65535. |
-| `401` | No `X-Access-Token`, or the node rejected the one presented. |
+| `401` | No `X-Access-Token` on anything but a signed file URL, one that does not derive from the claim, or the node rejected the relay. |
 | `404` | An `envd` internal path. |
 | `502` | Sandbox unknown, paused past recovery, nothing listening on the guest port, or its node unreachable. |
 

@@ -21,18 +21,23 @@ import (
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
 	"github.com/cocoonstack/sandbox-operator/pkg/logbridge"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/kubeinventory"
 	"github.com/cocoonstack/sandbox-operator/version"
 )
 
 type options struct {
-	Domain    string
-	Namespace string
-	Proxy     envdproxy.Flags
-	Inventory kubeinventory.Options
+	Domain            string
+	Namespace         string
+	SandboxdToken     string
+	SandboxdTokenFile string
+	EnvdSecretFile    string
+	Proxy             envdproxy.Flags
+	Inventory         kubeinventory.Options
 }
 
 func (o *options) addFlags(fs *pflag.FlagSet) {
@@ -40,6 +45,11 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.Inventory.AddFlags(fs)
 	fs.StringVar(&o.Domain, "domain", o.Domain,
 		"Base domain sandbox hosts are derived from, as {port}-{sandboxID}.{domain}. Must match the apiserver's --e2b-domain.")
+	fs.StringVar(&o.SandboxdToken, "sandboxd-token", o.SandboxdToken,
+		"Fleet root sandboxd api_token, which reads a sandbox's claim token to verify its envd access token. Prefer --sandboxd-token-file for a Secret mount.")
+	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
+		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+	e2bcompat.AddEnvdSecretFlag(fs, &o.EnvdSecretFile)
 	fs.StringVar(&o.Namespace, "namespace", o.Namespace,
 		"Namespace inventory lookups are filtered to; empty matches every namespace. Not an access boundary: a caller holding a sandbox's token reaches it in any namespace.")
 }
@@ -76,7 +86,16 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return err
 	}
-	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), inv, o.Namespace)
+	token, err := sandboxd.TokenFrom(o.SandboxdToken, o.SandboxdTokenFile)
+	if err != nil {
+		return err
+	}
+	secret, err := e2bcompat.EnvdSecret(o.EnvdSecretFile)
+	if err != nil {
+		return err
+	}
+	routed := scale.NewScatterGatherStore(inv, scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()))
+	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), routed, inv, o.Namespace, secret)
 	if err != nil {
 		return err
 	}

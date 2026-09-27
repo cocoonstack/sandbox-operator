@@ -137,7 +137,7 @@ type NodeInfo struct {
 // Client talks to a single sandboxd instance. It is safe for concurrent use.
 type Client struct {
 	baseURL string
-	// token is the node api_token every verb presents, except Release and IsOwner, which take one per call.
+	// token is the node api_token every verb presents, except Release, which takes one per call.
 	token string
 	hc    *http.Client
 }
@@ -228,25 +228,20 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: release requires a sandbox id")
 	}
-	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/release", token, "release", http.StatusNoContent, http.StatusNotFound)
+	return c.send(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/release", token, "release", nil, http.StatusNoContent, http.StatusNotFound)
 }
 
-// IsOwner performs GET /v1/sandboxes/{id}/owner with the sandbox's own token; the node's 404 is false.
-func (c *Client) IsOwner(ctx context.Context, id, token string) (bool, error) {
-	if id == "" {
-		return false, fmt.Errorf("sandboxd: owner requires a sandbox id")
+func (c *Client) send(ctx context.Context, method, path, token, op string, body []byte, ok ...int) error {
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
 	}
-	err := c.sendNoBody(ctx, http.MethodGet, "/v1/sandboxes/"+url.PathEscape(id)+"/owner", token, "owner", http.StatusOK)
-	if he, ok := errors.AsType[*HTTPError](err); ok && he.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-func (c *Client) sendNoBody(ctx context.Context, method, path, token, op string, ok ...int) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, r)
 	if err != nil {
 		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	c.authenticate(req, token)
 

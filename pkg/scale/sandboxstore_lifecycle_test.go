@@ -30,6 +30,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	_, snapErr := store.Snapshot(ctx, "n1", "sb_gone", "")
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
+		"metadata": store.SetInstanceMetadata(ctx, "n1", "sb_gone", []byte(`{}`)),
 		"resume":   store.Resume(ctx, "n1", "sb_gone"),
 		"port":     portErr,
 		"fork":     forkErr,

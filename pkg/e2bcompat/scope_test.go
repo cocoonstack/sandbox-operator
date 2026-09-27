@@ -209,7 +209,7 @@ func TestListHonorsStateTemplateAndMetadata(t *testing.T) {
 }
 
 func TestAKeyEntryIsAKeyOrAKeyAndANamespace(t *testing.T) {
-	if _, err := NewServer(&fakeStore{}, Options{Domain: testDomain, APIKeys: []string{"key ns extra"}}); err == nil {
+	if _, err := NewServer(&fakeStore{}, Options{EnvdSecret: []byte(testEnvdSecret), Domain: testDomain, APIKeys: []string{"key ns extra"}}); err == nil {
 		t.Fatal("a three-field key entry must fail startup")
 	}
 }

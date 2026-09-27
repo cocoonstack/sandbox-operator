@@ -77,3 +77,8 @@ func internalPath(path string) bool {
 	clean := "/" + strings.Trim(path, "/")
 	return slices.ContainsFunc(internalPaths, func(p string) bool { return strings.EqualFold(clean, p) })
 }
+
+// signedFileURL is an SDK download or upload link: it carries a signature envd checks against the sandbox's access token, and no header.
+func signedFileURL(r *http.Request) bool {
+	return r.URL.Path == "/files" && r.URL.Query().Get("signature") != ""
+}

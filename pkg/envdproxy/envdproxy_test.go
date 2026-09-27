@@ -15,10 +15,16 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-const testDomain = "sandbox.example.com"
+const (
+	testDomain = "sandbox.example.com"
+	testSecret = "test-envd-secret"
+)
+
+var testAccess = e2bcompat.AccessToken([]byte(testSecret), "tok")
 
 func TestProxyReachesTheGuestPort(t *testing.T) {
 	node := newFakeNode(t, guestEcho)
@@ -38,7 +44,7 @@ func TestProxyReachesTheGuestPort(t *testing.T) {
 		t.Errorf("node path = %q, want the raw claim id and the requested port", node.lastPath)
 	}
 	if node.lastAuth != "Bearer tok" {
-		t.Errorf("node auth = %q, want the presented sandbox token", node.lastAuth)
+		t.Errorf("node auth = %q, want the owner's claim token", node.lastAuth)
 	}
 }
 
@@ -62,21 +68,48 @@ func TestProxyRoutesByHeadersOnASharedHost(t *testing.T) {
 	}
 }
 
-func TestProxyStripsHostCredentialsFromTheGuest(t *testing.T) {
+func TestProxyForwardsTheAccessTokenButNoHostCredential(t *testing.T) {
 	node := newFakeNode(t, guestEcho)
 	h := newTestProxy(t, node.resolver())
 
-	r := httptest.NewRequest(http.MethodGet, "/files", nil)
-	r.Host = "49983-sb-abc." + testDomain
-	r.Header.Set(accessTokenHeader, "tok")
-	r.Header.Set(apiKeyHeader, "e2b_key")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
+	for _, port := range []string{"49983", "49999"} {
+		r := httptest.NewRequest(http.MethodGet, "/files", nil)
+		r.Host = port + "-sb-abc." + testDomain
+		r.Header.Set(accessTokenHeader, testAccess)
+		r.Header.Set(apiKeyHeader, "e2b_key")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
 
-	seen := w.Body.String()
-	for _, header := range []string{accessTokenHeader, apiKeyHeader, "tok", "e2b_key"} {
-		if strings.Contains(seen, header) {
-			t.Errorf("the guest saw %q; a host-side credential must not cross into the sandbox", header)
+		seen := w.Body.String()
+		if !strings.Contains(seen, accessTokenHeader+": "+testAccess) {
+			t.Errorf("port %s: the guest saw %q, want its own envd access token", port, seen)
+		}
+		for _, secret := range []string{apiKeyHeader, "e2b_key", "Bearer tok"} {
+			if strings.Contains(seen, secret) {
+				t.Errorf("port %s: the guest saw %q; a host-side credential must not cross into the sandbox", port, secret)
+			}
+		}
+	}
+}
+
+func TestProxyRelaysASignedFileURLWithoutTheToken(t *testing.T) {
+	node := newFakeNode(t, guestEcho)
+	h := newTestProxy(t, node.resolver())
+
+	resp := request(t, h, "49983-sb-abc."+testDomain, "/files?path=%2Fetc%2Fhosts&signature=v1_abc&signature_expiration=9", "")
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "GET /files?path=%2Fetc%2Fhosts&signature=v1_abc") {
+		t.Fatalf("status %d, guest saw %q; want the signed request relayed for envd to verify", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), accessTokenHeader) {
+		t.Errorf("a signed request gained an access token on the way: %q", body)
+	}
+	for _, path := range []string{"/files?path=%2Fetc%2Fhosts", "/envs?signature=v1_abc"} {
+		resp := request(t, h, "49983-sb-abc."+testDomain, path, "")
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401: only a signed file URL goes without the token", path, resp.StatusCode)
 		}
 	}
 }
@@ -150,13 +183,13 @@ func TestProxyFindsASandboxItsNodeHasNotPublished(t *testing.T) {
 	r, src := unpublishedResolver(t, owner, other)
 	h := newTestProxy(t, r)
 
-	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", "tok")
+	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", testAccess)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	sweeps := src.lists.Load()
-	resp = request(t, h, "49983-sb-abc."+testDomain, "/files", "tok")
+	resp = request(t, h, "49983-sb-abc."+testDomain, "/files", testAccess)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("second status = %d, want 200", resp.StatusCode)
@@ -172,13 +205,44 @@ func TestProxyFindsASandboxItsNodeHasNotPublished(t *testing.T) {
 	}
 }
 
+func TestProxyAdmitsOnlyTheTokenDerivedFromThePublishedClaim(t *testing.T) {
+	owner := newFakeNode(t, guestEcho)
+	owner.owns = "sb_abc"
+	src := &countingSource{StaticInventorySource: scale.NewStaticInventorySource()}
+	src.Put(&scale.NodeInventory{Name: "node-0", Node: "node-0", Address: owner.addr, Entries: []scale.InventoryEntry{{Name: "sandboxes/s1", ID: "sb_abc"}}})
+	routed := scale.NewScatterGatherStore(src, scale.WithClaimRouting("root", scale.NewSandboxdClientFactory()))
+	r, err := NewResolver(scale.NewScatterGatherStore(src), routed, src, "", []byte(testSecret))
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	h := newTestProxy(t, r)
+
+	for range 2 {
+		resp := request(t, h, "49983-sb-abc."+testDomain, "/files", testAccess)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200 for the derived token", resp.StatusCode)
+		}
+	}
+	if got := owner.probes.Load(); got != 1 {
+		t.Errorf("claim token read %d times, want once: the owner is cached", got)
+	}
+	for _, token := range []string{"tok", "someone-elses"} {
+		resp := request(t, h, "49983-sb-abc."+testDomain, "/files", token)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("token %q: status = %d, want 401; only the derived token is admitted", token, resp.StatusCode)
+		}
+	}
+}
+
 func TestProxyProbedOwnerStillNeedsTheToken(t *testing.T) {
 	owner := newFakeNode(t, guestEcho)
 	owner.owns = "sb_abc"
 	r, _ := unpublishedResolver(t, owner)
 	h := newTestProxy(t, r)
 
-	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", "tok")
+	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", testAccess)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -213,7 +277,7 @@ func TestProxyStopsProbingPastItsLimit(t *testing.T) {
 	r.(*storeResolver).probeLimit = rate.NewLimiter(0, 0)
 	h := newTestProxy(t, r)
 
-	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", "tok")
+	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", testAccess)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", resp.StatusCode)
@@ -385,7 +449,8 @@ func unpublishedResolver(t *testing.T, nodes ...*fakeNode) (Resolver, *countingS
 		name := fmt.Sprintf("node-%d", i)
 		src.Put(&scale.NodeInventory{Name: name, Node: name, Address: n.addr})
 	}
-	r, err := NewResolver(scale.NewScatterGatherStore(src), src, "")
+	routed := scale.NewScatterGatherStore(src, scale.WithClaimRouting("root", scale.NewSandboxdClientFactory()))
+	r, err := NewResolver(scale.NewScatterGatherStore(src), routed, src, "", []byte(testSecret))
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -452,7 +517,7 @@ func (l *oneConnListener) Accept() (net.Conn, error) {
 	return l.c, nil
 }
 
-// fakeNode answers sandboxd's owner check and, for the token "tok", the guest-port upgrade.
+// fakeNode answers a root by-id read of owns with the claim token "tok" and, for that token, the guest-port upgrade.
 type fakeNode struct {
 	addr     string
 	refuse   int
@@ -489,13 +554,13 @@ func (n *fakeNode) handle(conn net.Conn, guest func(net.Conn)) {
 		_ = conn.Close()
 		return
 	}
-	if strings.HasSuffix(req.URL.Path, "/owner") {
+	if !strings.Contains(req.URL.Path, "/ports/") {
 		n.probes.Add(1)
-		status := http.StatusNotFound
-		if req.URL.Path == "/v1/sandboxes/"+n.owns+"/owner" && req.Header.Get("Authorization") == "Bearer tok" {
-			status = http.StatusOK
+		status, body := http.StatusNotFound, ""
+		if req.URL.Path == "/v1/sandboxes/"+n.owns && req.Header.Get("Authorization") == "Bearer root" {
+			status, body = http.StatusOK, `{"id":"`+n.owns+`","token":"tok","key":{"template":"img"}}`
 		}
-		fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", status, http.StatusText(status))
+		fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", status, http.StatusText(status), len(body), body)
 		_ = conn.Close()
 		return
 	}
@@ -521,7 +586,7 @@ func (n *fakeNode) resolver() Resolver {
 		if id != "sb-abc" {
 			return Owner{}, ErrSandboxNotFound
 		}
-		return Owner{ClaimID: "sb_abc", Address: n.addr}, nil
+		return Owner{ClaimID: "sb_abc", Address: n.addr, Token: "tok"}, nil
 	})
 }
 
@@ -532,6 +597,10 @@ func (f resolverFunc) Owner(ctx context.Context, sandboxID, token string) (Owner
 		return Owner{}, errors.New("no resolver")
 	}
 	return f(ctx, sandboxID, token)
+}
+
+func (f resolverFunc) Locate(ctx context.Context, sandboxID string) (Owner, error) {
+	return f.Owner(ctx, sandboxID, "")
 }
 
 type countingSource struct {

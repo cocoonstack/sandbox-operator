@@ -33,6 +33,16 @@ app.kubernetes.io/name: sandbox-envd-proxy
 {{- default .Values.apiserver.e2b.domain .Values.envdProxy.domain -}}
 {{- end }}
 
+{{/* The e2b surface and the proxy mount one envd secret: the chart's own when a value is set, else the named one. */}}
+{{- define "sandbox-operator.e2b.envdSecretName" -}}
+{{- $s := .Values.apiserver.e2b.envdSecret -}}
+{{- if $s.value -}}
+sandbox-e2b-envd-secret
+{{- else -}}
+{{- required "apiserver.e2b.envdSecret.value or apiserver.e2b.envdSecret.secretName is required when apiserver.e2b.enabled is true" $s.secretName -}}
+{{- end -}}
+{{- end }}
+
 {{/* The proxy is not an access boundary and a key's sandboxes live in the key's namespace, so it resolves across every namespace unless narrowed. */}}
 {{- define "sandbox-operator.envdProxy.namespace" -}}
 {{- .Values.envdProxy.namespace -}}

@@ -94,12 +94,21 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	token := strings.TrimSpace(r.Header.Get(accessTokenHeader))
-	if token == "" {
+	var owner Owner
+	var err error
+	switch token := strings.TrimSpace(r.Header.Get(accessTokenHeader)); {
+	case token != "":
+		owner, err = s.resolver.Owner(r.Context(), rt.sandboxID, token)
+	case signedFileURL(r):
+		owner, err = s.resolver.Locate(r.Context(), rt.sandboxID)
+	default:
 		writeError(w, http.StatusUnauthorized, "missing "+accessTokenHeader)
 		return
 	}
-	owner, err := s.resolver.Owner(r.Context(), rt.sandboxID, token)
+	if errors.Is(err, ErrAccessDenied) {
+		writeError(w, http.StatusUnauthorized, "invalid sandbox access token")
+		return
+	}
 	if err != nil {
 		// A caller must not learn from this whether the id exists, which node
 		// holds it, or whether the fleet is reachable.
@@ -115,14 +124,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.proxy(rt).ServeHTTP(w, r.WithContext(withTarget(r.Context(), target{
 		owner: owner,
 		port:  rt.port,
-		token: token,
 		h2:    s.opts.GuestHTTP2,
 	})))
 }
 
-// proxy forwards one request into the guest untouched apart from the host-side
-// credentials, which are stripped: the sandbox token authorizes this hop only,
-// and a guest that learned it could drive its own sandbox's control plane.
+// proxy forwards one request into the guest untouched apart from the API key. X-Access-Token stays: envd
+// and the code interpreter check it, and the claim token that opens the relay never leaves this edge.
 func (s *Server) proxy(rt route) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		FlushInterval: flushInterval,
@@ -131,7 +138,6 @@ func (s *Server) proxy(rt route) *httputil.ReverseProxy {
 			pr.Out.URL.Scheme = "http"
 			pr.Out.URL.Host = s.sandboxHost(rt)
 			pr.Out.Host = pr.Out.URL.Host
-			pr.Out.Header.Del(accessTokenHeader)
 			pr.Out.Header.Del(apiKeyHeader)
 		},
 		Transport: s.transport,

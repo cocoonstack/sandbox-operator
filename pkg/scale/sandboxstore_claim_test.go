@@ -446,13 +446,14 @@ type recordingFactory struct {
 	releaseErr  error
 	verbErr     error
 
-	rows      map[string][]sandboxd.SandboxSummary
-	rowReads  []string
-	dialErr   error
-	dialErrs  map[string]error
-	dialPorts []uint16
-	silent    string
-	ignoreRef bool
+	rows         map[string][]sandboxd.SandboxSummary
+	rowReads     []string
+	dialErr      error
+	dialErrs     map[string]error
+	dialPorts    []uint16
+	metadataDocs []string
+	silent       string
+	ignoreRef    bool
 }
 
 func (f *recordingFactory) factory() SandboxdClientFactory {
@@ -508,6 +509,13 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 }
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
+
+func (c *recordingClient) SetInstanceMetadata(_ context.Context, id string, doc []byte) error {
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.metadataDocs = append(c.f.metadataDocs, id+" "+string(doc))
+	return c.f.verbErr
+}
 
 func (c *recordingClient) DialPort(_ context.Context, id string, port uint16) (net.Conn, error) {
 	c.f.mu.Lock()

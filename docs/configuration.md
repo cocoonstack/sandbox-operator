@@ -47,19 +47,21 @@ helm upgrade --install sandbox-operator ./helm \
 
 Image tags default to `latest`, so the chart renders with no `--set` at all;
 pin both to a release tag in production. The e2b surface is off by default and
-needs three values together:
+needs four values together:
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
   --namespace sandbox-system --create-namespace \
   --set apiserver.e2b.enabled=true \
   --set apiserver.e2b.domain=sandbox.example.com \
-  --set apiserver.e2b.apiKeySecret.name=e2b-api-keys
+  --set apiserver.e2b.apiKeySecret.name=e2b-api-keys \
+  --set apiserver.e2b.envdSecret.secretName=e2b-envd-secret
 ```
 
 Enabling it without the key secret fails at render
 (`apiserver.e2b.apiKeySecret.name is required when apiserver.e2b.enabled is
-true`) — the surface refuses to serve unauthenticated.
+true`) — the surface refuses to serve unauthenticated — and so does enabling it
+without `apiserver.e2b.envdSecret.value` or `.secretName`.
 
 The chart's default render is 16 objects: the
 `nodeinventories.sandbox.cocoonstack.io` CRD, the apiserver's Deployment,
@@ -70,7 +72,8 @@ rules, the `system:auth-delegator` binding, the leader-election Role, and the
 read `extension-apiserver-authentication`), and the cert-manager chain — a
 self-signed Issuer, a CA Certificate, a CA Issuer and the serving Certificate.
 Enabling the e2b surface adds the proxy's Deployment, Service, ServiceAccount
-and its own `nodeinventories` ClusterRole and binding (21 objects): the proxy
+and its own `nodeinventories` ClusterRole and binding (21 objects, 22 when the
+chart renders the envd secret from `apiserver.e2b.envdSecret.value`): the proxy
 is that surface's data plane and renders only with it. Every other object goes
 to `.Release.Namespace`; object names are fixed (`sandbox-apiserver`,
 `sandbox-envd-proxy`), not release-prefixed, so the release name is free.
@@ -171,11 +174,12 @@ node never goes stale, so an upgrade never empties the fleet.
 | `--e2b-bind-address` | `:8080` | Address the e2b-compatible surface listens on. |
 | `--e2b-namespace` | `default` | Namespace a key that names none claims in, and where anonymous claims land; e2b has no namespace concept. |
 | `--e2b-domain` | — | Base domain the SDK derives the in-sandbox envd host from, as `{port}-{sandboxID}.{domain}`. Required with `--enable-e2b-api`: without it a created sandbox has no reachable data plane. |
-| `--e2b-envd-version` | `0.4.0` when empty | envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one. |
+| `--e2b-envd-version` | `0.8.0` when empty | envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one. |
 | `--e2b-default-timeout` | `300` when `0` | Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for. |
 | `--e2b-api-key-file` | — | Path to a file (Secret mount) of accepted e2b API keys, one per line as `key` or `key namespace`, presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, `--e2b-namespace` when none is given. |
 | `--e2b-allow-anonymous` | `false` | Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port. |
 | `--e2b-template-alias-file` | — | Path to a file of template aliases, one per line as `alias pool-image`, so a create naming the alias (the SDK's default is `base`) claims from that image's pool. The chart writes `apiserver.e2b.templateAliases` to it. |
+| `--e2b-envd-secret-file` | — | Path to a file (Secret mount) holding the key every sandbox's envd access token derives from; the e2b surface and the envd-proxy must read the same one. Required with `--enable-e2b-api`. |
 
 Startup fails when `--enable-e2b-api` is set with neither a key file nor
 `--e2b-allow-anonymous`, and when `--e2b-domain` is empty. Details of the
@@ -205,6 +209,8 @@ informer and relays the request into the owning node's guest-port endpoint.
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext h2c behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Private key for `--tls-cert-file`. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2. |
+| `--e2b-envd-secret-file` | — | The e2b surface's envd secret file; access tokens are verified against it. Required. |
+| `--sandboxd-token` / `--sandboxd-token-file` | — | Fleet sandboxd `api_token`, which reads a sandbox's claim token by id; the file overrides the literal. |
 | `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
 
 The two TLS flags must be set together. Routing, authorization and failure
@@ -225,11 +231,14 @@ mapping are in [envd-proxy](envd-proxy.md).
 | `apiserver.e2b.enabled` | `false` | `--enable-e2b-api` |
 | `apiserver.e2b.domain` | `""` | `--e2b-domain`; required once enabled |
 | `apiserver.e2b.namespace` | `default` | `--e2b-namespace` |
-| `apiserver.e2b.envdVersion` | `""` | `--e2b-envd-version`; empty takes the binary's `0.4.0` |
+| `apiserver.e2b.envdVersion` | `""` | `--e2b-envd-version`; empty takes the binary's `0.8.0` |
 | `apiserver.e2b.defaultTimeoutSeconds` | `0` | `--e2b-default-timeout`; `0` takes the binary's 300 |
 | `apiserver.e2b.port` | `8080` | `--e2b-bind-address` |
 | `apiserver.e2b.apiKeySecret.name` | `""` | Secret of accepted `X-API-KEY` values, mounted for `--e2b-api-key-file`; required once e2b is enabled |
 | `apiserver.e2b.apiKeySecret.key` | `keys` | Key within that Secret |
+| `apiserver.e2b.envdSecret.value` | `""` | Key the chart renders into a Secret for `--e2b-envd-secret-file`; set this or `secretName` once e2b is enabled |
+| `apiserver.e2b.envdSecret.secretName` | `""` | Existing Secret for `--e2b-envd-secret-file` when `value` is empty; mounted into the apiserver and the proxy |
+| `apiserver.e2b.envdSecret.key` | `secret` | Key within that Secret |
 | `apiserver.resources` | 100m / 128Mi requests, 512Mi limit | Apiserver resources |
 | `envdProxy.image.repository` | `ghcr.io/cocoonstack/sandbox-envd-proxy` | Proxy image |
 | `envdProxy.image.tag` | `latest` | Pin a release tag in production |

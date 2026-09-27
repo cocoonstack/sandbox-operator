@@ -18,9 +18,10 @@ type NewSandbox struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// AutoPause archives the sandbox at lease end instead of destroying it; the internet lane refuses it.
 	AutoPause *bool `json:"autoPause,omitempty"`
-	// EnvVars and Secure name guarantees this backend cannot give, so a request that asks for one is refused rather than quietly dropped.
+	// EnvVars becomes envd's default environment for every process the sandbox starts.
 	EnvVars map[string]string `json:"envVars,omitempty"`
-	Secure  *bool             `json:"secure,omitempty"`
+	// Secure=false asks for a sandbox reachable without its token, which this backend never hands out.
+	Secure *bool `json:"secure,omitempty"`
 	// AllowInternetAccess selects the warm pool's network lane: true picks the
 	// egress-capable pool, false/nil the isolated one.
 	AllowInternetAccess *bool `json:"allow_internet_access,omitempty"`

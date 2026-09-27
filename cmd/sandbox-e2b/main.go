@@ -94,7 +94,7 @@ func run() error {
 		<-ctx.Done()
 		return nil
 	}
-	resolver, err := envdproxy.NewResolver(store, src, "")
+	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(src), store, src, "", opts.EnvdSecret)
 	if err != nil {
 		return err
 	}

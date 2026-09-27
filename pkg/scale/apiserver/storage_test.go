@@ -312,6 +312,10 @@ func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error)
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
 
+func (f *fakeStore) SetInstanceMetadata(context.Context, string, string, []byte) error {
+	return f.verbErr
+}
+
 func (f *fakeStore) DialGuestPort(context.Context, string, string, uint16) (net.Conn, error) {
 	return nil, f.verbErr
 }
