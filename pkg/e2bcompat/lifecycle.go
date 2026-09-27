@@ -229,10 +229,11 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	logger := log.WithFunc("e2bcompat.deleteSnapshot")
 	snapshotID := r.PathValue("snapshotID")
 	snaps, complete, err := s.snapshotsOf(r)
 	if err != nil {
-		log.WithFunc("e2bcompat.deleteSnapshot").Errorf(r.Context(), err, "e2b delete snapshot: listing failed snapshotID=%s", snapshotID)
+		logger.Errorf(r.Context(), err, "e2b delete snapshot: listing failed snapshotID=%s", snapshotID)
 		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
 		return
 	}
@@ -246,7 +247,7 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteSnapshot(r.Context(), snaps[i].Node, snapshotID); err != nil {
-		log.WithFunc("e2bcompat.deleteSnapshot").Errorf(r.Context(), err, "e2b delete snapshot failed node=%s snapshotID=%s", snaps[i].Node, snapshotID)
+		logger.Errorf(r.Context(), err, "e2b delete snapshot failed node=%s snapshotID=%s", snaps[i].Node, snapshotID)
 		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot")
 		return
 	}
