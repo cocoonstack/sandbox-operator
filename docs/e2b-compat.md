@@ -35,7 +35,7 @@ sandbox-apiserver \
 | `--e2b-envd-secret-file` | — | **Required.** File holding the key every sandbox's `envd` access token derives from; the envd-proxy reads the same file. |
 | `--e2b-default-timeout` | `300` | Lease in seconds for a create that names no timeout, and what a refresh renews for. |
 | `--e2b-allow-anonymous` | `false` | Serve with **no** API key. Development only. |
-| `--e2b-template-alias-file` | — | File of template aliases, one per line as `alias pool-image` (`#` comments ignored). A create naming the alias claims from that image's pool. The SDKs create `base` when no template is named, so the file needs a `base` line for `Sandbox.create()` to work. The file is read at startup, so a change needs a restart. Startup fails on a malformed line or an alias named twice. |
+| `--e2b-template-alias-file` | — | File of template aliases, one per line as `alias pool-image [size]` (`#` comments ignored). A create naming the alias claims from that image's pool at `size`: `small` (the default), `medium` or `large`. The SDKs create `base` when no template is named, and the code-interpreter SDKs create `code-interpreter-v1`, so the file needs those lines for `Sandbox.create()` to work (see [Pools for the aliases](#pools-for-the-aliases)). The file is read at startup, so a change needs a restart. Startup fails on a malformed line, an unknown size or an alias named twice. |
 
 Startup **fails** if neither `--e2b-api-key-file` nor `--e2b-allow-anonymous` is
 set, so a misconfiguration cannot silently expose an open claim endpoint. It
@@ -102,6 +102,33 @@ import { Sandbox } from '@e2b/code-interpreter'
 // from, the same axis SandboxWarmPool keys on.
 const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 ```
+
+## Pools for the aliases
+
+Each key an alias names needs warm capacity: a `SandboxWarmPool` whose
+template maps to that image and size on Kubernetes, a sandboxd pool on a
+mesh. The e2b flavors' own defaults are:
+
+```text
+base                 ghcr.io/cocoonstack/sandbox/e2b-rt:24.04
+code-interpreter-v1  ghcr.io/cocoonstack/sandbox/e2b-ci:24.04  medium
+```
+
+A clone must not be handed out before `envd` (and on `e2b-ci` the interpreter)
+answers, so every node's config carries the pool's `warmup` for the key, as the
+sandbox repo's `docs/e2b.md` gives it. `warmup` is config-owned: `PUT
+/v1/pools` cannot set it, and the node keeps it for the key under whatever warm
+target the warm-pool driver applies:
+
+```json
+{"template": "ghcr.io/cocoonstack/sandbox/e2b-ci:24.04",
+ "net": "none", "size": "medium", "warm": 2,
+ "warmup": ["sh", "-c",
+   "for i in $(seq 1 1200); do curl -sf -m 1 -o /dev/null http://127.0.0.1:49983/health && curl -sf -m 1 -o /dev/null http://127.0.0.1:49999/health && exit 0; sleep 0.05; done; exit 1"]}
+```
+
+Without it a create can land on a clone whose interpreter is still starting,
+and its first `runCode` fails with `502`.
 
 ## Endpoint mapping
 
@@ -195,8 +222,8 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   including create, so a stored value creates the same sandbox again. `alias`
   carries the image's first alias in sort order, and the list's `template`
   filter accepts either spelling.
-- **Size class** is pinned (`small`) — e2b's `NewSandbox` carries no size
-  selector.
+- **Size class** comes from the alias. e2b's `NewSandbox` carries no size
+  selector, so a create naming an image directly claims `small`.
 - **Options this backend cannot honor are refused, not dropped.** `secure:
   false` (every sandbox here is reachable only with its own access token),
   `autoPause: true` with `allow_internet_access: true`

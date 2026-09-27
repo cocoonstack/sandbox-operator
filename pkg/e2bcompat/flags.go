@@ -48,7 +48,7 @@ func (f *Flags) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&f.AllowAnonymous, "e2b-allow-anonymous", f.AllowAnonymous,
 		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
 	fs.StringVar(&f.AliasesFile, "e2b-template-alias-file", f.AliasesFile,
-		"Path to a file of e2b template aliases, one per line as \"alias pool-image\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool.")
+		"Path to a file of e2b template aliases, one per line as \"alias pool-image [size]\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool at size, small when none is given.")
 	AddEnvdSecretFlag(fs, &f.EnvdSecretFile)
 }
 

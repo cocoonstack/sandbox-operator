@@ -85,7 +85,7 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `apiserver.e2b.port` | Port the e2b surface listens on | `8080` |
 | `apiserver.e2b.apiKeySecret.name` | Secret of accepted API keys; required once enabled | `""` |
 | `apiserver.e2b.apiKeySecret.key` | Key within that Secret | `keys` |
-| `apiserver.e2b.templateAliases` | Template aliases, one per line as `alias pool-image`; `base` makes `Sandbox.create()` work | `""` |
+| `apiserver.e2b.templateAliases` | Template aliases, one per line as `alias pool-image [size]`; `base` makes `Sandbox.create()` work, `code-interpreter-v1` the code-interpreter SDK's | `""` |
 | `apiserver.e2b.envdSecret.value` | Key every sandbox's envd access token derives from; the chart renders it into a Secret. Set this or `secretName` once enabled | `""` |
 | `apiserver.e2b.envdSecret.secretName` | Existing Secret holding that key, used when `value` is empty; mounted into the apiserver and the envd-proxy | `""` |
 | `apiserver.e2b.envdSecret.key` | Key within that Secret | `secret` |
