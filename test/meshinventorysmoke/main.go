@@ -1,10 +1,6 @@
 //go:build meshinventorysmoke
 
-// meshinventorysmoke drives the mesh inventory source against a live sandboxd mesh with no Kubernetes:
-// it lists the nodes, prints each node's capacity, claims one sandbox through the store and releases it.
-//
-//	go run -tags meshinventorysmoke ./test/meshinventorysmoke \
-//	  -seeds 10.0.0.5:7777 -token-file /etc/sandboxd/token -template ghcr.io/cocoonstack/sandbox/rt:24.04
+// meshinventorysmoke lists a live sandboxd mesh through the mesh inventory source, then claims and releases one sandbox through the store.
 package main
 
 import (
