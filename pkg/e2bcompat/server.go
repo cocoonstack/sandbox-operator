@@ -62,6 +62,8 @@ const (
 var (
 	errSandboxNotFound = errors.New("sandbox not found")
 	errNoOwningNode    = errors.New("sandbox inventory entry names no owning node")
+
+	sizeClasses = []string{scale.SizeClassSmall, scale.SizeClassMedium, scale.SizeClassLarge}
 )
 
 // Options configures the compat server.
@@ -80,7 +82,7 @@ type Options struct {
 	AllowAnonymous bool
 	// Inventory enumerates the fleet's nodes; without it template and snapshot listing fail rather than report none.
 	Inventory scale.InventorySource
-	// TemplateAliases maps a templateID to a pool image, each entry "alias image"; the SDK's default "base" is one.
+	// TemplateAliases maps a templateID to a pool image and size, each entry "alias image [size]"; the SDK's default "base" is one.
 	TemplateAliases []string
 	// EnvdSecret keys every sandbox's envd access token, AccessToken(EnvdSecret, claim token); the edge shares it.
 	EnvdSecret []byte
@@ -95,7 +97,7 @@ type Server struct {
 	opts     Options
 	keys     map[string]string
 
-	aliases      map[string]string
+	aliases      map[string]scale.PoolKey
 	imageAliases map[string][]string
 }
 
@@ -135,16 +137,23 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if len(opts.EnvdSecret) == 0 {
 		return nil, errors.New("e2bcompat: an envd secret is required: every sandbox's access token derives from it")
 	}
-	aliases, imageAliases := map[string]string{}, map[string][]string{}
+	aliases, imageAliases := map[string]scale.PoolKey{}, map[string][]string{}
 	for _, entry := range opts.TemplateAliases {
 		fields := strings.Fields(entry)
-		if len(fields) != 2 {
-			return nil, fmt.Errorf("e2bcompat: template alias entry %q: want \"alias image\"", entry)
+		if len(fields) < 2 || len(fields) > 3 {
+			return nil, fmt.Errorf("e2bcompat: template alias entry %q: want \"alias image [size]\"", entry)
 		}
 		if _, dup := aliases[fields[0]]; dup {
 			return nil, fmt.Errorf("e2bcompat: template alias %q is named twice", fields[0])
 		}
-		aliases[fields[0]] = fields[1]
+		key := scale.PoolKey{Template: fields[1], Size: scale.SizeClassSmall}
+		if len(fields) == 3 {
+			if !slices.Contains(sizeClasses, fields[2]) {
+				return nil, fmt.Errorf("e2bcompat: template alias %q: size %q is not one of %v", fields[0], fields[2], sizeClasses)
+			}
+			key.Size = fields[2]
+		}
+		aliases[fields[0]] = key
 		imageAliases[fields[1]] = append(imageAliases[fields[1]], fields[0])
 	}
 	for _, aliasNames := range imageAliases {
@@ -275,12 +284,8 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := names.SimpleNameGenerator.GenerateName(namePrefix)
-	image := s.poolImage(req.TemplateID)
-	pool := scale.PoolKey{
-		Template: image,
-		Net:      netFor(req.AllowInternetAccess),
-		Size:     scale.SizeClassSmall,
-	}
+	pool := s.poolKey(req.TemplateID)
+	pool.Net = netFor(req.AllowInternetAccess)
 	opts := scale.ClaimOptions{TTLSeconds: s.timeoutSeconds(req.Timeout), Metadata: req.Metadata}
 	if req.AutoPause != nil && *req.AutoPause {
 		opts.OnExpire = sandboxd.ExpireArchive
@@ -310,8 +315,8 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, Sandbox{
-		TemplateID:      image,
-		Alias:           s.aliasOf(image),
+		TemplateID:      pool.Template,
+		Alias:           s.aliasOf(pool.Template),
 		SandboxID:       PublicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,
@@ -350,7 +355,7 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
-	filter.template = s.poolImage(filter.template)
+	filter.template = s.poolKey(filter.template).Template
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
 		log.WithFunc("e2bcompat.listed").Error(r.Context(), err, "e2b list: store list failed")
@@ -488,8 +493,12 @@ func (s *Server) aliasOf(image string) string {
 	return ""
 }
 
-func (s *Server) poolImage(templateID string) string {
-	return cmp.Or(s.aliases[templateID], templateID)
+// poolKey is the pool a create of templateID claims from: an alias's image and size, else that image at small.
+func (s *Server) poolKey(templateID string) scale.PoolKey {
+	if key, ok := s.aliases[templateID]; ok {
+		return key
+	}
+	return scale.PoolKey{Template: templateID, Size: scale.SizeClassSmall}
 }
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires

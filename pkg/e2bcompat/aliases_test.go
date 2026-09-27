@@ -15,22 +15,22 @@ import (
 )
 
 func TestACreateNamingAnAliasClaimsFromItsPool(t *testing.T) {
-	for templateID, pool := range map[string]string{"base": "reg/rt:24.04", "reg/py:3.12": "reg/py:3.12"} {
+	for templateID, want := range map[string]struct{ pool, size, alias string }{
+		"base":                {"reg/rt:24.04", scale.SizeClassSmall, "base"},
+		"code-interpreter-v1": {"reg/ci:24.04", scale.SizeClassMedium, "code-interpreter-v1"},
+		"reg/py:3.12":         {"reg/py:3.12", scale.SizeClassSmall, ""},
+	} {
 		t.Run(templateID, func(t *testing.T) {
 			store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}}
-			h := newTestServer(t, store, withAliases("base reg/rt:24.04"))
+			h := newTestServer(t, store, withAliases("base reg/rt:24.04", "code-interpreter-v1 reg/ci:24.04 medium"))
 
 			w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"`+templateID+`"}`, testKey)
 			require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-			assert.Equal(t, pool, store.claimPool.Template)
+			assert.Equal(t, [2]string{want.pool, want.size}, [2]string{store.claimPool.Template, store.claimPool.Size})
 			var got Sandbox
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-			assert.Equal(t, pool, got.TemplateID, "templateID is the pool image whichever spelling created it")
-			if pool == "reg/rt:24.04" {
-				assert.Equal(t, "base", got.Alias)
-			} else {
-				assert.Empty(t, got.Alias)
-			}
+			assert.Equal(t, want.pool, got.TemplateID, "templateID is the pool image whichever spelling created it")
+			assert.Equal(t, want.alias, got.Alias)
 		})
 	}
 }
@@ -89,7 +89,7 @@ func TestTheTemplateListCarriesEachPoolsAliases(t *testing.T) {
 }
 
 func TestNewServerRefusesAMalformedAliasTable(t *testing.T) {
-	for _, entries := range [][]string{{"base"}, {"base reg/rt:24.04 extra"}, {"base reg/rt:24.04", "base reg/py:3.12"}} {
+	for _, entries := range [][]string{{"base"}, {"base reg/rt:24.04 huge"}, {"base reg/rt:24.04 medium extra"}, {"base reg/rt:24.04", "base reg/py:3.12"}} {
 		_, err := NewServer(&fakeStore{}, Options{EnvdSecret: []byte(testEnvdSecret), Domain: testDomain, APIKeys: []string{testKey}, TemplateAliases: entries})
 		assert.Error(t, err, strings.Join(entries, " | "))
 	}
