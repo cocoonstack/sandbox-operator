@@ -138,13 +138,19 @@ pools. An empty sandboxd token leaves it fail-closed: it logs and sets no pools.
 
 | Flag | Default | Help |
 |---|---|---|
-| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` is older than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
+| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
 
 A node that stops publishing, because it died or its vk-sandbox stopped,
-leaves every read and claim path once its `publishedAt` passes this age. At
-vk-sandbox's default 30 s publish cadence that is three missed publishes. Keep
-it above vk-sandbox's `--publish-interval`. The age is measured against this
-host's clock, so the nodes and the control plane need synchronized clocks.
+leaves every read and claim path once its `publishedAt` trails the newest
+publish by more than this. At vk-sandbox's default 30 s publish cadence that is
+three missed publishes. Keep it above vk-sandbox's `--publish-interval`.
+
+The age is measured against the newest publish the process has seen, capped by
+its own clock. A control-plane write outage freezes every stamp together, so it
+never empties the fleet, and a node's clock matters only relative to the other
+nodes: one running ahead cannot evict the rest. A fleet whose nodes all stop
+publishing at once, or a one-node fleet, keeps its last inventory until the
+nodes publish again.
 
 The window works on a node once the `nodeinventories` CRD from `helm/crds` is
 applied and that node runs a vk-sandbox that stamps `publishedAt`. An older CRD
@@ -193,7 +199,7 @@ informer and relays the request into the owning node's guest-port endpoint.
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext h2c behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Private key for `--tls-cert-file`. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2. |
-| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` is older than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
+| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
 
 The two TLS flags must be set together. Routing, authorization and failure
 mapping are in [envd-proxy](envd-proxy.md).

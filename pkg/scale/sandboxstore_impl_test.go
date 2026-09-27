@@ -286,7 +286,7 @@ func TestPublisher_RebuildsFromLiveAfterLoss(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, src.ObjectCount())
 
-	require.NoError(t, src.Delete(ctx, "n1"))
+	src.Remove("n1")
 	require.Equal(t, 0, src.ObjectCount())
 
 	live.entries = []InventoryEntry{entry("ns/a", "Running"), entry("ns/b", "Running")}

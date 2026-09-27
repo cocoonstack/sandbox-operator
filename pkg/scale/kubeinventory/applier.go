@@ -39,13 +39,3 @@ func (a *ssaApplier) Apply(ctx context.Context, inv *scale.NodeInventory) error 
 	}
 	return nil
 }
-
-func (a *ssaApplier) Delete(ctx context.Context, node string) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(scale.NodeInventoryGVK)
-	u.SetName(node)
-	if err := client.IgnoreNotFound(a.c.Delete(ctx, u)); err != nil {
-		return fmt.Errorf("kubeinventory: delete node %q inventory: %w", node, err)
-	}
-	return nil
-}

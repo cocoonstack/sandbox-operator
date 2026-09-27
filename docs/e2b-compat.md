@@ -146,11 +146,10 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 - **A node that stops publishing leaves after `--inventory-stale-after`**
   (90 s by default). Until then a dead node's sandboxes stay listed and a
   claim can still sample it; past it they leave `GET /sandboxes`, and
-  `GET`, `DELETE` and the verbs on them answer `404`. A vk-sandbox that exits
-  deletes its inventory at once, so while it restarts the node's live
-  sandboxes are absent: `DELETE` answers `404` and the kill is dropped, and
-  the data plane answers `502`. A vk-sandbox that predates `publishedAt` never
-  goes stale.
+  `GET`, `DELETE` and the verbs on them answer `404`. The window is measured
+  against the fleet's newest publish, so a control-plane outage never drops
+  a node, and a vk-sandbox restart inside the window is invisible. A
+  vk-sandbox that predates `publishedAt` never goes stale.
 - **`envdVersion`** is reported as `0.4.0` unless `--e2b-envd-version` says
   otherwise. The SDK version-compares it and *kills the sandbox* if it cannot
   parse it, so it is always sent. Set it to the version actually installed in

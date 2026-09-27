@@ -539,8 +539,6 @@ type NodeLiveSource interface {
 // InventoryApplier server-side-applies a NodeInventory object.
 type InventoryApplier interface {
 	Apply(ctx context.Context, inv *NodeInventory) error
-	// Delete removes node's inventory, and a missing one is success.
-	Delete(ctx context.Context, node string) error
 }
 
 var (
@@ -586,12 +584,12 @@ func (s *StaticInventorySource) Partition(node string) {
 	s.partition[node] = struct{}{}
 }
 
-func (s *StaticInventorySource) Delete(_ context.Context, node string) error {
+// Remove drops a node's inventory object entirely (lost inventory).
+func (s *StaticInventorySource) Remove(node string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.inv, node)
 	delete(s.partition, node)
-	return nil
 }
 
 func (s *StaticInventorySource) ListNodes(_ context.Context) ([]string, error) {
