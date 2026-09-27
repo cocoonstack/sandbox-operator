@@ -40,6 +40,7 @@ import (
 	"k8s.io/apiserver/pkg/storage/names"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
@@ -86,6 +87,15 @@ type Options struct {
 	TemplateAliases []string
 	// EnvdSecret keys every sandbox's envd access token, AccessToken(EnvdSecret, claim token); the edge shares it.
 	EnvdSecret []byte
+	// Builds serves the template build API when Parallel is set; builds run in this process.
+	Builds BuildOptions
+}
+
+// BuildOptions bounds the in-process template builds.
+type BuildOptions struct {
+	Parallel int
+	Timeout  time.Duration
+	LogLines int
 }
 
 type namespaceKey struct{}
@@ -99,6 +109,7 @@ type Server struct {
 
 	aliases      map[string]scale.PoolKey
 	imageAliases map[string][]string
+	builds       *e2bbuild.Executor
 }
 
 // NewServer builds a compat server. It fails when no API key is configured and
@@ -159,7 +170,11 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	for _, aliasNames := range imageAliases {
 		slices.Sort(aliasNames)
 	}
-	return &Server{store: store, resolver: resolver, opts: opts, keys: keys, aliases: aliases, imageAliases: imageAliases}, nil
+	s := &Server{store: store, resolver: resolver, opts: opts, keys: keys, aliases: aliases, imageAliases: imageAliases}
+	if b := opts.Builds; b.Parallel > 0 {
+		s.builds = e2bbuild.New(store, b.Parallel, b.Timeout, b.LogLines)
+	}
+	return s, nil
 }
 
 // Handler returns the routed, authenticated HTTP handler.
@@ -200,6 +215,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /templates/tags", s.auth(http.HandlerFunc(s.deleteTemplateTags)))
 	// e2b addresses a snapshot as a template on delete.
 	mux.Handle("DELETE /templates/{templateID}", s.auth(http.HandlerFunc(s.deleteTemplate)))
+	if s.builds != nil {
+		mux.Handle("POST /v3/templates", s.auth(http.HandlerFunc(s.requestBuild)))
+		mux.Handle("POST /v2/templates/{templateID}/builds/{buildID}", s.auth(http.HandlerFunc(s.startBuild)))
+		mux.Handle("GET /templates/{templateID}/builds/{buildID}/status", s.auth(http.HandlerFunc(s.buildStatus)))
+	}
 	return mux
 }
 

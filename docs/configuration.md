@@ -71,12 +71,15 @@ rules, the `system:auth-delegator` binding, the leader-election Role, and the
 `sandbox-apiserver-auth-reader` RoleBinding that must live in `kube-system` to
 read `extension-apiserver-authentication`), and the cert-manager chain — a
 self-signed Issuer, a CA Certificate, a CA Issuer and the serving Certificate.
-Enabling the e2b surface adds the proxy's Deployment, Service, ServiceAccount
-and its own `nodeinventories` ClusterRole and binding (21 objects, 22 when the
-chart renders the envd secret from `apiserver.e2b.envdSecret.value`): the proxy
-is that surface's data plane and renders only with it. Every other object goes
-to `.Release.Namespace`; object names are fixed (`sandbox-apiserver`,
-`sandbox-envd-proxy`), not release-prefixed, so the release name is free.
+Enabling the e2b surface adds its own Service, `sandbox-apiserver-e2b`, and the
+proxy's Deployment, Service, ServiceAccount and `nodeinventories` ClusterRole and
+binding (22 objects, 23 when the chart renders the envd secret from
+`apiserver.e2b.envdSecret.value`): the proxy is that surface's data plane and
+renders only with it. The e2b port has a Service of its own so that the
+build affinity (`apiserver.e2b.builds`) never pins the aggregated API. Every
+other object goes to `.Release.Namespace`; object names are fixed
+(`sandbox-apiserver`, `sandbox-apiserver-e2b`, `sandbox-envd-proxy`), not
+release-prefixed, so the release name is free.
 
 It ships no upstream CRD.
 
@@ -180,6 +183,10 @@ node never goes stale, so an upgrade never empties the fleet.
 | `--e2b-allow-anonymous` | `false` | Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port. |
 | `--e2b-template-alias-file` | — | Path to a file of template aliases, one per line as `alias pool-image [size]`, so a create naming the alias (the SDK's default is `base`) claims from that image's pool at that size, `small` when none is given. The chart writes `apiserver.e2b.templateAliases` to it. |
 | `--e2b-envd-secret-file` | — | Path to a file (Secret mount) holding the key every sandbox's envd access token derives from; the e2b surface and the envd-proxy must read the same one. Required with `--enable-e2b-api`. |
+| `--e2b-builds` | `false` | Serve the e2b template build API; builds run in this process. |
+| `--e2b-build-parallel` | `2` | Builds that run at once. |
+| `--e2b-build-timeout` | `30m` | Bound on one build and the lease of its sandbox. |
+| `--e2b-build-log-lines` | `10000` | Log lines kept per build. |
 
 Startup fails when `--enable-e2b-api` is set with neither a key file nor
 `--e2b-allow-anonymous`, and when `--e2b-domain` is empty. Details of the

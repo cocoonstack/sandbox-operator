@@ -126,6 +126,7 @@ type SandboxdClient interface {
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
 	DeleteTemplate(ctx context.Context, key sandboxd.PoolKey) error
+	Promote(ctx context.Context, id, template string) (sandboxd.PoolKey, string, error)
 	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string) error
 	Info(ctx context.Context) (*sandboxd.NodeInfo, error)
 	DialPort(ctx context.Context, id string, port uint16) (net.Conn, error)

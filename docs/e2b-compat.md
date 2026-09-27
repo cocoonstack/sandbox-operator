@@ -36,6 +36,10 @@ sandbox-apiserver \
 | `--e2b-default-timeout` | `300` | Lease in seconds for a create that names no timeout, and what a refresh renews for. |
 | `--e2b-allow-anonymous` | `false` | Serve with **no** API key. Development only. |
 | `--e2b-template-alias-file` | — | File of template aliases, one per line as `alias pool-image [size]` (`#` comments ignored). A create naming the alias claims from that image's pool at `size`: `small` (the default), `medium` or `large`. The SDKs create `base` when no template is named, and the code-interpreter SDKs create `code-interpreter-v1`, so the file needs those lines for `Sandbox.create()` to work (see [Pools for the aliases](#pools-for-the-aliases)). The file is read at startup, so a change needs a restart. Startup fails on a malformed line, an unknown size or an alias named twice. |
+| `--e2b-builds` | `false` | Serve the [template build API](#template-builds). |
+| `--e2b-build-parallel` | `2` | Builds that run at once; a start beyond them answers `429` and the build stays waiting. |
+| `--e2b-build-timeout` | `30m` | Bound on one build, claim through publish, and the lease of its sandbox. |
+| `--e2b-build-log-lines` | `10000` | Log lines kept per build; later lines are dropped. |
 
 Startup **fails** if neither `--e2b-api-key-file` nor `--e2b-allow-anonymous` is
 set, so a misconfiguration cannot silently expose an open claim endpoint. It
@@ -151,6 +155,7 @@ and its first `runCode` fails with `502`.
 | `GET /templates/{templateID}` | the namespace's built templates | One `TemplateBuild` (`ready`) per content digest the holders report, its `buildID` that digest's UUIDv5. `404` for anything else, a pool image included (its message says so), `400` for a name over the budget. |
 | `PATCH /templates/{templateID}` | nothing | `200` for a built template, `public` accepted and ignored: every template is visible to every key of the namespace. `404` otherwise. |
 | `POST /templates/tags`, `DELETE /templates/tags`, `GET /templates/{templateID}/tags` | the template's sandboxd labels (`PUT /v1/templates/labels`) on every holder | A tag is a label on the template's record, its name the key and the content digest it points at the value, so every replica and the mesh front agree and a restart keeps it. `target` is `name` or `name:tag`; a tag points at the target's build (`default` or none means the current one). A write reads the current labels from a holder itself, merges, and writes the whole map to every holder; two writes racing from two replicas keep the later one. A tag whose digest no holder reports any more is dropped, and a rebuild (re-promote) clears the template's tags. |
+| `POST /v3/templates`, `POST /v2/templates/{templateID}/builds/{buildID}`, `GET /templates/{templateID}/builds/{buildID}/status` | the [build executor](#template-builds) | Served with `--e2b-builds`. |
 | `GET /templates/aliases/{alias}` | the alias table, then the namespace's built templates, then the fleet's pools | `200 {"templateID": "…", "public": true}` for an alias the table names (its pool image), a built template (its name) or an image a pool advertises, else `404`. The alias table wins a name clash. The SDKs call this to check whether a template exists. |
 | `GET /sandboxes/{id}/metrics` | `store.Read`, then envd `GET /metrics` | One live sample read from envd's `/metrics` inside the guest, with the sandbox's access token, through the owning node's passive guest-port relay; the node's record comes first, so a paused sandbox is answered without a dial (sandboxd built from 288103d or later): `cpuCount`, `cpuUsedPct`, `memUsed`, `memTotal`, `memCache`, `diskUsed` and `diskTotal` as the guest reports them. A paused or archived sandbox, or one mid pause, answers `[]` and is not woken. `start` and `end` are ignored: there is no history. |
 | `GET /sandboxes/metrics` | the same, per id | `sandbox_ids` is 1 to 100 distinct comma-separated ids (else `400`). Answers `{"sandboxes": {id: sample}}` for the running ones among them; a paused sandbox, an id the key cannot see, or one whose read fails is left out. |
@@ -171,6 +176,41 @@ the slash and `<name>` together fit sandboxd's 63-character name budget after th
 `e2b/` prefix; a longer name is refused with `400` naming the room left. Claiming
 a built template is not served yet: a create naming one answers `503` as a
 drained pool does.
+
+## Template builds
+
+With `--e2b-builds`, `Template.build()` on the unmodified SDKs builds a template
+from an image. `POST /v3/templates` opens a waiting build of the name (a `:tag`
+on the name joins `tags`); `cpuCount` and `memoryMB` pick the size class by the
+same thresholds a `SandboxTemplate`'s resources follow, and without them the
+image's alias size (else `small`) holds. `POST
+/v2/templates/{templateID}/builds/{buildID}` resolves `fromImage` like a create's
+`templateID` — the alias table, else the image itself — so the SDK's default base
+needs an alias line such as `e2bdev/base ghcr.io/cocoonstack/sandbox/e2b-rt:24.04`.
+The build then claims a sandbox of that pool on the `none` lane, promotes it as
+`e2b/<namespace>/<name>`, deletes the name on every other node that held an
+earlier build, sets the requested tags, and releases the claim; a rebuild
+replaces the previous build. Steps, `fromTemplate`, `fromImageRegistry`,
+`startCmd` and `readyCmd` answer `400`; `force` is accepted and ignored (there is
+no layer cache); `waiting` stays reported while every build slot runs, and the
+start answers `429`.
+
+`GET /templates/{templateID}/builds/{buildID}/status` pages `logEntries` by
+`logsOffset` and `limit` and filters them by `level`; a failed build reports
+`reason.step` `base` for the claim or `finalize` for the promote and the
+publish. The `buildID` a build answers with is a random UUID that names this
+build attempt; once it is ready, the template list reports the UUIDv5 of the
+published content digest, so the two differ.
+
+Builds live in the process that took `POST /v3/templates`, one goroutine each: a
+status poll that reaches another replica answers `404 build not found on this
+replica`. While builds are on, the chart sets `sessionAffinity: ClientIP` on the
+e2b Service, `sandbox-apiserver-e2b`, so a client reaching it directly stays on
+one replica; that keys on the source address the Service sees, so an ingress or
+load balancer in front that routes to endpoints itself, or rewrites the source,
+needs its own stickiness (or run one replica). A finished build is kept for an hour. A restart
+loses a build in flight; the SDK's next poll throws, and a rebuild converges
+because a promote replaces.
 
 ## Limits worth knowing
 

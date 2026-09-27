@@ -42,6 +42,11 @@ apiserver:
       value: ""
       secretName: ""
       key: secret
+    # builds serves Template.build. A build lives in the replica that took it,
+    # so the Service pins each client to one replica while builds are on.
+    builds:
+      enabled: false
+      parallel: 2
   resources:
     requests:
       cpu: 100m

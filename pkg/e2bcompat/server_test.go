@@ -570,6 +570,9 @@ type fakeStore struct {
 	deletedTemplates    []string
 	deleteTemplateErr   map[string]error
 	fleet               *scale.StaticInventorySource
+	promoted            []string
+	promoteErr          error
+	live                map[string][]scale.PromotedTemplate
 
 	envdCalls    []string
 	initStatus   int
@@ -654,6 +657,13 @@ func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 	return nil
 }
 
+func (f *fakeStore) Promote(_ context.Context, node, id, template string) (scale.PoolKey, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.promoted = append(f.promoted, node+" "+id+" "+template)
+	return scale.PoolKey{Template: template, Net: scale.NetDefault, Size: f.claimPool.Size}, "sha256:" + id, f.promoteErr
+}
+
 // SetTemplateLabels writes straight into the fleet the test serves, so a live read sees it at once.
 func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string) error {
 	inv, err := f.fleet.NodeInventory(ctx, node)
@@ -670,6 +680,13 @@ func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scal
 }
 
 func (f *fakeStore) NodeTemplates(ctx context.Context, node string) ([]scale.PromotedTemplate, error) {
+	if f.live != nil {
+		held, ok := f.live[node]
+		if !ok {
+			return nil, errors.New("connection refused")
+		}
+		return held, nil
+	}
 	inv, err := f.fleet.NodeInventory(ctx, node)
 	if err != nil {
 		return nil, err

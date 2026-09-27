@@ -232,6 +232,61 @@ type TemplateTag struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// TemplateBuildRequestV3 is the POST /v3/templates body; name may carry a ":tag", and cpuCount/memoryMB pick the size class.
+type TemplateBuildRequestV3 struct {
+	Name     string   `json:"name"`
+	Alias    string   `json:"alias"`
+	Tags     []string `json:"tags"`
+	CPUCount int32    `json:"cpuCount"`
+	MemoryMB int32    `json:"memoryMB"`
+}
+
+// TemplateRequestResponseV3 is the POST /v3/templates reply.
+type TemplateRequestResponseV3 struct {
+	TemplateID string   `json:"templateID"`
+	BuildID    string   `json:"buildID"`
+	Public     bool     `json:"public"`
+	Names      []string `json:"names"`
+	Tags       []string `json:"tags"`
+	Aliases    []string `json:"aliases"`
+}
+
+// TemplateBuildStartV2 is the POST /v2/templates/{templateID}/builds/{buildID} body; only fromImage is served yet.
+type TemplateBuildStartV2 struct {
+	FromImage         string            `json:"fromImage"`
+	FromTemplate      string            `json:"fromTemplate"`
+	FromImageRegistry json.RawMessage   `json:"fromImageRegistry"`
+	Force             bool              `json:"force"`
+	Steps             []json.RawMessage `json:"steps"`
+	StartCmd          string            `json:"startCmd"`
+	ReadyCmd          string            `json:"readyCmd"`
+}
+
+// TemplateBuildInfo is the GET /templates/{templateID}/builds/{buildID}/status reply.
+type TemplateBuildInfo struct {
+	TemplateID string             `json:"templateID"`
+	BuildID    string             `json:"buildID"`
+	Status     string             `json:"status"`
+	Logs       []string           `json:"logs"`
+	LogEntries []BuildLogEntry    `json:"logEntries"`
+	Reason     *BuildStatusReason `json:"reason,omitempty"`
+}
+
+// BuildLogEntry is one build log line.
+type BuildLogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Level     string `json:"level"`
+	Step      string `json:"step,omitempty"`
+}
+
+// BuildStatusReason says why a build failed and at which step.
+type BuildStatusReason struct {
+	Message    string          `json:"message"`
+	Step       string          `json:"step,omitempty"`
+	LogEntries []BuildLogEntry `json:"logEntries"`
+}
+
 // TemplateAliasResponse is the GET /templates/aliases/{alias} reply (spec: TemplateAliasResponse).
 type TemplateAliasResponse struct {
 	TemplateID string `json:"templateID"`
