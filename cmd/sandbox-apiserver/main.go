@@ -8,7 +8,6 @@ package main
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -25,6 +24,8 @@ import (
 	"k8s.io/klog/v2"
 	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
@@ -37,6 +38,8 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
 	"github.com/cocoonstack/sandbox-operator/version"
 )
+
+const driverRestartDelay = 5 * time.Second
 
 // options has no etcd option because this server stores nothing.
 type options struct {
@@ -120,8 +123,7 @@ func run() error {
 	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
 	o.addFlags(fs)
 	_ = fs.Parse(os.Args[1:])
-	ctx, fail := context.WithCancelCause(genericapiserver.SetupSignalContext())
-	defer fail(nil)
+	ctx := genericapiserver.SetupSignalContext()
 	level := cmp.Or(os.Getenv("OPERATOR_LOG_LEVEL"), "info")
 	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: level, UseJSON: !stderrIsTerminal()}, ""); err != nil {
 		return fmt.Errorf("setup log: %w", err)
@@ -149,7 +151,7 @@ func run() error {
 	)
 
 	if o.WarmPoolDriver {
-		if err = startWarmPoolDriver(ctx, fail, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
+		if err = startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
 			return err
 		}
 	}
@@ -173,14 +175,11 @@ func run() error {
 	}
 	err = server.PrepareRun().RunWithContext(ctx)
 	stopE2B()
-	if cause := context.Cause(ctx); err == nil && !errors.Is(cause, context.Canceled) {
-		return cause
-	}
 	return err
 }
 
 // startWarmPoolDriver takes the cache-fed inv because the manager client reads NodeInventory unstructured, uncached.
-func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
+func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register extensions scheme: %w", err)
@@ -188,27 +187,49 @@ func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, rest
 	if err := cocoonv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register node inventory scheme: %w", err)
 	}
-	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
-		Scheme:                  scheme,
-		Metrics:                 metricsserver.Options{BindAddress: "0"},
-		HealthProbeBindAddress:  "0",
-		LeaderElection:          true,
-		LeaderElectionID:        "cocoon-warmpool-driver",
-		LeaderElectionNamespace: currentNamespace(),
-	})
-	if err != nil {
-		return fmt.Errorf("build warm-pool manager: %w", err)
-	}
-	driver := warmpool.New(mgr.GetClient(), inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{Interval: interval})
-	if err := driver.SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("set up warm-pool controller: %w", err)
-	}
-	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			fail(fmt.Errorf("warm-pool manager: %w", err))
+	build := func() (manager.Runnable, error) {
+		mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
+			Scheme:                  scheme,
+			Metrics:                 metricsserver.Options{BindAddress: "0"},
+			HealthProbeBindAddress:  "0",
+			LeaderElection:          true,
+			LeaderElectionID:        "cocoon-warmpool-driver",
+			LeaderElectionNamespace: currentNamespace(),
+			Controller:              config.Controller{SkipNameValidation: new(true)},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("build warm-pool manager: %w", err)
 		}
-	}()
+		driver := warmpool.New(mgr.GetClient(), inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{Interval: interval})
+		if err := driver.SetupWithManager(mgr); err != nil {
+			return nil, fmt.Errorf("set up warm-pool controller: %w", err)
+		}
+		return mgr, nil
+	}
+	mgr, err := build()
+	if err != nil {
+		return err
+	}
+	go runRestarting(ctx, mgr, build, driverRestartDelay)
 	return nil
+}
+
+func runRestarting(ctx context.Context, r manager.Runnable, build func() (manager.Runnable, error), delay time.Duration) {
+	logger := log.WithFunc("main.runRestarting")
+	for {
+		if r != nil {
+			logger.Error(ctx, r.Start(ctx), "warm-pool manager stopped; rebuilding it")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		var err error
+		if r, err = build(); err != nil {
+			logger.Error(ctx, err, "rebuild warm-pool manager")
+		}
+	}
 }
 
 // startE2BServer shares the aggregated apiserver's store, so an e2b claim is the node-local claim the Kubernetes path makes.
