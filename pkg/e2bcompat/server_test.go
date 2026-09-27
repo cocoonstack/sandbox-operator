@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -642,8 +643,8 @@ func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Metrics(context.Context, string, string) (scale.SandboxMetrics, bool, error) {
-	return scale.SandboxMetrics{}, false, nil
+func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (net.Conn, error) {
+	return nil, k8serrors.NewConflict(sandboxv1beta1.Resource("sandboxes"), id, errors.New("sandbox is paused"))
 }
 
 func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {

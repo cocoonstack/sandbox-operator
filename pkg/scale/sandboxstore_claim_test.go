@@ -448,10 +448,9 @@ type recordingFactory struct {
 
 	rows      map[string][]sandboxd.SandboxSummary
 	rowReads  []string
-	envd      sandboxd.EnvdMetrics
-	envdErr   error
-	envdErrs  map[string]error
-	envdCalls []string
+	dialErr   error
+	dialErrs  map[string]error
+	dialPorts []uint16
 	silent    string
 	ignoreRef bool
 }
@@ -510,14 +509,19 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
 
-func (c *recordingClient) EnvdMetrics(_ context.Context, id string) (sandboxd.EnvdMetrics, error) {
+func (c *recordingClient) DialPort(_ context.Context, id string, port uint16) (net.Conn, error) {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
-	c.f.envdCalls = append(c.f.envdCalls, id)
-	if err, ok := c.f.envdErrs[id]; ok {
-		return sandboxd.EnvdMetrics{}, err
+	c.f.dialPorts = append(c.f.dialPorts, port)
+	if err, ok := c.f.dialErrs[id]; ok {
+		return nil, err
 	}
-	return c.f.envd, c.f.envdErr
+	if c.f.dialErr != nil {
+		return nil, c.f.dialErr
+	}
+	conn, peer := net.Pipe()
+	_ = peer.Close()
+	return conn, nil
 }
 
 func (c *recordingClient) Sandbox(ctx context.Context, id string) (sandboxd.SandboxSummary, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,11 +15,8 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
-const (
-	// maxCheckpointName is sandboxd's name budget (types.NameRe).
-	maxCheckpointName = 63
-	metricsTimeout    = 2 * time.Second
-)
+// maxCheckpointName is sandboxd's name budget (types.NameRe).
+const maxCheckpointName = 63
 
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
@@ -31,21 +29,16 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	return nil
 }
 
-func (s *scatterGatherStore) Metrics(ctx context.Context, node, id string) (SandboxMetrics, bool, error) {
-	cl, err := s.nodeClient(ctx, node, "metrics", id)
+func (s *scatterGatherStore) DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error) {
+	cl, err := s.nodeClient(ctx, node, "port", id)
 	if err != nil {
-		return SandboxMetrics{}, false, err
+		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, metricsTimeout)
-	defer cancel()
-	m, err := cl.EnvdMetrics(ctx, id)
-	if he, ok := errors.AsType[*sandboxd.HTTPError](err); ok && he.StatusCode == http.StatusConflict {
-		return SandboxMetrics{}, false, nil
-	}
+	conn, err := cl.DialPort(ctx, id, port)
 	if err != nil {
-		return SandboxMetrics{}, false, nodeVerbError(err, "metrics", id, node)
+		return nil, nodeVerbError(err, "port", id, node)
 	}
-	return m, true, nil
+	return conn, nil
 }
 
 func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error) {

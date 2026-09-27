@@ -298,7 +298,7 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, "metrics")
 		return
 	}
-	m, live, err := s.store.Metrics(r.Context(), sb.Status.NodeName, claimIDOf(sb))
+	m, live, err := s.readEnvdMetrics(r.Context(), sb.Status.NodeName, claimIDOf(sb))
 	if err != nil {
 		s.writeVerbError(w, r, err, "metrics", "failed to read sandbox metrics")
 		return
@@ -327,7 +327,7 @@ func (s *Server) sandboxesMetrics(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil
 			}
-			m, live, err := s.store.Metrics(r.Context(), sb.Status.NodeName, claimIDOf(sb))
+			m, live, err := s.readEnvdMetrics(r.Context(), sb.Status.NodeName, claimIDOf(sb))
 			if err != nil {
 				log.WithFunc("e2bcompat.sandboxesMetrics").Warnf(r.Context(), "metrics read failed sandboxID=%s err=%v", id, err)
 				return nil
@@ -517,7 +517,7 @@ func expireFor(autoPause *bool) sandboxd.ExpireAction {
 	return sandboxd.ExpireDestroy
 }
 
-func metricOf(m scale.SandboxMetrics) SandboxMetric {
+func metricOf(m envdMetrics) SandboxMetric {
 	at := time.Unix(m.Timestamp, 0)
 	if m.Timestamp == 0 {
 		at = time.Now()

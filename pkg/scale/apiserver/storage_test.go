@@ -3,6 +3,7 @@ package apiserver
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -311,8 +312,8 @@ func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error)
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
 
-func (f *fakeStore) Metrics(context.Context, string, string) (scale.SandboxMetrics, bool, error) {
-	return scale.SandboxMetrics{}, false, f.verbErr
+func (f *fakeStore) DialGuestPort(context.Context, string, string, uint16) (net.Conn, error) {
+	return nil, f.verbErr
 }
 
 func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {
