@@ -80,6 +80,9 @@ spec:
               - warm
               type: object
             type: array
+          publishedAt:
+            format: date-time
+            type: string
         required:
         - node
         type: object

@@ -87,6 +87,9 @@ type NodeInventory struct {
 	// already holds a warm microVM for a requested (template, net, size).
 	// +optional
 	Pools []PoolCapacity `json:"pools,omitempty"`
+	// publishedAt is the publisher's last apply; the aggregated apiserver skips an inventory older than its staleness window.
+	// +optional
+	PublishedAt metav1.Time `json:"publishedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

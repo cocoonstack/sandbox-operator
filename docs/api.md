@@ -67,6 +67,7 @@ _Appears in:_
 | `entries` _[InventoryEntry](#inventoryentry) array_ | entries summarizes the node's live sandboxes. |  | Optional: \{\} <br /> |
 | `address` _string_ | address is the node's sandboxd advertise address ("host:port"); the<br />aggregated apiserver routes a claim to this node's sandboxd through it. |  | Optional: \{\} <br /> |
 | `pools` _[PoolCapacity](#poolcapacity) array_ | pools is the node's per-pool warm capacity, used to pick a node that<br />already holds a warm microVM for a requested (template, net, size). |  | Optional: \{\} <br /> |
+| `publishedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | publishedAt is the publisher's last apply; the aggregated apiserver skips an inventory older than its staleness window. |  | Optional: \{\} <br /> |
 
 
 #### NodeInventoryList

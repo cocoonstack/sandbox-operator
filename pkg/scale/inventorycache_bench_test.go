@@ -96,6 +96,7 @@ func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scale.Sca
 	invs, pool := scale.BenchInventories(nodes, perNode)
 	list := &unstructured.UnstructuredList{}
 	for _, inv := range invs {
+		inv.PublishedAt = metav1.Now()
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(inv)
 		if err != nil {
 			b.Fatalf("encode node inventory: %v", err)
@@ -137,5 +138,5 @@ func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scale.Sca
 	if !invCache.WaitForCacheSync(syncCtx) {
 		b.Fatal("node inventory cache did not sync")
 	}
-	return scale.NewScatterGatherStore(kubeinventory.New(invCache)).(*scale.ScatterGatherStore), pool
+	return scale.NewScatterGatherStore(kubeinventory.New(invCache, kubeinventory.Options{})).(*scale.ScatterGatherStore), pool
 }

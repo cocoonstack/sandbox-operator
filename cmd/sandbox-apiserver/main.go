@@ -53,6 +53,8 @@ type options struct {
 
 	E2BAPI bool
 	E2B    *e2bcompat.Flags
+
+	Inventory kubeinventory.Options
 }
 
 func newOptions() *options {
@@ -88,6 +90,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&o.E2BAPI, "enable-e2b-api", o.E2BAPI,
 		"Serve the e2b-compatible REST surface, so an unmodified e2b SDK can claim from the same warm pools (point E2B_API_URL at it).")
 	o.E2B.AddFlags(fs)
+	o.Inventory.AddFlags(fs)
 }
 
 func (o *options) serverConfig() (*genericapiserver.Config, error) {
@@ -139,7 +142,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	invSource := kubeinventory.New(reader)
+	invSource := kubeinventory.New(reader, o.Inventory)
 	store := scale.NewScatterGatherStore(
 		invSource,
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),

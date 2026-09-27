@@ -134,6 +134,19 @@ The driver watches `SandboxWarmPool` and `NodeInventory`, resolves each pool's
 under leader election (`cocoon-warmpool-driver`), so one replica drives the
 pools. An empty sandboxd token leaves it fail-closed: it logs and sets no pools.
 
+### Node inventory freshness
+
+| Flag | Default | Help |
+|---|---|---|
+| `--inventory-stale-after` | `90s` | Drop a node from claims, lists, lookups, the warm-pool driver and the envd-proxy probe once its NodeInventory `publishedAt` is older than this. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
+
+A node that stops publishing, because it died or its vk-sandbox stopped,
+leaves every read and claim path once its `publishedAt` passes this age. At
+vk-sandbox's default 30 s publish cadence that is three missed publishes. Keep
+it above vk-sandbox's `-publish-interval`. A vk-sandbox that predates
+`publishedAt` never goes stale, so the window starts working on each node as
+its vk-sandbox is upgraded.
+
 ### e2b-compatible surface
 
 | Flag | Default | Help |
@@ -176,6 +189,7 @@ informer and relays the request into the owning node's guest-port endpoint.
 | `--tls-cert-file` | — | Wildcard certificate for `*.{domain}`. Omit to serve cleartext h2c behind an edge that terminates TLS. |
 | `--tls-private-key-file` | — | Private key for `--tls-cert-file`. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2. |
+| `--inventory-stale-after` | `90s` | Drop a node from claims, lists, lookups, the warm-pool driver and the envd-proxy probe once its NodeInventory `publishedAt` is older than this. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
 
 The two TLS flags must be set together. Routing, authorization and failure
 mapping are in [envd-proxy](envd-proxy.md).
