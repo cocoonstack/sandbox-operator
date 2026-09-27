@@ -64,14 +64,6 @@ func EntryFromSummary(row sandboxd.SandboxSummary) InventoryEntry {
 	}
 }
 
-func PoolCapacityFromInfo(info *sandboxd.NodeInfo) []PoolCapacity {
-	pools := make([]PoolCapacity, 0, len(info.Pools))
-	for _, p := range info.Pools {
-		pools = append(pools, PoolCapacity{Template: p.Key.Template, Net: p.Key.Net, Size: p.Key.Size, Warm: p.Warm, Target: p.Target})
-	}
-	return pools
-}
-
 func isPaused(row sandboxd.SandboxSummary) bool { return row.Hibernated || row.Archived }
 
 func rowsByClaimRef(ref string) nodeRows {

@@ -63,50 +63,6 @@ func TestSandboxdClaimRedirectIsCapacityMiss(t *testing.T) {
 	require.ErrorIs(t, err, ErrNodeAtCapacity)
 }
 
-func TestClaimRedirectCarriesItsTargets(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(ClaimResult{Redirect: []string{"10.0.0.6:7777", "10.0.0.7:7777"}})
-	}))
-	defer srv.Close()
-
-	_, err := New(srv.URL, "root-token").Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
-	re, ok := errors.AsType[*RedirectError](err)
-	require.True(t, ok, "a redirect-only 200 is a *RedirectError, got %v", err)
-	assert.Equal(t, []string{"10.0.0.6:7777", "10.0.0.7:7777"}, re.Targets)
-}
-
-func TestClaimEmptyBodyIsCapacityMissNotRedirect(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	_, err := New(srv.URL, "root-token").Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
-	require.ErrorIs(t, err, ErrNodeAtCapacity)
-	_, isRedirect := errors.AsType[*RedirectError](err)
-	assert.False(t, isRedirect)
-}
-
-func TestClaimSendsNoRedirectOnlyWhenSet(t *testing.T) {
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&b)
-		bodies = append(bodies, b)
-		_ = json.NewEncoder(w).Encode(ClaimResult{ID: "sb_1", Token: "tok"})
-	}))
-	defer srv.Close()
-
-	c := New(srv.URL, "root-token")
-	_, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04", NoRedirect: true})
-	require.NoError(t, err)
-	_, err = c.Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
-	require.NoError(t, err)
-	require.Len(t, bodies, 2)
-	assert.Equal(t, true, bodies[0]["no_redirect"])
-	assert.NotContains(t, bodies[1], "no_redirect")
-}
-
 func TestClaimServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -150,7 +106,7 @@ func TestInfo(t *testing.T) {
 		assert.Equal(t, "/v1/info", r.URL.Path)
 		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "info is a root-token operator surface")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"claimed":2,"hibernated":1,"archived":0,"advertise_addr":"10.0.0.5:7777","peers":["10.0.0.6:7777"]}`))
+		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"claimed":2,"hibernated":1,"archived":0,"peers":["10.0.0.6:7777"]}`))
 	}))
 	defer srv.Close()
 
@@ -162,8 +118,6 @@ func TestInfo(t *testing.T) {
 	assert.Equal(t, 4, info.Pools[0].Target)
 	assert.Equal(t, 2, info.Claimed)
 	assert.Equal(t, 1, info.Hibernated)
-	assert.Equal(t, "10.0.0.5:7777", info.AdvertiseAddr)
-	assert.Equal(t, []string{"10.0.0.6:7777"}, info.Peers)
 }
 
 func TestSandboxesDecodesTheClaimTime(t *testing.T) {

@@ -156,18 +156,6 @@ func TestLiveReadsNeedClaimRouting(t *testing.T) {
 	assert.Equal(t, int32(2), src.lists.Load(), "without a fleet token no second, node-asking sweep runs")
 }
 
-func TestPoolCapacityFromInfoMapsEveryPool(t *testing.T) {
-	got := PoolCapacityFromInfo(&sandboxd.NodeInfo{Pools: []sandboxd.NodePool{
-		{Key: sandboxd.PoolKey{Template: "rt:24.04", Net: "none", Size: "small"}, Warm: 3, Refilling: 1, Target: 4, Golden: true},
-		{Key: sandboxd.PoolKey{Template: "py:3.12", Net: "egress", Size: "medium"}, Target: 2},
-	}})
-	assert.Equal(t, []PoolCapacity{
-		{Template: "rt:24.04", Net: "none", Size: "small", Warm: 3, Target: 4},
-		{Template: "py:3.12", Net: "egress", Size: "medium", Target: 2},
-	}, got)
-	assert.Empty(t, PoolCapacityFromInfo(&sandboxd.NodeInfo{}))
-}
-
 func TestEntryFromSummaryIsWhatANodePublishes(t *testing.T) {
 	deadline := time.Date(2026, 9, 23, 3, 0, 0, 0, time.UTC)
 	running := EntryFromSummary(sandboxd.SandboxSummary{ID: "sb_1", ClaimRef: "ns/s1", Key: sandboxd.PoolKey{Template: "img"}, Deadline: deadline})
