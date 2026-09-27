@@ -5,17 +5,17 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/spf13/pflag"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	toolscache "k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
@@ -36,110 +36,128 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"Drop a node from this process's inventory reads once its NodeInventory publishedAt trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without publishedAt, from a vk-sandbox that predates the field, always stays.")
 }
 
+type snapshot struct {
+	names  []string
+	stamps []int64
+	newest int64
+	byNode map[string]*scale.NodeInventory
+}
+
 var _ scale.InventorySource = (*Source)(nil)
 
-// Source is the production InventorySource over a cache-fed NodeInventory reader.
-// It never mutates what it reads, since NewCache hands out its cached objects themselves.
+// Source is the production InventorySource: a snapshot of the informer's NodeInventory objects, rebuilt on every event.
+// It never mutates what it holds, since the informer hands out its cached objects themselves.
 type Source struct {
-	reader     client.Reader
 	staleAfter time.Duration
 	reference  atomic.Int64
+	snap       atomic.Pointer[snapshot]
+
+	mu     sync.Mutex
+	byNode map[string]*scale.NodeInventory
 }
 
-// New builds a Source over reader.
-func New(reader client.Reader, opts Options) *Source {
-	return &Source{reader: reader, staleAfter: cmp.Or(opts.StaleAfter, defaultStaleAfter)}
+// New builds a Source over the NodeInventory informer in informers and waits until its snapshot holds the synced fleet.
+func New(ctx context.Context, informers cache.Informers, opts Options) (*Source, error) {
+	s := &Source{staleAfter: cmp.Or(opts.StaleAfter, defaultStaleAfter), byNode: map[string]*scale.NodeInventory{}}
+	s.snap.Store(&snapshot{})
+	inf, err := informers.GetInformer(ctx, &scale.NodeInventory{})
+	if err != nil {
+		return nil, fmt.Errorf("kubeinventory: get node inventory informer: %w", err)
+	}
+	reg, err := inf.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
+		AddFunc:    s.put,
+		UpdateFunc: func(_, obj any) { s.put(obj) },
+		DeleteFunc: s.drop,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("kubeinventory: watch node inventories: %w", err)
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, cacheSyncTimeout)
+	defer cancel()
+	if !toolscache.WaitForCacheSync(syncCtx.Done(), reg.HasSynced) {
+		return nil, fmt.Errorf("kubeinventory: node inventory snapshot did not sync within %s", cacheSyncTimeout)
+	}
+	return s, nil
 }
 
-func (s *Source) ListNodes(ctx context.Context) ([]string, error) {
-	ul := &unstructured.UnstructuredList{}
-	ul.SetGroupVersionKind(scale.NodeInventoryGVK.GroupVersion().WithKind(scale.NodeInventoryGVK.Kind + "List"))
-	if err := s.reader.List(ctx, ul); err != nil {
-		return nil, fmt.Errorf("kubeinventory: list node inventories: %w", err)
-	}
-	nodes := make([]string, len(ul.Items))
-	stamps := make([]int64, len(ul.Items))
-	var newest int64
-	for i := range ul.Items {
-		nodes[i], stamps[i] = ul.Items[i].GetName(), publishedAt(ul.Items[i].Object)
-		newest = max(newest, stamps[i])
-	}
-	ref := min(newest, time.Now().UnixNano())
+func (s *Source) ListNodes(context.Context) ([]string, error) {
+	snap := s.snap.Load()
+	ref := min(snap.newest, time.Now().UnixNano())
 	s.reference.Store(ref)
-	kept := nodes[:0]
-	for i, node := range nodes {
-		if !s.stale(stamps[i], ref) {
-			kept = append(kept, node)
+	nodes := make([]string, 0, len(snap.names))
+	for i, node := range snap.names {
+		if !s.stale(snap.stamps[i], ref) {
+			nodes = append(nodes, node)
 		}
 	}
-	slices.Sort(kept)
-	return kept, nil
+	return nodes, nil
 }
 
-func (s *Source) NodeInventory(ctx context.Context, node string) (*scale.NodeInventory, error) {
-	u, err := s.get(ctx, node)
-	if err != nil {
-		return nil, err
-	}
-	inv := &scale.NodeInventory{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, inv); err != nil {
-		return nil, fmt.Errorf("kubeinventory: decode node %q inventory: %w", node, err)
-	}
-	return inv, nil
+func (s *Source) NodeInventory(_ context.Context, node string) (*scale.NodeInventory, error) {
+	return s.get(node)
 }
 
-func (s *Source) NodeCapacity(ctx context.Context, node string) (string, []scale.PoolCapacity, error) {
-	u, err := s.get(ctx, node)
+func (s *Source) NodeCapacity(_ context.Context, node string) (string, []scale.PoolCapacity, error) {
+	inv, err := s.get(node)
 	if err != nil {
 		return "", nil, err
 	}
-	addr, _, err := unstructured.NestedString(u.Object, "address")
-	if err != nil {
-		return "", nil, fmt.Errorf("kubeinventory: decode node %q address: %w", node, err)
-	}
-	raw, _, err := unstructured.NestedSlice(u.Object, "pools")
-	if err != nil {
-		return "", nil, fmt.Errorf("kubeinventory: decode node %q pools: %w", node, err)
-	}
-	pools := make([]scale.PoolCapacity, 0, len(raw))
-	for _, item := range raw {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		pc := scale.PoolCapacity{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &pc); err != nil {
-			return "", nil, fmt.Errorf("kubeinventory: decode node %q pool capacity: %w", node, err)
-		}
-		pools = append(pools, pc)
-	}
-	return addr, pools, nil
+	return inv.Address, inv.Pools, nil
 }
 
-func (s *Source) get(ctx context.Context, node string) (*unstructured.Unstructured, error) {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(scale.NodeInventoryGVK)
-	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
-		return nil, fmt.Errorf("kubeinventory: get node %q inventory: %w", node, err)
+func (s *Source) get(node string) (*scale.NodeInventory, error) {
+	inv := s.snap.Load().byNode[node]
+	if inv == nil {
+		return nil, fmt.Errorf("kubeinventory: get node %q inventory: %w", node, k8serrors.NewNotFound(nodeInventories, node))
 	}
-	if s.stale(publishedAt(u.Object), s.reference.Load()) {
+	if s.stale(publishedAt(inv), s.reference.Load()) {
 		return nil, fmt.Errorf("kubeinventory: node %q inventory is stale: %w", node, k8serrors.NewNotFound(nodeInventories, node))
 	}
-	return u, nil
+	return inv, nil
 }
 
 func (s *Source) stale(stamp, ref int64) bool {
 	return stamp != 0 && ref-stamp > int64(s.staleAfter)
 }
 
-func publishedAt(obj map[string]any) int64 {
-	raw, _ := obj["publishedAt"].(string)
-	if raw == "" {
+func (s *Source) put(obj any) {
+	inv, ok := obj.(*scale.NodeInventory)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byNode[inv.Name] = inv
+	s.publish()
+}
+
+func (s *Source) drop(obj any) {
+	if tomb, ok := obj.(toolscache.DeletedFinalStateUnknown); ok {
+		obj = tomb.Obj
+	}
+	inv, ok := obj.(*scale.NodeInventory)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.byNode, inv.Name)
+	s.publish()
+}
+
+func (s *Source) publish() {
+	snap := &snapshot{names: slices.Sorted(maps.Keys(s.byNode)), byNode: maps.Clone(s.byNode)}
+	snap.stamps = make([]int64, len(snap.names))
+	for i, node := range snap.names {
+		snap.stamps[i] = publishedAt(snap.byNode[node])
+		snap.newest = max(snap.newest, snap.stamps[i])
+	}
+	s.snap.Store(snap)
+}
+
+func publishedAt(inv *scale.NodeInventory) int64 {
+	if inv.PublishedAt.IsZero() {
 		return 0
 	}
-	at, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return 0
-	}
-	return at.UnixNano()
+	return inv.PublishedAt.UnixNano()
 }

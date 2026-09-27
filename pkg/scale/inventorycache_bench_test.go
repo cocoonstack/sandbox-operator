@@ -9,7 +9,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -19,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/kubeinventory"
 )
@@ -94,22 +94,20 @@ func BenchmarkClientInventoryWatchTick(b *testing.B) {
 func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scale.ScatterGatherStore, scale.PoolKey) {
 	b.Helper()
 	invs, pool := scale.BenchInventories(nodes, perNode)
-	list := &unstructured.UnstructuredList{}
+	list := &cocoonv1beta1.NodeInventoryList{}
 	for _, inv := range invs {
-		inv.PublishedAt = metav1.Now()
-		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(inv)
-		if err != nil {
-			b.Fatalf("encode node inventory: %v", err)
-		}
-		u := unstructured.Unstructured{Object: raw}
-		u.SetGroupVersionKind(scale.NodeInventoryGVK)
-		list.Items = append(list.Items, u)
+		inv.PublishedAt = metav1.Now().Rfc3339Copy()
+		list.Items = append(list.Items, *inv)
 	}
-	inv := &unstructured.Unstructured{}
-	inv.SetGroupVersionKind(scale.NodeInventoryGVK)
+	scheme := runtime.NewScheme()
+	if err := cocoonv1beta1.AddToScheme(scheme); err != nil {
+		b.Fatalf("register node inventory scheme: %v", err)
+	}
+	inv := &cocoonv1beta1.NodeInventory{}
 	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{scale.NodeInventoryGVK.GroupVersion()})
 	mapper.Add(scale.NodeInventoryGVK, meta.RESTScopeRoot)
 	invCache, err := cache.New(&restclient.Config{Host: "http://127.0.0.1:1"}, cache.Options{
+		Scheme:   scheme,
 		Mapper:   mapper,
 		ByObject: map[client.Object]cache.ByObject{inv: {UnsafeDisableDeepCopy: &noCopy}},
 		NewInformer: func(_ toolscache.ListerWatcher, obj runtime.Object, resync time.Duration, indexers toolscache.Indexers) toolscache.SharedIndexInformer {
@@ -138,5 +136,9 @@ func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scale.Sca
 	if !invCache.WaitForCacheSync(syncCtx) {
 		b.Fatal("node inventory cache did not sync")
 	}
-	return scale.NewScatterGatherStore(kubeinventory.New(invCache, kubeinventory.Options{})).(*scale.ScatterGatherStore), pool
+	src, err := kubeinventory.New(ctx, invCache, kubeinventory.Options{})
+	if err != nil {
+		b.Fatalf("build inventory source: %v", err)
+	}
+	return scale.NewScatterGatherStore(src).(*scale.ScatterGatherStore), pool
 }
