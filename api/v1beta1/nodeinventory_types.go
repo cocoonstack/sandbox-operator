@@ -23,6 +23,37 @@ type PoolCapacity struct {
 	Target int `json:"target"`
 }
 
+// PromotedTemplate is one promoted sandboxd template a node holds, as its GET
+// /v1/info reports it: the template key, the content identity of its export,
+// and the size tier later claims of it boot with.
+type PromotedTemplate struct {
+	// template is the promoted template's name.
+	Template string `json:"template"`
+	// net is the template's network shape.
+	// +optional
+	Net string `json:"net,omitempty"`
+	// size is the template's VM size class.
+	// +optional
+	Size string `json:"size,omitempty"`
+	// contentDigest is the digest of the template's published export bytes.
+	ContentDigest string `json:"contentDigest"`
+	// tenant is the sandboxd tenant that promoted the template; empty for the operator.
+	// +optional
+	Tenant string `json:"tenant,omitempty"`
+	// createdAt is the template's last promote.
+	// +optional
+	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+	// cpuCount is the vCPU count of the template's size tier.
+	// +optional
+	CPUCount int32 `json:"cpuCount,omitempty"`
+	// memoryBytes is the memory of the template's size tier.
+	// +optional
+	MemoryBytes int64 `json:"memoryBytes,omitempty"`
+	// labels is the template's label map, set through the node's PUT /v1/templates/labels.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
 // InventoryEntry is one live sandbox as summarized by its owning node.
 type InventoryEntry struct {
 	// name is the sandbox "<namespace>/<name>"; an unqualified name means the
@@ -96,6 +127,9 @@ type NodeInventory struct {
 	// already holds a warm microVM for a requested (template, net, size).
 	// +optional
 	Pools []PoolCapacity `json:"pools,omitempty"`
+	// templates is the node's promoted templates, which later claims of their key clone from.
+	// +optional
+	Templates []PromotedTemplate `json:"templates,omitempty"`
 	// publishedAt is the publisher's last apply; the aggregated apiserver skips an inventory older than its staleness window.
 	// +optional
 	PublishedAt metav1.Time `json:"publishedAt,omitempty"`

@@ -91,6 +91,37 @@ spec:
           publishedAt:
             format: date-time
             type: string
+          templates:
+            items:
+              properties:
+                contentDigest:
+                  type: string
+                cpuCount:
+                  format: int32
+                  type: integer
+                createdAt:
+                  format: date-time
+                  type: string
+                labels:
+                  additionalProperties:
+                    type: string
+                  type: object
+                memoryBytes:
+                  format: int64
+                  type: integer
+                net:
+                  type: string
+                size:
+                  type: string
+                template:
+                  type: string
+                tenant:
+                  type: string
+              required:
+              - contentDigest
+              - template
+              type: object
+            type: array
         required:
         - node
         type: object

@@ -54,7 +54,7 @@ helm upgrade sandbox-operator ./helm --namespace sandbox-system --reuse-values
 ```
 
 An older `nodeinventories` CRD silently prunes fields it does not know
-(`claimedAt` and `publishedAt` are two), so until the CRD is applied every node
+(`claimedAt`, `publishedAt` and `templates` are three), so until the CRD is applied every node
 publishes like an older node: the read view falls back accordingly, and no node
 ever goes stale under `--inventory-stale-after`.
 

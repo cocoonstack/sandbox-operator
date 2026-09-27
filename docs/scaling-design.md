@@ -145,7 +145,8 @@ type NodeInventory struct {
     Node    string           `json:"node"`
     Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline, claimedAt, claimMetadata, cpuCount, memoryBytes}
     Address string           `json:"address"` // the node's sandboxd advertise address
-    Pools   []PoolCapacity   `json:"pools"`   // per-pool warm capacity
+    Pools     []PoolCapacity     `json:"pools"`     // per-pool warm capacity
+    Templates []PromotedTemplate `json:"templates"` // {template, net, size, contentDigest, tenant, createdAt, cpuCount, memoryBytes}
 }
 ```
 

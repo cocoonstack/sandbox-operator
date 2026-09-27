@@ -123,15 +123,27 @@ type NodePool struct {
 	Golden    bool    `json:"golden"`
 }
 
+// NodeTemplate is one promoted template in a NodeInfo; an empty Tenant means the operator.
+type NodeTemplate struct {
+	Key           PoolKey           `json:"key"`
+	ContentDigest string            `json:"content_digest"`
+	Tenant        string            `json:"tenant,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	CPUCount      int               `json:"cpu_count,omitzero"`
+	MemTotalBytes int64             `json:"mem_total_bytes,omitzero"`
+	Labels        map[string]string `json:"labels,omitempty"`
+}
+
 // NodeInfo is the PUT /v1/pools (and GET /v1/info) response: the node's live
-// per-pool warm state plus its lifecycle counters.
+// per-pool warm state, its promoted templates, and its lifecycle counters.
 type NodeInfo struct {
-	Pools         []NodePool `json:"pools"`
-	Claimed       int        `json:"claimed"`
-	Hibernated    int        `json:"hibernated"`
-	Archived      int        `json:"archived"`
-	AdvertiseAddr string     `json:"advertise_addr,omitempty"`
-	Peers         []string   `json:"peers,omitempty"`
+	Pools         []NodePool     `json:"pools"`
+	Templates     []NodeTemplate `json:"templates"`
+	Claimed       int            `json:"claimed"`
+	Hibernated    int            `json:"hibernated"`
+	Archived      int            `json:"archived"`
+	AdvertiseAddr string         `json:"advertise_addr,omitempty"`
+	Peers         []string       `json:"peers,omitempty"`
 }
 
 // Client talks to a single sandboxd instance. It is safe for concurrent use.

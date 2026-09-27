@@ -70,6 +70,7 @@ _Appears in:_
 | `entries` _[InventoryEntry](#inventoryentry) array_ | entries summarizes the node's live sandboxes. |  | Optional: \{\} <br /> |
 | `address` _string_ | address is the node's sandboxd advertise address ("host:port"); the<br />aggregated apiserver routes a claim to this node's sandboxd through it. |  | Optional: \{\} <br /> |
 | `pools` _[PoolCapacity](#poolcapacity) array_ | pools is the node's per-pool warm capacity, used to pick a node that<br />already holds a warm microVM for a requested (template, net, size). |  | Optional: \{\} <br /> |
+| `templates` _[PromotedTemplate](#promotedtemplate) array_ | templates is the node's promoted templates, which later claims of their key clone from. |  | Optional: \{\} <br /> |
 | `publishedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | publishedAt is the publisher's last apply; the aggregated apiserver skips an inventory older than its staleness window. |  | Optional: \{\} <br /> |
 
 
@@ -114,5 +115,31 @@ _Appears in:_
 | `size` _string_ | size is the pool's VM size class (e.g. "small"). |  | Optional: \{\} <br /> |
 | `warm` _integer_ | warm is the number of ready-to-claim warm microVMs currently in the pool. |  |  |
 | `target` _integer_ | target is the pool's desired warm depth. |  |  |
+
+
+#### PromotedTemplate
+
+
+
+PromotedTemplate is one promoted sandboxd template a node holds, as its GET
+/v1/info reports it: the template key, the content identity of its export,
+and the size tier later claims of it boot with.
+
+
+
+_Appears in:_
+- [NodeInventory](#nodeinventory)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `template` _string_ | template is the promoted template's name. |  |  |
+| `net` _string_ | net is the template's network shape. |  | Optional: \{\} <br /> |
+| `size` _string_ | size is the template's VM size class. |  | Optional: \{\} <br /> |
+| `contentDigest` _string_ | contentDigest is the digest of the template's published export bytes. |  |  |
+| `tenant` _string_ | tenant is the sandboxd tenant that promoted the template; empty for the operator. |  | Optional: \{\} <br /> |
+| `createdAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | createdAt is the template's last promote. |  | Optional: \{\} <br /> |
+| `cpuCount` _integer_ | cpuCount is the vCPU count of the template's size tier. |  | Optional: \{\} <br /> |
+| `memoryBytes` _integer_ | memoryBytes is the memory of the template's size tier. |  | Optional: \{\} <br /> |
+| `labels` _object (keys:string, values:string)_ | labels is the template's label map, set through the node's PUT /v1/templates/labels. |  | Optional: \{\} <br /> |
 
 

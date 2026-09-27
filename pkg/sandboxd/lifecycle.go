@@ -152,6 +152,27 @@ func (c *Client) Checkpoints(ctx context.Context) ([]Checkpoint, error) {
 	return out.Checkpoints, err
 }
 
+// DeleteTemplate performs DELETE /v1/templates for key on this node alone (no_redirect). A 404 is success.
+func (c *Client) DeleteTemplate(ctx context.Context, key PoolKey) error {
+	if key.Template == "" {
+		return fmt.Errorf("sandboxd: delete template requires a template name")
+	}
+	q := templateQuery(key)
+	q.Set("no_redirect", "1")
+	return c.send(ctx, http.MethodDelete, "/v1/templates?"+q.Encode(), c.token, "delete template", nil, http.StatusNoContent, http.StatusNotFound)
+}
+
+// SetTemplateLabels performs PUT /v1/templates/labels for key on this node, replacing the whole label map.
+func (c *Client) SetTemplateLabels(ctx context.Context, key PoolKey, labels map[string]string) error {
+	body, err := json.Marshal(struct {
+		Labels map[string]string `json:"labels"`
+	}{labels})
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, http.MethodPut, "/v1/templates/labels?"+templateQuery(key).Encode(), c.token, "template labels", body, http.StatusNoContent)
+}
+
 // DeleteCheckpoint performs DELETE /v1/checkpoints/{id}. A 404 is success.
 func (c *Client) DeleteCheckpoint(ctx context.Context, checkpointID string) error {
 	if checkpointID == "" {
@@ -255,4 +276,15 @@ func decodeInto(resp *http.Response, out any, path string) error {
 		return fmt.Errorf("sandboxd: decode %s reply: %w", path, err)
 	}
 	return nil
+}
+
+func templateQuery(key PoolKey) url.Values {
+	q := url.Values{"template": {key.Template}}
+	if key.Net != "" {
+		q.Set("net", key.Net)
+	}
+	if key.Size != "" {
+		q.Set("size", key.Size)
+	}
+	return q
 }

@@ -446,6 +446,8 @@ type recordingFactory struct {
 	releaseErr  error
 	verbErr     error
 
+	deletedTemplates []sandboxd.PoolKey
+
 	rows         map[string][]sandboxd.SandboxSummary
 	rowReads     []string
 	dialErr      error
@@ -509,6 +511,21 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 }
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
+
+func (c *recordingClient) DeleteTemplate(_ context.Context, key sandboxd.PoolKey) error {
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.deletedTemplates = append(c.f.deletedTemplates, key)
+	return c.f.verbErr
+}
+
+func (c *recordingClient) SetTemplateLabels(context.Context, sandboxd.PoolKey, map[string]string) error {
+	return c.f.verbErr
+}
+
+func (c *recordingClient) Info(context.Context) (*sandboxd.NodeInfo, error) {
+	return &sandboxd.NodeInfo{}, c.f.verbErr
+}
 
 func (c *recordingClient) SetInstanceMetadata(_ context.Context, id string, doc []byte) error {
 	c.f.mu.Lock()

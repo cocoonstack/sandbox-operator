@@ -260,7 +260,7 @@ func read(ctx context.Context, r NodeReader) answer {
 	}
 	key := info.AdvertiseAddr
 	return answer{
-		inv:   &scale.NodeInventory{Node: key, Address: key, Pools: scale.PoolCapacityFromInfo(info), Entries: entries},
+		inv:   &scale.NodeInventory{Node: key, Address: key, Pools: scale.PoolCapacityFromInfo(info), Templates: scale.TemplatesFromInfo(info), Entries: entries},
 		peers: info.Peers,
 	}
 }
