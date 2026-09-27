@@ -487,6 +487,12 @@ func TestGetReadsStateAndEndAtFromTheOwningNode(t *testing.T) {
 	store.nodePaused = false
 	assert.Equal(t, StateRunning, getDetailWith(t, h, "sb-abc").State)
 
+	store.nodeArchived, store.deadline = true, time.Time{}
+	got = getDetailWith(t, h, "sb-abc")
+	assert.Equal(t, StatePaused, got.State)
+	assert.Equal(t, "2030-01-02T03:04:05Z", got.EndAt, "an archive without retention has no deadline, so the published endAt stands")
+	store.nodeArchived = false
+
 	store.nodeErr = k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc")
 	w := do(t, h, http.MethodGet, "/sandboxes/sb-abc", ``, testKey)
 	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())

@@ -367,9 +367,12 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := s.detailFor(sb)
-	d.State, d.EndAt = StateRunning, rec.Deadline.UTC().Format(time.RFC3339)
+	d.State = StateRunning
 	if rec.Paused {
 		d.State = StatePaused
+	}
+	if !rec.Deadline.IsZero() {
+		d.EndAt = rec.Deadline.UTC().Format(time.RFC3339)
 	}
 	writeJSON(w, http.StatusOK, d)
 }
