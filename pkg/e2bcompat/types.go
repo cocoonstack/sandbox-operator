@@ -27,7 +27,7 @@ type NewSandbox struct {
 	// AllowInternetAccess selects the warm pool's network lane: true picks the
 	// egress-capable pool, false/nil the isolated one.
 	AllowInternetAccess *bool `json:"allow_internet_access,omitempty"`
-	// The NewSandboxV2 fields below name guarantees this backend cannot give, so a request that sets one is refused.
+
 	Network         map[string]json.RawMessage `json:"network,omitempty"`
 	VolumeMounts    []json.RawMessage          `json:"volumeMounts,omitempty"`
 	AutoPauseMemory *bool                      `json:"autoPauseMemory,omitempty"`
@@ -97,6 +97,12 @@ type ConnectSandbox struct {
 	Memory  *bool  `json:"memory,omitempty"`
 }
 
+// ResumedSandbox is the legacy POST /sandboxes/{id}/resume body (spec: ResumedSandbox).
+type ResumedSandbox struct {
+	ConnectSandbox
+	AutoPause *bool `json:"autoPause,omitempty"`
+}
+
 // SandboxForkRequest is the POST /sandboxes/{id}/fork body.
 type SandboxForkRequest struct {
 	Timeout *int32 `json:"timeout,omitempty"`
@@ -133,6 +139,17 @@ type SandboxMetric struct {
 	MemCache      int64   `json:"memCache"`
 	DiskUsed      int64   `json:"diskUsed"`
 	DiskTotal     int64   `json:"diskTotal"`
+}
+
+// SandboxLogs is the GET /sandboxes/{id}/logs reply (spec: SandboxLogs).
+type SandboxLogs struct {
+	Logs       []struct{} `json:"logs"`
+	LogEntries []struct{} `json:"logEntries"`
+}
+
+// SandboxLogsV2 is the GET /v2/sandboxes/{id}/logs reply (spec: SandboxLogsV2Response).
+type SandboxLogsV2 struct {
+	Logs []struct{} `json:"logs"`
 }
 
 // Template is the templates-listing entry.

@@ -61,6 +61,22 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
+	s.connect(w, r, req, false)
+}
+
+func (s *Server) resumeSandbox(w http.ResponseWriter, r *http.Request) {
+	var req ResumedSandbox
+	if !decodeOptionalBody(w, r, &req) {
+		return
+	}
+	if req.AutoPause != nil && *req.AutoPause {
+		writeError(w, http.StatusBadRequest, autoPauseRefusal)
+		return
+	}
+	s.connect(w, r, req.ConnectSandbox, true)
+}
+
+func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSandbox, refuseRunning bool) {
 	if req.Memory != nil && !*req.Memory {
 		writeError(w, http.StatusBadRequest, "memory=false is not supported; a paused sandbox resumes from its memory snapshot")
 		return
@@ -75,6 +91,10 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	rec, err := s.store.Read(r.Context(), node, claimID)
 	if err != nil {
 		s.writeVerbError(w, r, err, "connect: read", "failed to connect the sandbox")
+		return
+	}
+	if !rec.Paused && refuseRunning {
+		writeError(w, http.StatusConflict, fmt.Sprintf("sandbox %q is already running", id))
 		return
 	}
 	status := http.StatusOK
@@ -286,6 +306,22 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 		MemUsed:       st.MemUsedBytes,
 		MemTotal:      st.MemTotalBytes,
 	}})
+}
+
+func (s *Server) sandboxLogs(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.lookup(r, r.PathValue("sandboxID")); err != nil {
+		s.writeLookupError(w, r, err, "logs")
+		return
+	}
+	writeJSON(w, http.StatusOK, SandboxLogs{Logs: []struct{}{}, LogEntries: []struct{}{}})
+}
+
+func (s *Server) sandboxLogsV2(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.lookup(r, r.PathValue("sandboxID")); err != nil {
+		s.writeLookupError(w, r, err, "logs")
+		return
+	}
+	writeJSON(w, http.StatusOK, SandboxLogsV2{Logs: []struct{}{}})
 }
 
 // listTemplates reports the advertised warm-pool keys, the values create accepts as templateID.

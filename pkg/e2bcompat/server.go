@@ -10,13 +10,13 @@
 //
 // Mapping to the e2b contract (e2b-dev/E2B spec/openapi.yml):
 //
-//	POST/GET/DELETE /sandboxes                 -> claim, list, get, release
-//	POST /sandboxes/{id}/pause|connect|fork    -> pause, resume, fork
-//	POST /sandboxes/{id}/snapshots             -> create checkpoint
-//	GET /snapshots, DELETE /templates/{id}     -> list or delete checkpoints
-//	GET /templates, /v2/templates              -> advertised warm-pool keys
-//	GET /sandboxes/{id}/metrics                -> node resource statistics
-//	POST timeout|refreshes, GET /health         -> lease renewal, liveness
+//	POST/GET/DELETE /sandboxes                    -> claim, list, get, release
+//	POST /sandboxes/{id}/pause|connect|resume|fork -> pause, resume, fork
+//	POST /sandboxes/{id}/snapshots                -> create checkpoint
+//	GET /snapshots, DELETE /templates/{id}        -> list or delete checkpoints
+//	GET /templates, /v2/templates                 -> advertised warm-pool keys
+//	GET /sandboxes/{id}/metrics|logs              -> node statistics, an empty log page
+//	POST timeout|refreshes, GET /health           -> lease renewal, liveness
 package e2bcompat
 
 import (
@@ -46,6 +46,8 @@ const (
 	DefaultTimeoutSeconds = 300
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
+
+	autoPauseRefusal = "autoPause is not supported; pause explicitly, or let the lease expire"
 )
 
 var (
@@ -137,10 +139,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /sandboxes/{sandboxID}/pause", s.auth(http.HandlerFunc(s.pauseSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
 	mux.Handle("POST /v2/sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
+	mux.Handle("POST /sandboxes/{sandboxID}/resume", s.auth(http.HandlerFunc(s.resumeSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/fork", s.auth(http.HandlerFunc(s.forkSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/snapshots", s.auth(http.HandlerFunc(s.createSnapshot)))
 	mux.Handle("GET /snapshots", s.auth(http.HandlerFunc(s.listSnapshots)))
 	mux.Handle("GET /sandboxes/{sandboxID}/metrics", s.auth(http.HandlerFunc(s.sandboxMetrics)))
+	mux.Handle("GET /sandboxes/{sandboxID}/logs", s.auth(http.HandlerFunc(s.sandboxLogs)))
+	mux.Handle("GET /v2/sandboxes/{sandboxID}/logs", s.auth(http.HandlerFunc(s.sandboxLogsV2)))
 	mux.Handle("GET /templates", s.auth(http.HandlerFunc(s.listTemplates)))
 	mux.Handle("GET /v2/templates", s.auth(http.HandlerFunc(s.listTemplates)))
 	// e2b addresses a snapshot as a template on delete.
@@ -451,7 +456,7 @@ func unsupportedCreateOption(req NewSandbox) (string, bool) {
 	case len(req.EnvVars) > 0:
 		return "envVars is not supported; set the environment inside the sandbox after it starts", true
 	case req.AutoPause != nil && *req.AutoPause:
-		return "autoPause is not supported; pause explicitly, or let the lease expire", true
+		return autoPauseRefusal, true
 	case len(req.Network) > 0:
 		return "network rules are not supported; allow_internet_access picks the pool's lane and nothing else is enforced", true
 	case len(req.VolumeMounts) > 0:
