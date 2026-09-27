@@ -90,7 +90,6 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.E2B.AddFlags(fs)
 }
 
-// serverConfig assembles a GenericAPIServer config from the options.
 func (o *options) serverConfig() (*genericapiserver.Config, error) {
 	if err := o.SecureServing.MaybeDefaultWithSelfSignedCerts("localhost", nil, nil); err != nil {
 		return nil, fmt.Errorf("create self-signed certificates: %w", err)
@@ -209,8 +208,7 @@ func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, rest
 	return nil
 }
 
-// startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
-// the same way, and listed by the same scatter-gather read.
+// startE2BServer shares the aggregated apiserver's store, so an e2b claim is the node-local claim the Kubernetes path makes.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) (func(), error) {
 	opts, err := o.E2B.ServerOptions(inv)
 	if err != nil {
@@ -223,8 +221,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 	return srv.Serve(ctx, o.E2B.Addr)
 }
 
-// currentNamespace returns the pod's namespace (for the leader-election lease),
-// read from the service-account mount, defaulting to the deployment namespace.
+// currentNamespace reads the pod's namespace for the leader-election lease, defaulting to the deployment namespace.
 func currentNamespace() string {
 	if b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 		if ns := strings.TrimSpace(string(b)); ns != "" {

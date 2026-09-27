@@ -30,7 +30,6 @@ import (
 )
 
 const (
-	// The store stamps these labels on synthesized Sandboxes, so label selectors have axes to filter on.
 	// NodeLabel carries the owning node of a synthesized Sandbox.
 	NodeLabel = "sandbox.cocoonstack.io/node"
 	// PhaseLabel carries the entry phase of a synthesized Sandbox.
@@ -58,6 +57,7 @@ const (
 
 	// Idle conns per host match the per-node claim fan-out, so a burst reuses connections.
 	sandboxdRequestTimeout      = 10 * time.Second
+	sandboxdDialTimeout         = time.Second
 	sandboxdMaxIdleConns        = 256
 	sandboxdMaxIdleConnsPerHost = 32
 	sandboxdIdleConnTimeout     = 90 * time.Second
@@ -73,7 +73,7 @@ var (
 
 // InventorySource enumerates nodes and fetches each one's NodeInventory, so a partitioned node drops out of a List instead of failing it.
 type InventorySource interface {
-	// ListNodes returns the nodes that publish inventory. O(nodes), cache-fed.
+	// ListNodes returns the nodes the source holds inventory for. O(nodes), from memory.
 	ListNodes(ctx context.Context) ([]string, error)
 	// NodeInventory returns one node's inventory, or an error for an unreadable or unpublished node.
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
@@ -87,6 +87,14 @@ type StoreOption func(*scatterGatherStore)
 // WithWatchPollInterval sets how often Watch re-derives the inventories, one second by default.
 func WithWatchPollInterval(d time.Duration) StoreOption {
 	return func(s *scatterGatherStore) { s.watchPoll = d }
+}
+
+// WithClaimRouting lets the store call nodes with the fleet api_token, and without it node calls fail closed and lookups read inventory alone.
+func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
+	return func(s *scatterGatherStore) {
+		s.sandboxdToken = token
+		s.sandboxdFactory = factory
+	}
 }
 
 // SandboxdClient is the subset of the sandboxd HTTP client the store needs.
@@ -111,14 +119,6 @@ type SandboxdClient interface {
 
 // SandboxdClientFactory builds a sandboxd client for one node's advertise address and the fleet api_token.
 type SandboxdClientFactory func(addr, token string) SandboxdClient
-
-// WithClaimRouting lets the store call nodes with the fleet api_token, and without it node calls fail closed and lookups read inventory alone.
-func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
-	return func(s *scatterGatherStore) {
-		s.sandboxdToken = token
-		s.sandboxdFactory = factory
-	}
-}
 
 // NewSandboxdClientFactory returns the production factory, whose clients share one HTTP client.
 func NewSandboxdClientFactory() SandboxdClientFactory {
@@ -646,6 +646,7 @@ func NewSandboxdHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: sandboxdRequestTimeout,
 		Transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: sandboxdDialTimeout}).DialContext,
 			MaxIdleConns:        sandboxdMaxIdleConns,
 			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
 			IdleConnTimeout:     sandboxdIdleConnTimeout,
@@ -665,6 +666,9 @@ func SandboxdBaseURL(addr string) string {
 func AddressIPs(addr string) []string {
 	if addr == "" {
 		return nil
+	}
+	if _, rest, ok := strings.Cut(addr, "://"); ok {
+		addr = rest
 	}
 	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
 		return []string{host}

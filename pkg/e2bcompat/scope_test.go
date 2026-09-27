@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -187,15 +188,7 @@ func TestListHonorsStateAndTemplateAndRefusesMetadata(t *testing.T) {
 		{"?startedAfter=2999-01-01T00:00:00Z", []string{}},
 		{"?metadata=", []string{"sb-a", "sb-b"}},
 	} {
-		w := do(t, h, http.MethodGet, "/v2/sandboxes"+tc.query, "", testKey)
-		var listed []SandboxDetail
-		if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil || w.Code != http.StatusOK {
-			t.Fatalf("%s: status %d, decode %v: %s", tc.query, w.Code, err, w.Body.String())
-		}
-		ids := make([]string, 0, len(listed))
-		for _, d := range listed {
-			ids = append(ids, d.SandboxID)
-		}
+		ids, _ := pageOfList(t, h, "/v2/sandboxes"+tc.query)
 		slices.Sort(ids)
 		if !slices.Equal(ids, tc.want) {
 			t.Errorf("%s lists %v, want %v", tc.query, ids, tc.want)
@@ -248,6 +241,23 @@ func TestV2ListCursorSurvivesASandboxLeaving(t *testing.T) {
 	store.items = slices.DeleteFunc(store.items, func(sb sandboxv1beta1.Sandbox) bool { return sb.Name == "s3" })
 	second, _ := pageOfList(t, h, "/v2/sandboxes?limit=2&nextToken="+token)
 	assert.Equal(t, []string{"sb-2", "sb-1"}, second)
+}
+
+func TestV2ListPagesSandboxesWithoutAClaimTimeOnce(t *testing.T) {
+	unstamped := []sandboxv1beta1.Sandbox{liveSandbox("s0", "sb_0", "node-a", "img"), liveSandbox("s1", "sb_1", "node-a", "img")}
+	for i := range unstamped {
+		unstamped[i].CreationTimestamp = metav1.Time{}
+	}
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestServer(t, &fakeStore{items: unstamped})
+		for _, order := range []string{"desc", "asc"} {
+			first, token := pageOfList(t, h, "/v2/sandboxes?limit=1&order="+order)
+			time.Sleep(1100 * time.Millisecond)
+			second, last := pageOfList(t, h, "/v2/sandboxes?limit=1&order="+order+"&nextToken="+token)
+			assert.ElementsMatch(t, []string{"sb-0", "sb-1"}, append(first, second...), order)
+			assert.Empty(t, last, order)
+		}
+	})
 }
 
 func TestV2ListRefusesPageParametersOutsideTheSpec(t *testing.T) {

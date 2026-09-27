@@ -30,6 +30,10 @@ apiserver:
     apiKeySecret:
       name: ""
       key: keys
+    # templateAliases maps a templateID the SDK sends onto a pool image, one
+    # per line as "alias pool-image". Sandbox.create() with no template asks
+    # for base, so name it here for that call to work.
+    templateAliases: ""
   resources:
     requests:
       cpu: 100m

@@ -2,8 +2,6 @@ package e2bcompat
 
 import "encoding/json"
 
-// Field names and JSON casing are fixed by the e2b OpenAPI contract the SDKs unmarshal.
-
 // Sandbox states reported to the SDK (spec: SandboxState).
 const (
 	StateRunning = "running"
@@ -70,6 +68,8 @@ type SandboxDetail struct {
 	EnvdAccessToken     string            `json:"envdAccessToken,omitempty"`
 	Domain              string            `json:"domain,omitempty"`
 	AllowInternetAccess *bool             `json:"allowInternetAccess,omitempty"`
+
+	startedAtKey string
 }
 
 // SandboxTimeoutRequest is the POST /sandboxes/{sandboxID}/timeout request body

@@ -48,8 +48,7 @@ type Resolver interface {
 	Owner(ctx context.Context, sandboxID, token string) (Owner, error)
 }
 
-// storeResolver answers from the same cache-fed node inventories the aggregated
-// apiserver reads, so a lookup costs no round trip to the kube-apiserver.
+// storeResolver answers from the inventory source the apiserver reads, so a lookup costs no kube-apiserver round trip.
 type storeResolver struct {
 	claims    scale.ClaimIDResolver
 	inventory scale.InventorySource

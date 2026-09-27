@@ -47,10 +47,10 @@ const (
 	DefaultEnvdVersion = "0.4.0"
 	// DefaultTimeoutSeconds is the node's default lease; the SDK's own 15s reaps a cold client's sandbox.
 	DefaultTimeoutSeconds = 300
-	// apiKeyHeader is the header the e2b SDKs authenticate with.
-	apiKeyHeader = "X-API-KEY"
+	apiKeyHeader          = "X-API-KEY"
 
 	autoPauseRefusal = "autoPause is not supported; pause explicitly, or let the lease expire"
+	connectFailure   = "failed to connect the sandbox"
 	maxListLimit     = 100
 	nextTokenHeader  = "X-Next-Token"
 
@@ -172,8 +172,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /sandboxes/{sandboxID}/snapshots", s.auth(http.HandlerFunc(s.createSnapshot)))
 	mux.Handle("GET /snapshots", s.auth(http.HandlerFunc(s.listSnapshots)))
 	mux.Handle("GET /sandboxes/{sandboxID}/metrics", s.auth(http.HandlerFunc(s.sandboxMetrics)))
-	mux.Handle("GET /sandboxes/{sandboxID}/logs", s.auth(http.HandlerFunc(s.sandboxLogs)))
-	mux.Handle("GET /v2/sandboxes/{sandboxID}/logs", s.auth(http.HandlerFunc(s.sandboxLogsV2)))
+	mux.Handle("GET /sandboxes/{sandboxID}/logs", s.auth(s.sandboxLogs(SandboxLogs{Logs: []struct{}{}, LogEntries: []struct{}{}})))
+	mux.Handle("GET /v2/sandboxes/{sandboxID}/logs", s.auth(s.sandboxLogs(SandboxLogsV2{Logs: []struct{}{}})))
 	mux.Handle("GET /templates", s.auth(http.HandlerFunc(s.listTemplates)))
 	mux.Handle("GET /v2/templates", s.auth(http.HandlerFunc(s.listTemplates)))
 	mux.Handle("GET /templates/aliases/{alias}", s.auth(http.HandlerFunc(s.templateAlias)))
@@ -327,9 +327,7 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
-	if filter.template != "" {
-		filter.template = s.poolImage(filter.template)
-	}
+	filter.template = s.poolImage(filter.template)
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
 		log.WithFunc("e2bcompat.listed").Error(r.Context(), err, "e2b list: store list failed")
@@ -474,15 +472,16 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 		endAt = deadline
 	}
 	return SandboxDetail{
-		TemplateID:  templateOf(sb),
-		Alias:       s.aliasOf(templateOf(sb)),
-		SandboxID:   PublicID(claimIDOf(sb)),
-		ClientID:    sb.Status.NodeName,
-		StartedAt:   started.UTC().Format(time.RFC3339),
-		EndAt:       endAt.UTC().Format(time.RFC3339),
-		State:       state,
-		EnvdVersion: s.opts.EnvdVersion,
-		Domain:      s.opts.Domain,
+		TemplateID:   templateOf(sb),
+		Alias:        s.aliasOf(templateOf(sb)),
+		SandboxID:    PublicID(claimIDOf(sb)),
+		ClientID:     sb.Status.NodeName,
+		StartedAt:    started.UTC().Format(time.RFC3339),
+		EndAt:        endAt.UTC().Format(time.RFC3339),
+		State:        state,
+		EnvdVersion:  s.opts.EnvdVersion,
+		Domain:       s.opts.Domain,
+		startedAtKey: sb.CreationTimestamp.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -568,10 +567,10 @@ func listPageOf(q url.Values) (listPage, error) {
 }
 
 func (p listPage) cut(items []SandboxDetail) ([]SandboxDetail, string) {
-	slices.SortFunc(items, func(a, b SandboxDetail) int { return p.compare(keyOf(a), keyOf(b)) })
 	if p.after != (pageKey{}) {
 		items = slices.DeleteFunc(items, func(d SandboxDetail) bool { return p.compare(keyOf(d), p.after) <= 0 })
 	}
+	slices.SortFunc(items, func(a, b SandboxDetail) int { return p.compare(keyOf(a), keyOf(b)) })
 	if len(items) <= p.limit {
 		return items, ""
 	}
@@ -587,7 +586,7 @@ func (p listPage) compare(a, b pageKey) int {
 	return c
 }
 
-func keyOf(d SandboxDetail) pageKey { return pageKey{d.StartedAt, d.SandboxID} }
+func keyOf(d SandboxDetail) pageKey { return pageKey{d.startedAtKey, d.SandboxID} }
 
 // templateOf reads the store's label because a synthesized Sandbox holds no pod spec.
 func templateOf(sb *sandboxv1beta1.Sandbox) string {

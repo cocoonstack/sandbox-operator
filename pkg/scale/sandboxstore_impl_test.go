@@ -339,6 +339,18 @@ func TestWatchSeesAShortLivedSandbox(t *testing.T) {
 	}
 }
 
+func TestAddressIPsTakesTheHostOfAnAddressOrAnOrigin(t *testing.T) {
+	for addr, want := range map[string][]string{
+		"":                              nil,
+		"10.0.0.5:7777":                 {"10.0.0.5"},
+		"node-a":                        {"node-a"},
+		"https://n2.sb.example.com":     {"n2.sb.example.com"},
+		"https://n2.sb.example.com:443": {"n2.sb.example.com"},
+	} {
+		assert.Equal(t, want, AddressIPs(addr), addr)
+	}
+}
+
 func publish(ctx context.Context, node string, live NodeLiveSource, applier InventoryApplier) (int, error) {
 	entries, err := live.LiveSandboxes(ctx)
 	if err != nil {

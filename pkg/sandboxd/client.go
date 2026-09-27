@@ -125,14 +125,12 @@ type NodeInfo struct {
 // Client talks to a single sandboxd instance. It is safe for concurrent use.
 type Client struct {
 	baseURL string
-	// token is the node api_token (root or tenant) every other verb presents;
-	// Release and IsOwner authenticate with a token passed per call.
+	// token is the node api_token every verb presents, except Release and IsOwner, which take one per call.
 	token string
 	hc    *http.Client
 }
 
-// New returns a Client for the sandboxd at baseURL, authenticating resource verbs
-// with the node api_token (may be empty when sandboxd runs without auth).
+// New returns a Client for the sandboxd at baseURL; token is the node api_token, empty when sandboxd runs without auth.
 func New(baseURL, token string, opts ...Option) *Client {
 	c := &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -145,8 +143,7 @@ func New(baseURL, token string, opts ...Option) *Client {
 	return c
 }
 
-// Claim performs POST /v1/claim, returning the delivered sandbox on success.
-// A 429 or an empty 200 yields ErrNodeAtCapacity, a redirect-only 200 a *RedirectError.
+// Claim performs POST /v1/claim; a 429 or an empty 200 yields ErrNodeAtCapacity and a redirect-only 200 a *RedirectError.
 func (c *Client) Claim(ctx context.Context, spec ClaimSpec) (ClaimResult, error) {
 	body, err := json.Marshal(spec)
 	if err != nil {
@@ -202,8 +199,7 @@ func (c *Client) SetPools(ctx context.Context, pools []PoolSpec) (*NodeInfo, err
 	return &info, nil
 }
 
-// Info performs GET /v1/info: the node's live per-pool warm state and lifecycle
-// counters, read without touching its pool config.
+// Info performs GET /v1/info: live per-pool warm state and lifecycle counters, without touching pool config.
 func (c *Client) Info(ctx context.Context) (*NodeInfo, error) {
 	var info NodeInfo
 	if err := c.getJSON(ctx, "/v1/info", &info); err != nil {
@@ -235,7 +231,6 @@ func (c *Client) IsOwner(ctx context.Context, id, token string) (bool, error) {
 	return err == nil, err
 }
 
-// sendNoBody performs a body-less request authenticated with token, accepting the statuses in ok.
 func (c *Client) sendNoBody(ctx context.Context, method, path, token, op string, ok ...int) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
@@ -273,7 +268,6 @@ func TokenFrom(literal, file string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// statusError reads the {"error": "..."} body and returns a typed *HTTPError.
 func statusError(resp *http.Response) error {
 	var payload struct {
 		Error string `json:"error"`
@@ -283,8 +277,7 @@ func statusError(resp *http.Response) error {
 	return &HTTPError{StatusCode: resp.StatusCode, Message: payload.Error}
 }
 
-// drainAndClose fully reads and closes the body so the keep-alive connection can
-// be reused — essential for stable sub-millisecond claim latency under load.
+// drainAndClose reads the body out so the keep-alive connection is reused, which sub-millisecond claims depend on.
 func drainAndClose(resp *http.Response) {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()

@@ -1,0 +1,12 @@
+{{- if and .Values.apiserver.e2b.enabled .Values.apiserver.e2b.templateAliases }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandbox-apiserver-e2b-template-aliases
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sandbox-operator.apiserver.labels" . | nindent 4 }}
+data:
+  aliases: |
+    {{- .Values.apiserver.e2b.templateAliases | nindent 4 }}
+{{- end }}

@@ -55,6 +55,9 @@ spec:
         {{- with $e2b.defaultTimeoutSeconds }}
         - --e2b-default-timeout={{ . }}
         {{- end }}
+        {{- if $e2b.templateAliases }}
+        - --e2b-template-alias-file=/etc/sandbox-apiserver/e2b-template-aliases/aliases
+        {{- end }}
         {{- end }}
         ports:
         - name: https
@@ -95,6 +98,11 @@ spec:
         - name: e2b-api-keys
           mountPath: /etc/sandbox-apiserver/e2b-api-keys
           readOnly: true
+        {{- if $e2b.templateAliases }}
+        - name: e2b-template-aliases
+          mountPath: /etc/sandbox-apiserver/e2b-template-aliases
+          readOnly: true
+        {{- end }}
         {{- end }}
       volumes:
       - name: serving-certs
@@ -109,4 +117,9 @@ spec:
       - name: e2b-api-keys
         secret:
           secretName: {{ $e2bKeySecret }}
+      {{- if $e2b.templateAliases }}
+      - name: e2b-template-aliases
+        configMap:
+          name: sandbox-apiserver-e2b-template-aliases
+      {{- end }}
       {{- end }}

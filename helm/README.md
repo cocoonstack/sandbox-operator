@@ -82,6 +82,7 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `apiserver.e2b.port` | Port the e2b surface listens on | `8080` |
 | `apiserver.e2b.apiKeySecret.name` | Secret of accepted API keys; required once enabled | `""` |
 | `apiserver.e2b.apiKeySecret.key` | Key within that Secret | `keys` |
+| `apiserver.e2b.templateAliases` | Template aliases, one per line as `alias pool-image`; `base` makes `Sandbox.create()` work | `""` |
 | `apiserver.resources` | Apiserver requests and limits | 100m/128Mi, limit 512Mi |
 | `envdProxy.image.repository` | Proxy image | `ghcr.io/cocoonstack/sandbox-envd-proxy` |
 | `envdProxy.image.tag` | Image tag; pin a release | `latest` |

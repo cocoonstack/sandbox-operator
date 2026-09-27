@@ -44,7 +44,7 @@ func (f *Flags) AddFlags(fs *pflag.FlagSet) {
 		"Path to a file (Secret mount) of accepted e2b API keys, one per line as \"key\" or \"key namespace\", presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, --e2b-namespace when none is given.")
 	fs.BoolVar(&f.AllowAnonymous, "e2b-allow-anonymous", f.AllowAnonymous,
 		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
-	fs.StringVar(&f.AliasesFile, "e2b-template-aliases", f.AliasesFile,
+	fs.StringVar(&f.AliasesFile, "e2b-template-alias-file", f.AliasesFile,
 		"Path to a file of e2b template aliases, one per line as \"alias pool-image\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool.")
 }
 

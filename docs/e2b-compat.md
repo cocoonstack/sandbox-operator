@@ -33,7 +33,7 @@ sandbox-apiserver \
 | `--e2b-envd-version` | `0.4.0` | `envd` version reported to the SDK. Set it to the one actually in the image. |
 | `--e2b-default-timeout` | `300` | Lease in seconds for a create that names no timeout, and what a refresh renews for. |
 | `--e2b-allow-anonymous` | `false` | Serve with **no** API key. Development only. |
-| `--e2b-template-aliases` | — | File of template aliases, one per line as `alias pool-image` (`#` comments ignored). A create naming the alias claims from that image's pool. The SDKs create `base` when no template is named, so the file needs a `base` line for `Sandbox.create()` to work. The file is read at startup, so a change needs a restart. Startup fails on a malformed line or an alias named twice. |
+| `--e2b-template-alias-file` | — | File of template aliases, one per line as `alias pool-image` (`#` comments ignored). A create naming the alias claims from that image's pool. The SDKs create `base` when no template is named, so the file needs a `base` line for `Sandbox.create()` to work. The file is read at startup, so a change needs a restart. Startup fails on a malformed line or an alias named twice. |
 
 Startup **fails** if neither `--e2b-api-key-file` nor `--e2b-allow-anonymous` is
 set, so a misconfiguration cannot silently expose an open claim endpoint. It
@@ -56,7 +56,7 @@ sandbox-e2b \
   --sandboxd-seeds=172.20.0.5:7777,172.20.0.6:7777 \
   --sandboxd-token-file=/etc/sandboxd/token \
   --e2b-bind-address=:8080 --e2b-domain=sandbox.example.com \
-  --e2b-api-key-file=/etc/e2b/keys --e2b-template-aliases=/etc/e2b/aliases \
+  --e2b-api-key-file=/etc/e2b/keys --e2b-template-alias-file=/etc/e2b/aliases \
   --envd-proxy-bind-address=:8443
 ```
 
@@ -77,8 +77,9 @@ sandbox-e2b \
 - **Startup fails loud** when no seed answers or a seed refuses the token
   (`GET /v1/info needs the fleet root api_token`).
 - **A silent node** keeps its last snapshot for 3 ticks and then leaves the
-  listing, while a peer the mesh no longer names leaves at once; its sandboxes
-  die with it, as on the Kubernetes path.
+  listing; a peer the mesh no longer names is dropped after those same ticks,
+  so a graceful restart inside that window is invisible. A dead node's
+  sandboxes die with it, as on the Kubernetes path.
 - **Warm pools** are set through the sandbox SDK's `SetPoolsCluster` or
   sandboxd's own config; mesh mode has no warm-pool driver.
 - **Claims follow sandboxd's redirects**: a warm miss at one node lands on the
@@ -103,7 +104,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
-| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-aliases` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
+| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored; `metadata` is refused with `400`, since metadata is not stored. `/v2` pages as the spec says: `limit` (1 to 100, default 100), `order` by start time (`desc`, newest first, by default, or `asc`) and `nextToken`, the opaque cursor the previous page returned in `X-Next-Token`. The cursor names the last sandbox served, so a sandbox created or released between pages neither repeats nor skips the rest. An out-of-range `limit`, an unknown `order` or a malformed `nextToken` is `400`. The legacy `GET /sandboxes` takes no page parameters and returns every match. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |
@@ -117,7 +118,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 | `GET /snapshots` | `store.Snapshots` across nodes | Lists the key's checkpoints: create stamps the namespace on the checkpoint name (`<namespace>/<name>`), listing keeps only that prefix and strips it; the `sandboxID` and `name` filters are honored, `limit` and `nextToken` are ignored. One unreachable node is skipped rather than blanking the whole result. |
 | `DELETE /templates/{snapshotID}` | `store.DeleteSnapshot` on the holding node | e2b addresses snapshot deletion through the templates path. The id is looked up among the key's checkpoints first, so `404` for one in another namespace, then deleted on the node that holds it; `500` when the id is not listed and a node did not answer, so an outage never reads as already gone. |
 | `GET /templates`, `GET /v2/templates` | advertised warm-pool keys | Lists the distinct templates the fleet can currently claim; these are pool-derived entries, not e2b-hosted template builds. Each entry's `aliases` lists the aliases that name its image. |
-| `GET /templates/aliases/{alias}` | the alias table | `200 {"templateID": "<pool image>", "public": true}` for an alias the table names, else `404`. The SDKs call this to check whether a template alias exists. |
+| `GET /templates/aliases/{alias}` | the alias table, then the fleet's pools | `200 {"templateID": "<pool image>", "public": true}` for an alias the table names or an image a pool advertises (the `names` the template list reports), else `404`. The SDKs call this to check whether a template exists. |
 | `GET /sandboxes/{id}/metrics` | `store.Stats` | Returns the complete e2b metric schema; see the zero-valued fields below. |
 | `GET /sandboxes/{id}/logs`, `GET /v2/sandboxes/{id}/logs` | `store.GetByClaimID` | This backend keeps no sandbox logs. A sandbox the key can see answers `200` with an empty page: `{"logs":[],"logEntries":[]}` on the legacy route, `{"logs":[]}` on `/v2`. `e2b sandbox logs` then prints no log lines and exits `0`. With `-f` it polls until the sandbox is released, then exits `1` on the `404`; a paused sandbox makes it report "not found". An unknown id is `404`. |
 | `GET /health` | — | Unauthenticated, for probes. |
@@ -162,7 +163,9 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   node (one node round trip; sandbox#229 or later), so a process that never
   saw the sandbox before can connect and use the data plane. Node inventory
   deliberately carries no per-sandbox secret, so `GET /sandboxes` and
-  `GET /sandboxes/{id}` report it empty.
+  `GET /sandboxes/{id}` report it empty. JS SDKs before 2.6 reconnect by id
+  through that detail read and take the token from it, so reconnect by id
+  needs SDK 2.6 or later; a handle from create keeps its token on any version.
 - **`templateID` on read paths comes from node inventory.** The owning node
   publishes the pool template with each entry; a node that does not yet publish
   it makes `GET /sandboxes` and `GET /sandboxes/{id}` report an empty
