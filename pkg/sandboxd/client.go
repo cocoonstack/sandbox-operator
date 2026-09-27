@@ -112,10 +112,12 @@ type NodePool struct {
 // NodeInfo is the PUT /v1/pools (and GET /v1/info) response: the node's live
 // per-pool warm state plus its lifecycle counters.
 type NodeInfo struct {
-	Pools      []NodePool `json:"pools"`
-	Claimed    int        `json:"claimed"`
-	Hibernated int        `json:"hibernated"`
-	Archived   int        `json:"archived"`
+	Pools         []NodePool `json:"pools"`
+	Claimed       int        `json:"claimed"`
+	Hibernated    int        `json:"hibernated"`
+	Archived      int        `json:"archived"`
+	AdvertiseAddr string     `json:"advertise_addr,omitempty"`
+	Peers         []string   `json:"peers,omitempty"`
 }
 
 // Client talks to a single sandboxd instance. It is safe for concurrent use.
