@@ -132,7 +132,11 @@ The driver watches `SandboxWarmPool` and `NodeInventory`, resolves each pool's
 `PUT`s each node its full pool set. It writes `status.replicas` and
 `status.readyReplicas` back from the warm counts those calls report. It runs
 under leader election (`cocoon-warmpool-driver`), so one replica drives the
-pools. An empty sandboxd token leaves it fail-closed: it logs and sets no pools.
+pools. A driver that stops, most often because its lease could not be renewed
+during a control-plane outage, is rebuilt after 5 s and waits in leader election
+again, so the replica keeps serving the aggregated API and the e2b API; only a
+driver that cannot be built at startup stops the process. An empty sandboxd
+token leaves it fail-closed: it logs and sets no pools.
 
 ### Node inventory freshness
 
