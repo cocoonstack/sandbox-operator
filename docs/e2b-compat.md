@@ -33,7 +33,7 @@ sandbox-apiserver \
 | `--e2b-envd-version` | `0.4.0` | `envd` version reported to the SDK. Set it to the one actually in the image. |
 | `--e2b-default-timeout` | `300` | Lease in seconds for a create that names no timeout, and what a refresh renews for. |
 | `--e2b-allow-anonymous` | `false` | Serve with **no** API key. Development only. |
-| `--e2b-template-aliases` | — | File of template aliases, one per line as `alias pool-image` (`#` comments ignored). A create naming the alias claims from that image's pool. The SDKs create `base` when no template is named, so the file needs a `base` line for `Sandbox.create()` to work. The file is read at startup, so a change needs a restart. Startup fails on a malformed line or an alias named twice. |
+| `--e2b-template-alias-file` | — | File of template aliases, one per line as `alias pool-image` (`#` comments ignored). A create naming the alias claims from that image's pool. The SDKs create `base` when no template is named, so the file needs a `base` line for `Sandbox.create()` to work. The file is read at startup, so a change needs a restart. Startup fails on a malformed line or an alias named twice. |
 
 Startup **fails** if neither `--e2b-api-key-file` nor `--e2b-allow-anonymous` is
 set, so a misconfiguration cannot silently expose an open claim endpoint. It
@@ -56,7 +56,7 @@ sandbox-e2b \
   --sandboxd-seeds=172.20.0.5:7777,172.20.0.6:7777 \
   --sandboxd-token-file=/etc/sandboxd/token \
   --e2b-bind-address=:8080 --e2b-domain=sandbox.example.com \
-  --e2b-api-key-file=/etc/e2b/keys --e2b-template-aliases=/etc/e2b/aliases \
+  --e2b-api-key-file=/etc/e2b/keys --e2b-template-alias-file=/etc/e2b/aliases \
   --envd-proxy-bind-address=:8443
 ```
 
@@ -103,7 +103,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
-| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-aliases` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
+| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored; `metadata` is refused with `400`, since metadata is not stored. `/v2` pages as the spec says: `limit` (1 to 100, default 100), `order` by start time (`desc`, newest first, by default, or `asc`) and `nextToken`, the opaque cursor the previous page returned in `X-Next-Token`. The cursor names the last sandbox served, so a sandbox created or released between pages neither repeats nor skips the rest. An out-of-range `limit`, an unknown `order` or a malformed `nextToken` is `400`. The legacy `GET /sandboxes` takes no page parameters and returns every match. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |

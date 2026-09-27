@@ -56,7 +56,7 @@ spec:
         - --e2b-default-timeout={{ . }}
         {{- end }}
         {{- if $e2b.templateAliases }}
-        - --e2b-template-aliases=/etc/sandbox-apiserver/e2b-template-aliases/aliases
+        - --e2b-template-alias-file=/etc/sandbox-apiserver/e2b-template-aliases/aliases
         {{- end }}
         {{- end }}
         ports:
