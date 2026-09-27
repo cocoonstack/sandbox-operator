@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"k8s.io/client-go/util/flowcontrol"
+	"golang.org/x/time/rate"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
@@ -210,7 +210,7 @@ func TestProxyStopsProbingPastItsLimit(t *testing.T) {
 	owner := newFakeNode(t, guestEcho)
 	owner.owns = "sb_abc"
 	r, _ := unpublishedResolver(t, owner)
-	r.(*storeResolver).probeLimit = flowcontrol.NewFakeNeverRateLimiter()
+	r.(*storeResolver).probeLimit = rate.NewLimiter(0, 0)
 	h := newTestProxy(t, r)
 
 	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", "tok")

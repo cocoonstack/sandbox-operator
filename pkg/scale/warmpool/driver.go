@@ -127,9 +127,6 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 	if d.kube == nil {
 		d.kube = mgr.GetClient()
 	}
-	if d.inv == nil {
-		d.inv = scale.NewClientInventorySource(mgr.GetClient())
-	}
 	// Any NodeInventory change (a node joined, restarted, changed address) must
 	// re-spread every pool, so map it to a single global reconcile trigger.
 	enqueueAll := handler.EnqueueRequestsFromMapFunc(syncRequest)
