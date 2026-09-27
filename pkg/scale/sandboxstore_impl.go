@@ -329,7 +329,11 @@ func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, r
 			continue
 		}
 		res, err := s.sandboxdFactory(target, s.sandboxdToken).Claim(ctx, spec)
-		if err == nil || !claimUndelivered(err) {
+		if err == nil {
+			logger.Debugf(ctx, "claim followed a redirect from=%s node=%s id=%s", from, node, res.ID)
+			return node, res, nil
+		}
+		if !claimUndelivered(err) {
 			return node, res, err
 		}
 		logger.Debugf(ctx, "redirect target delivered nothing; skipping from=%s node=%s err=%v", from, node, err)
