@@ -319,7 +319,6 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, m
 	return nil
 }
 
-// claimRedirected retries the claim with no_redirect at each target a node is known for and returns redirect when none delivers.
 func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, redirect *sandboxd.RedirectError, candidates []warmCandidate, spec sandboxd.ClaimSpec) (string, sandboxd.ClaimResult, error) {
 	logger := log.WithFunc("scale.claimRedirected")
 	spec.NoRedirect = true
@@ -338,7 +337,6 @@ func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, r
 	return from, sandboxd.ClaimResult{}, redirect
 }
 
-// nodeForAddress names the node advertising addr, from the candidates or else from every node's capacity, and "" for none.
 func (s *scatterGatherStore) nodeForAddress(ctx context.Context, addr string, candidates []warmCandidate) string {
 	if i := slices.IndexFunc(candidates, func(c warmCandidate) bool { return c.addr == addr }); i >= 0 {
 		return candidates[i].node
