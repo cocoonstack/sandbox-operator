@@ -37,12 +37,7 @@ import (
 )
 
 const (
-	// defaultInterval is the pool resync cadence, and with it the sampling period of
-	// the fleet-wide warm count reported in pool status. Pools are O(single-digit)
-	// and every tick's node fan-out is the same PUT the driver already owes, so a 5s
-	// loop costs no extra round trips — it buys a 5s-granularity view of total warm
-	// capacity while still reconciling drift (a node that restarted, a target edited
-	// out of band).
+	// defaultInterval is the pool resync cadence and the sampling period of the warm count in pool status; each tick's fan-out is the PUT the driver owes anyway.
 	defaultInterval = 5 * time.Second
 
 	// maxNodeConcurrency bounds the per-node PUT /v1/pools fan-out per tick.
@@ -51,19 +46,15 @@ const (
 
 var errNoTemplateRef = errors.New("spec.sandboxTemplateRef.name is required")
 
-// PoolSetter is the sandboxd surface the driver needs: replace a node's whole
-// warm-target set. The concrete *sandboxd.Client satisfies it; tests inject a fake.
+// PoolSetter replaces a node's whole warm-target set; *sandboxd.Client satisfies it and tests inject a fake.
 type PoolSetter interface {
 	SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error)
 }
 
-// ClientFactory builds a PoolSetter for one node's advertise address and the
-// uniform fleet api_token.
+// ClientFactory builds a PoolSetter for one node's advertise address and the fleet api_token.
 type ClientFactory func(addr, token string) PoolSetter
 
-// NewSandboxdFactory returns the production factory. It renders addresses and
-// builds its client as the store does, so a node advertising a scheme is
-// reachable here too.
+// NewSandboxdFactory returns the production factory, which renders addresses as the store does so a node advertising a scheme is reachable.
 func NewSandboxdFactory() ClientFactory {
 	hc := scale.NewSandboxdHTTPClient()
 	return func(addr, token string) PoolSetter {
@@ -76,15 +67,13 @@ type Options struct {
 	Interval time.Duration
 }
 
-// nodeView is one schedulable node: its name, sandboxd address, and current
-// per-pool warm counts (for status write-back).
+// nodeView is one schedulable node with its live per-pool warm counts.
 type nodeView struct {
 	name   string
 	addr   string
 	warmBy map[scale.PoolKey]int
 }
 
-// desiredPool is a resolved SandboxWarmPool: its key and per-node target.
 type desiredPool struct {
 	pool    *extv1beta1.SandboxWarmPool
 	key     scale.PoolKey
@@ -104,8 +93,7 @@ type Driver struct {
 	interval time.Duration
 }
 
-// New builds a Driver. token empty leaves the driver fail-closed (it logs and
-// sets no pools rather than driving sandboxd unauthenticated).
+// New builds a Driver; an empty token leaves it fail-closed, logging instead of driving sandboxd unauthenticated.
 func New(kube client.Client, inv scale.InventorySource, token string, factory ClientFactory, opts Options) *Driver {
 	if opts.Interval <= 0 {
 		opts.Interval = defaultInterval
@@ -120,15 +108,11 @@ func (d *Driver) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, er
 	return ctrl.Result{RequeueAfter: d.interval}, nil
 }
 
-// SetupWithManager registers the driver as a controller watching SandboxWarmPool
-// (the desired-state object) and NodeInventory (the node set to spread across).
+// SetupWithManager registers the driver as a controller watching SandboxWarmPool and NodeInventory.
 func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
-	// Any NodeInventory change (a node joined, restarted, changed address) must
-	// re-spread every pool, so map it to a single global reconcile trigger.
+	// Any NodeInventory change re-spreads every pool, so it maps to one global reconcile.
 	enqueueAll := handler.EnqueueRequestsFromMapFunc(syncRequest)
-	// Generation-filtered so the loop's own writeStatus cannot re-trigger it
-	// into a continuous back-to-back loop under claim churn; create/delete,
-	// spec edits, NodeInventory events, and the RequeueAfter tick keep coverage.
+	// Generation-filtered so the loop's own status writes cannot re-trigger it under claim churn.
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("sandboxwarmpool").
 		Watches(&extv1beta1.SandboxWarmPool{}, enqueueAll, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
@@ -136,8 +120,7 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(d)
 }
 
-// reconcileOnce is the whole loop: resolve pools, distribute targets, PUT every
-// node's full pool set, write pool status from the warm those PUTs report back.
+// reconcileOnce resolves pools, spreads targets, PUTs every node's full set and writes status from what the PUTs report.
 func (d *Driver) reconcileOnce(ctx context.Context) error {
 	var pools extv1beta1.SandboxWarmPoolList
 	if err := d.kube.List(ctx, &pools); err != nil {
@@ -173,16 +156,14 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 
 	d.applyToNodes(ctx, nodes, desired)
 
-	// Status comes from the warm counts applyToNodes just refreshed off the PUT
-	// responses; post-apply warm may still be refilling.
+	// Status comes from the warm the PUTs just reported; post-apply warm may still be refilling.
 	for i, warm := range apportionWarm(desired, nodes) {
 		d.writeStatus(ctx, desired[i].pool, warm)
 	}
 	return nil
 }
 
-// schedulableNodes reads NodeInventory (O(nodes), cache-fed) into node views,
-// keeping only nodes that advertise a sandboxd address.
+// schedulableNodes keeps only the nodes that advertise a sandboxd address.
 func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 	names, err := d.inv.ListNodes(ctx)
 	if err != nil {
@@ -204,8 +185,7 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 	return views, nil
 }
 
-// poolKey resolves a SandboxWarmPool's SandboxTemplate and derives the pool key
-// via the shared scale.PoolKeyFor — identical to the key a Create derives.
+// poolKey derives the key through scale.PoolKeyFor, the derivation a Create uses.
 func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (scale.PoolKey, error) {
 	name := p.Spec.TemplateRef.Name
 	if name == "" {
@@ -219,10 +199,7 @@ func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (sc
 	return scale.PoolKeyFor(tmpl.Spec.PodTemplate.Spec.Containers, net), nil
 }
 
-// applyToNodes builds each node's FULL desired pool set (one entry per pool) and
-// PUTs it. The whole set goes in one request because sandboxd replaces its pool
-// config wholesale — an omitted pool drains. Per-node failures are logged, not
-// fatal: one unreachable node must not stall the rest.
+// applyToNodes PUTs each node's full pool set in one request, since sandboxd drains any pool the set omits; a failed node is logged, not fatal.
 func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []desiredPool) {
 	logger := log.WithFunc("warmpool.applyToNodes")
 	if d.token == "" {
@@ -233,9 +210,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 	g.SetLimit(maxNodeConcurrency)
 	for i := range nodes {
 		node := nodes[i]
-		// Aggregate targets BY KEY: two SandboxWarmPools may resolve to the same
-		// (template,net,size) — their warm targets sum, and sandboxd rejects a PUT
-		// that repeats a key ("duplicate pool"). One spec per distinct key.
+		// Targets sum by key: two SandboxWarmPools may resolve to one key, and sandboxd rejects a PUT that repeats one.
 		byKey := make(map[scale.PoolKey]int, len(desired))
 		for _, dp := range desired {
 			byKey[dp.key] += dp.targets[node.name]
@@ -260,12 +235,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 			if info == nil {
 				return nil
 			}
-			// The PUT response carries this node's live per-pool warm, so adopt it
-			// as the status source: NodeInventory lags by up to one publish
-			// interval, which would make the status sampling period
-			// interval+publish instead of the resync interval. A node whose PUT
-			// failed keeps its inventory-derived counts. Only this goroutine
-			// touches nodes[i], so no lock is needed.
+			// The PUT response carries the node's live warm, one publish interval fresher than inventory; only this goroutine touches nodes[i].
 			nodes[i].warmBy = warmByKey(scale.PoolCapacityFromInfo(info))
 			return nil
 		})
@@ -273,11 +243,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 	_ = g.Wait()
 }
 
-// writeStatus updates a SandboxWarmPool's status.replicas/readyReplicas to the
-// pool's share of the live warm across all nodes — this tick's PUT responses
-// for every node that answered, inventory for any that did not. Warm VMs are
-// claim-ready, so readyReplicas == replicas. Best-effort; a conflict is retried
-// next tick.
+// writeStatus sets replicas and readyReplicas to the pool's share of the live warm, which is claim-ready; a conflict waits for the next tick.
 func (d *Driver) writeStatus(ctx context.Context, p *extv1beta1.SandboxWarmPool, warm int) {
 	selector := "agents.x-k8s.io/warm-pool=" + p.Name
 	if p.Status.Replicas == int32(warm) && p.Status.ReadyReplicas == int32(warm) && p.Status.Selector == selector {
