@@ -156,6 +156,30 @@ func TestSourceReadsStayConsistentWhileTheSnapshotRebuilds(t *testing.T) {
 	wg.Wait()
 }
 
+func TestNodeCapacitiesMatchesTheListAndPerNodeLookups(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		src, w := fleet(t, Options{}, inventory("live", metav1.Now()), inventory("dead", metav1.Now()), inventory("unstamped", metav1.Time{}))
+		fresh, err := src.NodeCapacities(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"dead", "live", "unstamped"}, nodeNames(fresh))
+		time.Sleep(91 * time.Second)
+		w.publish("live", metav1.Now())
+		got, err := src.NodeCapacities(ctx)
+		require.NoError(t, err)
+		nodes, err := src.ListNodes(ctx)
+		require.NoError(t, err)
+		want := make([]scale.NodePools, 0, len(nodes))
+		for _, n := range nodes {
+			addr, pools, err := src.NodeCapacity(ctx, n)
+			require.NoError(t, err)
+			want = append(want, scale.NodePools{Node: n, Address: addr, Pools: pools})
+		}
+		assert.Equal(t, want, got)
+		assert.Equal(t, []string{"live", "unstamped"}, nodes)
+	})
+}
+
 func TestPublishedAtTreatsAZeroStampAsUnset(t *testing.T) {
 	assert.Zero(t, publishedAt(inventory("a", metav1.Time{})))
 	at := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
@@ -239,4 +263,12 @@ func inventory(node string, publishedAt metav1.Time) *cocoonv1beta1.NodeInventor
 		Pools:       []scale.PoolCapacity{{Template: "rt", Warm: 1, Target: 1}},
 		PublishedAt: publishedAt.Rfc3339Copy(),
 	}
+}
+
+func nodeNames(caps []scale.NodePools) []string {
+	names := make([]string, len(caps))
+	for i, c := range caps {
+		names[i] = c.Node
+	}
+	return names
 }

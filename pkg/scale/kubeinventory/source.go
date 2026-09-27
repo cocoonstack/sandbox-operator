@@ -37,7 +37,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 }
 
 type snapshot struct {
-	names  []string
+	caps   []scale.NodePools
 	stamps []int64
 	newest int64
 	byNode map[string]*scale.NodeInventory
@@ -81,16 +81,28 @@ func New(ctx context.Context, informers cache.Informers, opts Options) (*Source,
 }
 
 func (s *Source) ListNodes(context.Context) ([]string, error) {
-	snap := s.snap.Load()
-	ref := min(snap.newest, time.Now().UnixNano())
-	s.reference.Store(ref)
-	nodes := make([]string, 0, len(snap.names))
-	for i, node := range snap.names {
+	snap, ref := s.current()
+	nodes := make([]string, 0, len(snap.caps))
+	for i, c := range snap.caps {
 		if !s.stale(snap.stamps[i], ref) {
-			nodes = append(nodes, node)
+			nodes = append(nodes, c.Node)
 		}
 	}
 	return nodes, nil
+}
+
+func (s *Source) NodeCapacities(context.Context) ([]scale.NodePools, error) {
+	snap, ref := s.current()
+	if !slices.ContainsFunc(snap.stamps, func(stamp int64) bool { return s.stale(stamp, ref) }) {
+		return snap.caps, nil
+	}
+	out := make([]scale.NodePools, 0, len(snap.caps))
+	for i, c := range snap.caps {
+		if !s.stale(snap.stamps[i], ref) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func (s *Source) NodeInventory(_ context.Context, node string) (*scale.NodeInventory, error) {
@@ -114,6 +126,13 @@ func (s *Source) get(node string) (*scale.NodeInventory, error) {
 		return nil, fmt.Errorf("kubeinventory: node %q inventory is stale: %w", node, k8serrors.NewNotFound(nodeInventories, node))
 	}
 	return inv, nil
+}
+
+func (s *Source) current() (*snapshot, int64) {
+	snap := s.snap.Load()
+	ref := min(snap.newest, time.Now().UnixNano())
+	s.reference.Store(ref)
+	return snap, ref
 }
 
 func (s *Source) stale(stamp, ref int64) bool {
@@ -146,10 +165,12 @@ func (s *Source) drop(obj any) {
 }
 
 func (s *Source) publish() {
-	snap := &snapshot{names: slices.Sorted(maps.Keys(s.byNode)), byNode: maps.Clone(s.byNode)}
-	snap.stamps = make([]int64, len(snap.names))
-	for i, node := range snap.names {
-		snap.stamps[i] = publishedAt(snap.byNode[node])
+	names := slices.Sorted(maps.Keys(s.byNode))
+	snap := &snapshot{caps: make([]scale.NodePools, len(names)), stamps: make([]int64, len(names)), byNode: maps.Clone(s.byNode)}
+	for i, node := range names {
+		inv := s.byNode[node]
+		snap.caps[i] = scale.NodePools{Node: node, Address: inv.Address, Pools: inv.Pools}
+		snap.stamps[i] = publishedAt(inv)
 		snap.newest = max(snap.newest, snap.stamps[i])
 	}
 	s.snap.Store(snap)

@@ -296,6 +296,22 @@ func TestTwoGossipedSpellingsOfOneNodeEndUpPolledOnce(t *testing.T) {
 	assert.NotContains(t, s.members, old.addr())
 }
 
+func TestNodeCapacitiesMatchesTheListAndPerNodeLookups(t *testing.T) {
+	a, b := newStubNode(t), newStubNode(t)
+	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	s := newSource(t, a.addr())
+	got, err := s.NodeCapacities(t.Context())
+	require.NoError(t, err)
+	var want []scale.NodePools
+	for _, n := range listNodes(t, s) {
+		addr, pools, err := s.NodeCapacity(t.Context(), n)
+		require.NoError(t, err)
+		want = append(want, scale.NodePools{Node: n, Address: addr, Pools: pools})
+	}
+	assert.Equal(t, want, got)
+	assert.Len(t, got, 2)
+}
+
 type stubNode struct {
 	mu        sync.Mutex
 	srv       *httptest.Server

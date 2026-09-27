@@ -79,6 +79,15 @@ type InventorySource interface {
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
 	// NodeCapacity returns one node's advertise address and warm pools without decoding its entries.
 	NodeCapacity(ctx context.Context, node string) (address string, pools []PoolCapacity, err error)
+	// NodeCapacities returns every readable node's address and warm pools in ListNodes order; a source may return its own shared slice, so callers never mutate it.
+	NodeCapacities(ctx context.Context) ([]NodePools, error)
+}
+
+// NodePools is one node's advertise address and warm pools.
+type NodePools struct {
+	Node    string
+	Address string
+	Pools   []PoolCapacity
 }
 
 // StoreOption configures a scatterGatherStore.
@@ -235,7 +244,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, spec)
 		redirect, _ := errors.AsType[*sandboxd.RedirectError](claimErr)
 		if redirect != nil {
-			node, res, claimErr = s.claimRedirected(ctx, node, redirect, candidates, spec)
+			node, res, claimErr = s.claimRedirected(ctx, node, redirect, spec)
 		}
 		if claimErr == nil {
 			s.index.remember(nameKey(namespace, name), node)
@@ -319,11 +328,11 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, m
 	return nil
 }
 
-func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, redirect *sandboxd.RedirectError, candidates []warmCandidate, spec sandboxd.ClaimSpec) (string, sandboxd.ClaimResult, error) {
+func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, redirect *sandboxd.RedirectError, spec sandboxd.ClaimSpec) (string, sandboxd.ClaimResult, error) {
 	logger := log.WithFunc("scale.claimRedirected")
 	spec.NoRedirect = true
 	for _, target := range redirect.Targets {
-		node := s.nodeForAddress(ctx, target, candidates)
+		node := s.nodeForAddress(ctx, target)
 		if node == "" {
 			logger.Debugf(ctx, "redirect target is no known node; skipping from=%s target=%s", from, target)
 			continue
@@ -341,38 +350,34 @@ func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, r
 	return from, sandboxd.ClaimResult{}, redirect
 }
 
-func (s *scatterGatherStore) nodeForAddress(ctx context.Context, addr string, candidates []warmCandidate) string {
-	if i := slices.IndexFunc(candidates, func(c warmCandidate) bool { return c.addr == addr }); i >= 0 {
-		return candidates[i].node
-	}
-	node, _ := FirstHit(ctx, s.src, s.concurrency, func(gctx context.Context, n string) string {
-		if got, _, err := s.src.NodeCapacity(gctx, n); err == nil && got == addr {
-			return n
-		}
+func (s *scatterGatherStore) nodeForAddress(ctx context.Context, addr string) string {
+	nodes, err := s.src.NodeCapacities(ctx)
+	if err != nil {
 		return ""
-	})
-	return node
+	}
+	if i := slices.IndexFunc(nodes, func(n NodePools) bool { return n.Address == addr }); i >= 0 {
+		return nodes[i].Node
+	}
+	return ""
 }
 
-// warmCandidates fans out per node like List, skipping (not failing) a node whose inventory is unavailable.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
-	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
-		addr, pools, err := s.src.NodeCapacity(gctx, n)
-		if err != nil {
-			log.WithFunc("scale.warmCandidates").Debugf(gctx, "node inventory unavailable during claim node-pick; skipping node=%s err=%v", n, err)
-			return nil
+	nodes, err := s.src.NodeCapacities(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scale: enumerate node capacity: %w", err)
+	}
+	var out []warmCandidate
+	for _, n := range nodes {
+		if n.Address == "" {
+			continue
 		}
-		if addr == "" {
-			return nil
-		}
-		var out []warmCandidate
-		for j := range pools {
-			if pc := pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
-				out = append(out, warmCandidate{node: n, addr: addr, warm: pc.Warm})
+		for _, pc := range n.Pools {
+			if pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+				out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: pc.Warm})
 			}
 		}
-		return out
-	})
+	}
+	return out, nil
 }
 
 func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, labelSel labels.Selector, fieldSel fields.Selector, w *watch.ProxyWatcher, ch chan watch.Event) {
@@ -622,6 +627,20 @@ func (s *StaticInventorySource) NodeCapacity(_ context.Context, node string) (st
 		return "", nil, fmt.Errorf("scale: no inventory published for node %q", node)
 	}
 	return inv.Address, slices.Clone(inv.Pools), nil
+}
+
+func (s *StaticInventorySource) NodeCapacities(context.Context) ([]NodePools, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]NodePools, 0, len(s.inv))
+	for _, node := range slices.Sorted(maps.Keys(s.inv)) {
+		if _, partitioned := s.partition[node]; partitioned {
+			continue
+		}
+		inv := s.inv[node]
+		out = append(out, NodePools{Node: node, Address: inv.Address, Pools: slices.Clone(inv.Pools)})
+	}
+	return out, nil
 }
 
 // ObjectCount is the number of NodeInventory objects held, the O(nodes) etcd object count.

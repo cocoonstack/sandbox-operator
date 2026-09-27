@@ -165,21 +165,15 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 
 // schedulableNodes keeps only the nodes that advertise a sandboxd address.
 func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
-	names, err := d.inv.ListNodes(ctx)
+	nodes, err := d.inv.NodeCapacities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list node inventories: %w", err)
 	}
-	views := make([]nodeView, 0, len(names))
-	for _, name := range names {
-		addr, pools, err := d.inv.NodeCapacity(ctx, name)
-		if err != nil {
-			log.WithFunc("warmpool.schedulableNodes").Debugf(ctx, "skip node without readable inventory node=%s err=%v", name, err)
-			continue
+	views := make([]nodeView, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Address != "" {
+			views = append(views, nodeView{name: n.Node, addr: n.Address, warmBy: warmByKey(n.Pools)})
 		}
-		if addr == "" {
-			continue
-		}
-		views = append(views, nodeView{name: name, addr: addr, warmBy: warmByKey(pools)})
 	}
 	slices.SortFunc(views, func(a, b nodeView) int { return cmp.Compare(a.name, b.name) })
 	return views, nil

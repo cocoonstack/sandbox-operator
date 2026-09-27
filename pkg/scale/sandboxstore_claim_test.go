@@ -348,6 +348,40 @@ func TestStoreClaimReportsNoCapacityWhenEveryRedirectTargetIsFull(t *testing.T) 
 	assert.Equal(t, []claimCall{{"a:7777", false}, {"b:7777", true}, {"c:7777", true}}, f.calls)
 }
 
+func TestWarmCandidatesMatchThePerNodeFanOut(t *testing.T) {
+	ctx := t.Context()
+	pool := PoolKey{Template: "rt", Net: NetDefault, Size: SizeClassSmall}
+	src := NewStaticInventorySource()
+	src.Put(poolInv("a", "10.0.0.1:7777", PoolCapacity{Template: "rt", Warm: 2}, PoolCapacity{Template: "other", Warm: 9}))
+	src.Put(poolInv("b", "10.0.0.2:7777", PoolCapacity{Template: "rt", Warm: 0}))
+	src.Put(poolInv("c", "", PoolCapacity{Template: "rt", Warm: 3}))
+	src.Put(poolInv("d", "10.0.0.4:7777", PoolCapacity{Template: "rt", Net: NetDefault, Size: SizeClassSmall, Warm: 1}, PoolCapacity{Template: "rt", Warm: 4}))
+	src.Put(poolInv("e", "10.0.0.5:7777", PoolCapacity{Template: "rt", Warm: 5}))
+	src.Partition("e")
+	store := NewScatterGatherStore(src).(*scatterGatherStore)
+
+	var want []warmCandidate
+	nodes, err := src.ListNodes(ctx)
+	require.NoError(t, err)
+	for _, n := range nodes {
+		addr, pools, err := src.NodeCapacity(ctx, n)
+		if err != nil || addr == "" {
+			continue
+		}
+		for _, pc := range pools {
+			if pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+				want = append(want, warmCandidate{node: n, addr: addr, warm: pc.Warm})
+			}
+		}
+	}
+	got, err := store.warmCandidates(ctx, pool)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	assert.Len(t, got, 3, "a's rt pool and both of d's; b is cold, c has no address, e is partitioned")
+	assert.Equal(t, "d", store.nodeForAddress(ctx, "10.0.0.4:7777"), "a node address resolves to its node")
+	assert.Empty(t, store.nodeForAddress(ctx, "10.0.0.5:7777"), "a partitioned node's address does not resolve")
+}
+
 type claimCall struct {
 	addr       string
 	noRedirect bool
