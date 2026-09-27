@@ -49,6 +49,7 @@ spec:
         - --e2b-namespace={{ $e2b.namespace }}
         - --e2b-domain={{ required "apiserver.e2b.domain is required when apiserver.e2b.enabled is true" $e2b.domain }}
         - --e2b-api-key-file=/etc/sandbox-apiserver/e2b-api-keys/{{ $e2b.apiKeySecret.key }}
+        - --e2b-envd-secret-file=/etc/sandbox-apiserver/e2b-envd-secret/{{ $e2b.envdSecret.key }}
         {{- with $e2b.envdVersion }}
         - --e2b-envd-version={{ . }}
         {{- end }}
@@ -98,6 +99,9 @@ spec:
         - name: e2b-api-keys
           mountPath: /etc/sandbox-apiserver/e2b-api-keys
           readOnly: true
+        - name: e2b-envd-secret
+          mountPath: /etc/sandbox-apiserver/e2b-envd-secret
+          readOnly: true
         {{- if $e2b.templateAliases }}
         - name: e2b-template-aliases
           mountPath: /etc/sandbox-apiserver/e2b-template-aliases
@@ -117,6 +121,9 @@ spec:
       - name: e2b-api-keys
         secret:
           secretName: {{ $e2bKeySecret }}
+      - name: e2b-envd-secret
+        secret:
+          secretName: {{ include "sandbox-operator.e2b.envdSecretName" . }}
       {{- if $e2b.templateAliases }}
       - name: e2b-template-aliases
         configMap:

@@ -122,6 +122,14 @@ func (c *Client) Fork(ctx context.Context, id string, spec ForkSpec) (ForkResult
 	return out, err
 }
 
+// SetInstanceMetadata performs PUT /v1/sandboxes/{id}/instance-metadata, replacing the JSON object the guest reads from 169.254.169.254; a paused sandbox answers 409 and is not woken.
+func (c *Client) SetInstanceMetadata(ctx context.Context, id string, doc []byte) error {
+	if id == "" {
+		return fmt.Errorf("sandboxd: instance metadata requires a sandbox id")
+	}
+	return c.send(ctx, http.MethodPut, "/v1/sandboxes/"+url.PathEscape(id)+"/instance-metadata", c.token, "instance metadata", doc, http.StatusNoContent)
+}
+
 // Checkpoint performs POST /v1/sandboxes/{id}/checkpoint, capturing the
 // sandbox's state under a fresh id. The source keeps running.
 func (c *Client) Checkpoint(ctx context.Context, id string, spec CheckpointSpec) (Checkpoint, error) {
@@ -149,7 +157,7 @@ func (c *Client) DeleteCheckpoint(ctx context.Context, checkpointID string) erro
 	if checkpointID == "" {
 		return fmt.Errorf("sandboxd: delete checkpoint requires a checkpoint id")
 	}
-	return c.sendNoBody(ctx, http.MethodDelete, "/v1/checkpoints/"+url.PathEscape(checkpointID), c.token, "delete checkpoint", http.StatusNoContent, http.StatusNotFound)
+	return c.send(ctx, http.MethodDelete, "/v1/checkpoints/"+url.PathEscape(checkpointID), c.token, "delete checkpoint", nil, http.StatusNoContent, http.StatusNotFound)
 }
 
 // Sandbox performs GET /v1/sandboxes/{id}, one live claim in the index-row shape.
@@ -185,7 +193,7 @@ func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: %s requires a sandbox id", verb)
 	}
-	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, http.StatusNoContent)
+	return c.send(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, nil, http.StatusNoContent)
 }
 
 func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {

@@ -37,9 +37,10 @@ type step struct {
 
 // client drives the proxy the way an unmodified e2b SDK would.
 type client struct {
-	base  string
-	host  string
-	token string
+	base       string
+	host       string
+	token      string
+	claimToken string
 }
 
 func (c *client) post(ctx context.Context, h2 bool, path, host, token string, extra http.Header, body string) (string, error) {
@@ -100,13 +101,22 @@ type staticResolver struct {
 	claimID  string
 	address  string
 	publicID string
+	token    string
+	access   string
 }
 
-func (r staticResolver) Owner(_ context.Context, sandboxID, _ string) (envdproxy.Owner, error) {
+func (r staticResolver) Owner(ctx context.Context, sandboxID, accessToken string) (envdproxy.Owner, error) {
+	if accessToken != r.access {
+		return envdproxy.Owner{}, envdproxy.ErrAccessDenied
+	}
+	return r.Locate(ctx, sandboxID)
+}
+
+func (r staticResolver) Locate(_ context.Context, sandboxID string) (envdproxy.Owner, error) {
 	if sandboxID != r.publicID && sandboxID != r.claimID {
 		return envdproxy.Owner{}, envdproxy.ErrSandboxNotFound
 	}
-	return envdproxy.Owner{ClaimID: r.claimID, Address: r.address}, nil
+	return envdproxy.Owner{ClaimID: r.claimID, Address: r.address, Token: r.token}, nil
 }
 
 func main() {
@@ -136,7 +146,8 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	// The published id is the DNS-safe rendering, exactly as the compat API
 	// hands it to the SDK; the proxy must resolve it back to the claim id.
 	publicID := e2bcompat.PublicID(sandboxID)
-	srv, err := envdproxy.NewServer(staticResolver{claimID: sandboxID, address: node, publicID: publicID},
+	access := e2bcompat.AccessToken([]byte("envdproxysmoke"), token)
+	srv, err := envdproxy.NewServer(staticResolver{claimID: sandboxID, address: node, publicID: publicID, token: token, access: access},
 		envdproxy.Options{Domain: domain, GuestHTTP2: guestHTTP2})
 	if err != nil {
 		return err
@@ -149,7 +160,7 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	go func() { _ = edge.Serve(ln) }()
 	defer func() { _ = edge.Close() }()
 
-	c := &client{base: "http://" + ln.Addr().String(), host: fmt.Sprintf("%d-%s.%s", port, publicID, domain), token: token}
+	c := &client{base: "http://" + ln.Addr().String(), host: fmt.Sprintf("%d-%s.%s", port, publicID, domain), token: access, claimToken: token}
 	fmt.Printf("proxying %s -> %s/%s:%d\n", c.host, node, sandboxID, port)
 
 	steps := []step{
@@ -170,7 +181,7 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 		steps = append([]step{
 			{"http/1.1 reaches the guest", stepHTTP1},
 			{"http/2 client reaches the guest", stepH2Client},
-			{"host credentials are stripped", stepStripped},
+			{"only the access token crosses", stepCredentials},
 			{"header routing", stepHeaderRouting},
 		}, steps...)
 	default:
@@ -201,18 +212,18 @@ func stepH2Client(ctx context.Context, c *client) error {
 	return err
 }
 
-// stepStripped proves a host-side credential never crosses into the guest: a
-// sandbox that learned its own token could drive its own control plane.
-func stepStripped(ctx context.Context, c *client) error {
+// stepCredentials proves the guest gets its own envd access token and no host
+// credential: a sandbox that learned its claim token could drive its own control plane.
+func stepCredentials(ctx context.Context, c *client) error {
 	extra := http.Header{"X-Api-Key": []string{"e2b_secret"}, "X-Probe": []string{"kept"}}
 	body, err := c.post(ctx, false, "/echo", c.host, c.token, extra, "{}")
 	if err != nil {
 		return err
 	}
-	if err := wantReport(body, "header[X-Access-Token]=\n", "header[X-API-KEY]=\n"); err != nil {
+	if err := wantReport(body, "header[X-Access-Token]="+c.token+"\n", "header[X-API-KEY]=\n"); err != nil {
 		return err
 	}
-	if strings.Contains(body, c.token) || strings.Contains(body, "e2b_secret") {
+	if strings.Contains(body, c.claimToken) || strings.Contains(body, "e2b_secret") {
 		return fmt.Errorf("guest saw a host credential:\n%s", body)
 	}
 	return wantReport(body, "header[X-Probe]=kept")

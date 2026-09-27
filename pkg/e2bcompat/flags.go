@@ -1,6 +1,8 @@
 package e2bcompat
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +23,7 @@ type Flags struct {
 	APIKeyFile     string
 	AllowAnonymous bool
 	AliasesFile    string
+	EnvdSecretFile string
 }
 
 // NewFlags returns the flag defaults.
@@ -46,6 +49,7 @@ func (f *Flags) AddFlags(fs *pflag.FlagSet) {
 		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
 	fs.StringVar(&f.AliasesFile, "e2b-template-alias-file", f.AliasesFile,
 		"Path to a file of e2b template aliases, one per line as \"alias pool-image\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool.")
+	AddEnvdSecretFlag(fs, &f.EnvdSecretFile)
 }
 
 // ServerOptions reads the key and alias files and returns the server options over inv.
@@ -58,6 +62,10 @@ func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
+	secret, err := EnvdSecret(f.EnvdSecretFile)
+	if err != nil {
+		return Options{}, err
+	}
 	return Options{
 		Namespace:             f.Namespace,
 		Domain:                f.Domain,
@@ -67,7 +75,29 @@ func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
 		AllowAnonymous:        f.AllowAnonymous,
 		Inventory:             inv,
 		TemplateAliases:       aliases,
+		EnvdSecret:            secret,
 	}, nil
+}
+
+// AddEnvdSecretFlag registers --e2b-envd-secret-file, which the e2b surface and the envd-proxy must share.
+func AddEnvdSecretFlag(fs *pflag.FlagSet, path *string) {
+	fs.StringVar(path, "e2b-envd-secret-file", *path,
+		"Path to a file (Secret mount) holding the key every sandbox's envd access token derives from; the e2b surface and the envd-proxy must read the same one.")
+}
+
+// EnvdSecret reads the envd secret file, trimmed; an empty or missing one is an error.
+func EnvdSecret(path string) ([]byte, error) {
+	if path == "" {
+		return nil, errors.New("--e2b-envd-secret-file is required")
+	}
+	b, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("read e2b envd secret file %q: %w", path, err)
+	}
+	if b = bytes.TrimSpace(b); len(b) == 0 {
+		return nil, fmt.Errorf("e2b envd secret file %q is empty", path)
+	}
+	return b, nil
 }
 
 func fileLines(path, what string) ([]string, error) {

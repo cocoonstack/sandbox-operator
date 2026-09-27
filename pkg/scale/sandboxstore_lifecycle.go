@@ -41,6 +41,17 @@ func (s *scatterGatherStore) DialGuestPort(ctx context.Context, node, id string,
 	return conn, nil
 }
 
+func (s *scatterGatherStore) SetInstanceMetadata(ctx context.Context, node, id string, doc []byte) error {
+	cl, err := s.nodeClient(ctx, node, "instance metadata", id)
+	if err != nil {
+		return err
+	}
+	if err := cl.SetInstanceMetadata(ctx, id, doc); err != nil {
+		return nodeVerbError(err, "instance metadata", id, node)
+	}
+	return nil
+}
+
 func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error) {
 	cl, err := s.nodeClient(ctx, node, "renew", id)
 	if err != nil {

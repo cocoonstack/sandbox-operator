@@ -246,31 +246,30 @@ func TestSandboxReadsOneRow(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, he.StatusCode)
 }
 
-func TestIsOwnerAsksWithTheSandboxsOwnToken(t *testing.T) {
-	var fail atomic.Bool
+func TestSetInstanceMetadataPutsTheDocumentVerbatim(t *testing.T) {
+	var gotBody, gotAuth, gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case fail.Load():
-			w.WriteHeader(http.StatusInternalServerError)
-		case r.URL.Path == "/v1/sandboxes/sb_1/owner" && r.Header.Get("Authorization") == "Bearer sbtok":
-			_, _ = w.Write([]byte(`{"owner_addr":"10.0.0.1:7777"}`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
+		if r.URL.Path != "/v1/sandboxes/sb_1/instance-metadata" {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"sandbox is paused"}`))
+			return
 		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody, gotAuth, gotMethod = string(b), r.Header.Get("Authorization"), r.Method
+		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
 	c := New(srv.URL, "root-token")
 
-	owns, err := c.IsOwner(t.Context(), "sb_1", "sbtok")
-	require.NoError(t, err)
-	assert.True(t, owns)
-	owns, err = c.IsOwner(t.Context(), "sb_1", "root-token")
-	require.NoError(t, err)
-	assert.False(t, owns, "the node's own api token is not the sandbox's")
+	require.NoError(t, c.SetInstanceMetadata(t.Context(), "sb_1", []byte(`{"accessTokenHash":"ab"}`)))
+	assert.Equal(t, `{"accessTokenHash":"ab"}`, gotBody)
+	assert.Equal(t, "Bearer root-token", gotAuth)
+	assert.Equal(t, http.MethodPut, gotMethod)
 
-	fail.Store(true)
-	_, err = c.IsOwner(t.Context(), "sb_1", "sbtok")
-	assert.Error(t, err, "a node error is not a no")
+	err := c.SetInstanceMetadata(t.Context(), "sb_2", []byte(`{}`))
+	he, ok := errors.AsType[*HTTPError](err)
+	require.True(t, ok, "the node's refusal must surface as its status, got %v", err)
+	assert.Equal(t, http.StatusConflict, he.StatusCode)
 }
 
 func TestSetPoolsReplacesTheNodeTargetsAndDecodesTheEcho(t *testing.T) {

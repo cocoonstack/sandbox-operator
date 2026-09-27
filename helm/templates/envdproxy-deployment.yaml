@@ -38,6 +38,10 @@ spec:
         {{- with include "sandbox-operator.envdProxy.domain" . }}
         - --domain={{ . }}
         {{- end }}
+        - --e2b-envd-secret-file=/etc/sandbox-envd-proxy/e2b-envd-secret/{{ .Values.apiserver.e2b.envdSecret.key }}
+        {{- if .Values.apiserver.sandboxdToken.secretName }}
+        - --sandboxd-token-file=/etc/sandbox-envd-proxy/sandboxd-token/{{ .Values.apiserver.sandboxdToken.key }}
+        {{- end }}
         {{- if $tlsSecret }}
         - --tls-cert-file=/etc/sandbox-envd-proxy/serving-certs/tls.crt
         - --tls-private-key-file=/etc/sandbox-envd-proxy/serving-certs/tls.key
@@ -62,16 +66,34 @@ spec:
           periodSeconds: 10
         resources:
           {{- toYaml .Values.envdProxy.resources | nindent 10 }}
-{{- if $tlsSecret }}
         volumeMounts:
+        - name: e2b-envd-secret
+          mountPath: /etc/sandbox-envd-proxy/e2b-envd-secret
+          readOnly: true
+        {{- if .Values.apiserver.sandboxdToken.secretName }}
+        - name: sandboxd-token
+          mountPath: /etc/sandbox-envd-proxy/sandboxd-token
+          readOnly: true
+        {{- end }}
+        {{- if $tlsSecret }}
         - name: serving-certs
           mountPath: /etc/sandbox-envd-proxy/serving-certs
           readOnly: true
+        {{- end }}
       volumes:
+      - name: e2b-envd-secret
+        secret:
+          secretName: {{ include "sandbox-operator.e2b.envdSecretName" . }}
+      {{- with .Values.apiserver.sandboxdToken.secretName }}
+      - name: sandboxd-token
+        secret:
+          secretName: {{ . }}
+      {{- end }}
+      {{- if $tlsSecret }}
       # A wildcard certificate for *.{domain}: the SDK addresses every sandbox
       # by its own derived host.
       - name: serving-certs
         secret:
           secretName: {{ $tlsSecret }}
-{{- end }}
+      {{- end }}
 {{- end }}

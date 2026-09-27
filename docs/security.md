@@ -8,12 +8,15 @@
   (`apiserver.e2b.apiKeySecret`).
 - Node-local warm-pool claims are authorized by the sandboxd bearer token. A
   claimed sandbox is driven with the per-claim token handed back on create:
-  the `sandbox.cocoonstack.io/token` annotation on the Kubernetes surface,
-  `envdAccessToken` on the e2b surface. Both are secrets — leaking either
-  grants control over the corresponding sandboxes, never over the host.
-- `sandbox-envd-proxy` holds no fleet credential and mints nothing. It relays a
-  request into a guest port only with the sandbox token the caller presents,
-  and a caller never learns a node address.
+  the `sandbox.cocoonstack.io/token` annotation on the Kubernetes surface.
+  The e2b surface hands out `envdAccessToken` instead, an HMAC of that claim
+  token under the envd secret (`apiserver.e2b.envdSecret`), which the sandbox's
+  own `envd` enforces. Both are secrets: leaking one grants control over that
+  sandbox, never over the host, and the e2b token reaches only its data plane.
+- `sandbox-envd-proxy` holds the fleet sandboxd token and the envd secret. It
+  reads a sandbox's claim token from the owning node, admits a request only
+  when the presented token derives from it, and opens the relay with the claim
+  token, which no client ever sees. A caller never learns a node address.
 - Sandboxes are hardware-isolated microVMs. A guest escape is a vulnerability
   in the hypervisor stack underneath, coordinated with the relevant upstream.
 

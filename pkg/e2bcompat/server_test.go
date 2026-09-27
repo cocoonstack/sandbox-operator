@@ -1,6 +1,7 @@
 package e2bcompat
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,8 +26,9 @@ import (
 )
 
 const (
-	testKey    = "e2b_testkey"
-	testDomain = "sandbox.example.com"
+	testKey        = "e2b_testkey"
+	testDomain     = "sandbox.example.com"
+	testEnvdSecret = "test-envd-secret"
 )
 
 func TestCreateClaimsFromTemplatePool(t *testing.T) {
@@ -48,8 +50,8 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	if got.TemplateID != "registry/rt:24.04" {
 		t.Errorf("templateID = %q, want it echoed back", got.TemplateID)
 	}
-	if got.EnvdAccessToken != "tok-1" {
-		t.Errorf("envdAccessToken = %q, want the claim token", got.EnvdAccessToken)
+	if got.EnvdAccessToken != AccessToken([]byte(testEnvdSecret), "tok-1") {
+		t.Errorf("envdAccessToken = %q, want the token derived from the claim token", got.EnvdAccessToken)
 	}
 	if got.Domain != "sandbox.example.com" {
 		t.Errorf("domain = %q, want the configured domain", got.Domain)
@@ -143,7 +145,6 @@ func TestAuthRequiresAPIKey(t *testing.T) {
 func TestCreateRefusesGuaranteesThisBackendCannotGive(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{
 		{"secure false", `{"templateID":"t","secure":false}`},
-		{"envVars", `{"templateID":"t","envVars":{"A":"1"}}`},
 		{"autoPause on the internet lane", `{"templateID":"t","autoPause":true,"allow_internet_access":true}`},
 		{"network rules", `{"templateID":"t","network":{"denyOut":["10.0.0.0/8"]}}`},
 		{"volume mounts", `{"templateID":"t","volumeMounts":[{"name":"v","path":"/data"}]}`},
@@ -239,19 +240,22 @@ func TestCreatePassesTheNodeRefusalThrough(t *testing.T) {
 }
 
 func TestNewServerRefusesOpenByDefault(t *testing.T) {
-	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", Domain: testDomain}); err == nil {
+	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", Domain: testDomain, EnvdSecret: []byte(testEnvdSecret)}); err == nil {
 		t.Fatal("NewServer accepted no API key without explicit anonymous access")
 	}
-	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", Domain: testDomain, AllowAnonymous: true}); err != nil {
+	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", Domain: testDomain, AllowAnonymous: true}); err == nil {
+		t.Fatal("NewServer accepted no envd secret")
+	}
+	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", Domain: testDomain, AllowAnonymous: true, EnvdSecret: []byte(testEnvdSecret)}); err != nil {
 		t.Fatalf("NewServer rejected explicit anonymous access: %v", err)
 	}
 }
 
 func TestNewServerRequiresADomain(t *testing.T) {
-	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", APIKeys: []string{testKey}}); err == nil {
+	if _, err := NewServer(&fakeStore{}, Options{EnvdSecret: []byte(testEnvdSecret), Namespace: "x", APIKeys: []string{testKey}}); err == nil {
 		t.Fatal("NewServer accepted an empty domain; a sandbox handed out with one has no reachable data plane")
 	}
-	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x", Domain: "   ", APIKeys: []string{testKey}}); err == nil {
+	if _, err := NewServer(&fakeStore{}, Options{EnvdSecret: []byte(testEnvdSecret), Namespace: "x", Domain: "   ", APIKeys: []string{testKey}}); err == nil {
 		t.Fatal("NewServer accepted a blank domain")
 	}
 }
@@ -327,7 +331,7 @@ func TestDetailStartedAtIsTheNodesClaimTime(t *testing.T) {
 		Address: "10.0.0.1:7777",
 		Entries: []scale.InventoryEntry{{Name: "sandboxes/sb-1", ID: "sb_0123abcd", Phase: scale.PhaseRunning, Address: "10.0.0.1:7777", ClaimedAt: &claimed}},
 	})
-	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
+	s, err := NewServer(scale.NewScatterGatherStore(src), Options{EnvdSecret: []byte(testEnvdSecret), Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -488,7 +492,7 @@ func TestLookupUsesClaimIDResolver(t *testing.T) {
 			{Name: "elsewhere/sb-2", ID: "sb_ffff0000", Phase: "Running", Address: "10.0.0.1:7777"},
 		},
 	})
-	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
+	s, err := NewServer(scale.NewScatterGatherStore(src), Options{EnvdSecret: []byte(testEnvdSecret), Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -512,7 +516,7 @@ func TestLookupUsesClaimIDResolver(t *testing.T) {
 }
 
 func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
-	s, err := NewServer(&fakeStore{}, Options{Domain: testDomain, AllowAnonymous: true})
+	s, err := NewServer(&fakeStore{}, Options{EnvdSecret: []byte(testEnvdSecret), Domain: testDomain, AllowAnonymous: true})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -563,6 +567,10 @@ type fakeStore struct {
 	snapshotsDownNode   string
 	deletedSnapshotNode string
 	deletedSnapshotID   string
+
+	envdCalls    []string
+	initStatus   int
+	metadataDocs []string
 }
 
 func (f *fakeStore) List(_ context.Context, opts scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
@@ -644,7 +652,22 @@ func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 }
 
 func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (net.Conn, error) {
-	return nil, k8serrors.NewConflict(sandboxv1beta1.Resource("sandboxes"), id, errors.New("sandbox is paused"))
+	return fakeEnvd(func(r *http.Request, body string) (int, string) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.envdCalls = append(f.envdCalls, id+" "+r.Method+" "+r.URL.Path+" "+body)
+		if r.URL.Path == "/init" {
+			return cmp.Or(f.initStatus, http.StatusNoContent), ""
+		}
+		return http.StatusNotFound, ""
+	}), nil
+}
+
+func (f *fakeStore) SetInstanceMetadata(_ context.Context, _, id string, doc []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metadataDocs = append(f.metadataDocs, id+" "+string(doc))
+	return nil
 }
 
 func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {
@@ -703,7 +726,7 @@ func (f *renewStore) Renew(_ context.Context, node, id string, ttlSeconds int, _
 
 func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
 	t.Helper()
-	o := Options{Namespace: "sandboxes", Domain: testDomain, APIKeys: []string{testKey}}
+	o := Options{Namespace: "sandboxes", Domain: testDomain, APIKeys: []string{testKey}, EnvdSecret: []byte(testEnvdSecret)}
 	for _, fn := range opts {
 		fn(&o)
 	}

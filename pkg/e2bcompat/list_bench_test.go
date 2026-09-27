@@ -31,7 +31,7 @@ func BenchmarkListSandboxes(b *testing.B) {
 				}
 				src.Put(&scale.NodeInventory{Name: name, Node: name, Address: "10.0.0.1:7777", Entries: entries})
 			}
-			s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
+			s, err := NewServer(scale.NewScatterGatherStore(src), Options{EnvdSecret: []byte(testEnvdSecret), Namespace: "sandboxes", Domain: testDomain, AllowAnonymous: true})
 			if err != nil {
 				b.Fatalf("NewServer: %v", err)
 			}

@@ -125,7 +125,7 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSand
 		SandboxID:       PublicID(claimID),
 		ClientID:        node,
 		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: rec.Token,
+		EnvdAccessToken: AccessToken(s.opts.EnvdSecret, rec.Token),
 		Domain:          s.opts.Domain,
 	})
 }
@@ -171,17 +171,26 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	template := templateOf(sb)
 	alias := s.aliasOf(template)
-	out := make([]SandboxForkResult, 0, len(children))
-	for _, child := range children {
-		out = append(out, SandboxForkResult{Sandbox: &Sandbox{
+	out := make([]SandboxForkResult, len(children))
+	var g errgroup.Group
+	g.SetLimit(maxNodeConcurrency)
+	for i, child := range children {
+		token := AccessToken(s.opts.EnvdSecret, child.Token)
+		out[i] = SandboxForkResult{Sandbox: &Sandbox{
 			TemplateID:      template,
 			Alias:           alias,
 			SandboxID:       PublicID(child.SandboxName),
 			ClientID:        child.Node,
 			EnvdVersion:     s.opts.EnvdVersion,
-			EnvdAccessToken: child.Token,
+			EnvdAccessToken: token,
 			Domain:          s.opts.Domain,
-		}})
+		}}
+		g.Go(func() error { return s.handOver(r.Context(), child, token) })
+	}
+	if err := g.Wait(); err != nil {
+		s.releaseAll(r.Context(), children)
+		s.writeVerbError(w, r, err, "fork: envd init", "failed to fork the sandbox")
+		return
 	}
 	writeJSON(w, http.StatusCreated, out)
 }
