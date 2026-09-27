@@ -32,7 +32,7 @@ type Options struct {
 // AddFlags registers the source flags on fs.
 func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&o.StaleAfter, "inventory-stale-after", cmp.Or(o.StaleAfter, defaultStaleAfter),
-		"Drop a node from claims, lists, lookups, the warm-pool driver and the envd-proxy probe once its NodeInventory publishedAt is older than this. An inventory without publishedAt, from a vk-sandbox that predates the field, always stays.")
+		"Drop a node from this process's inventory reads once its NodeInventory publishedAt is older than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without publishedAt, from a vk-sandbox that predates the field, always stays.")
 }
 
 var _ scale.InventorySource = (*Source)(nil)
