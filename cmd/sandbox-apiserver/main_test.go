@@ -2,15 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"io"
+	"net"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/spf13/pflag"
+	"k8s.io/apiserver/pkg/authorization/authorizerfactory"
+	genericapiserver "k8s.io/apiserver/pkg/server"
 	restclient "k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 )
 
 func TestServerConfigAppliesTheFeatureFlags(t *testing.T) {
@@ -112,4 +121,74 @@ func TestStartWarmPoolDriverBuildsAgainInTheSameProcess(t *testing.T) {
 			t.Fatalf("build %d: %v", i+1, err)
 		}
 	}
+}
+
+func TestShutdownClosesAnOpenWatchPromptly(t *testing.T) {
+	o := newOptions()
+	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ContinueOnError)
+	o.addFlags(fs)
+	if err := fs.Parse([]string{"--bind-address=127.0.0.1"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	o.SecureServing.Listener = ln
+	cfg, err := o.serverConfig()
+	if err != nil {
+		t.Fatalf("serverConfig: %v", err)
+	}
+	cfg.Authorization.Authorizer = authorizerfactory.NewAlwaysAllowAuthorizer()
+	server, err := cfg.Complete(nil).New("sandbox-apiserver", genericapiserver.NewEmptyDelegate())
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := sandboxapiserver.InstallSandboxAPI(server, scale.NewScatterGatherStore(scale.NewStaticInventorySource())); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.PrepareRun().RunWithContext(ctx) }()
+
+	hc := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	url := "https://" + cfg.SecureServing.Listener.Addr().String() + "/apis/agents.x-k8s.io/v1beta1/namespaces/default/sandboxes?watch=true"
+	closed := make(chan struct{})
+	go func(body io.ReadCloser) {
+		defer body.Close()
+		_, _ = io.Copy(io.Discard, body)
+		close(closed)
+	}(openWatch(t, hc, url))
+
+	start := time.Now()
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunWithContext still running 10 s after the stop with a watch open")
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("shutdown with an open watch took %v, want under 5 s", took)
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Error("the watch client never saw the stream close")
+	}
+}
+
+func openWatch(t *testing.T, hc *http.Client, url string) io.ReadCloser {
+	t.Helper()
+	for range 50 {
+		resp, err := hc.Get(url)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return resp.Body
+		}
+		if err == nil {
+			resp.Body.Close()
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("the watch never answered 200")
+	return nil
 }
