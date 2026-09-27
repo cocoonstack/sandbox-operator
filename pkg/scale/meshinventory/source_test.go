@@ -85,7 +85,7 @@ func TestASilentPeerLeavesTheSnapshotAfterMaxStaleWhileItIsNamed(t *testing.T) {
 	assert.Contains(t, s.members, b.addr(), "a peer the mesh still names stays a member")
 }
 
-func TestAPeerNoLongerNamedLeavesAtItsFirstSilence(t *testing.T) {
+func TestAPeerNoLongerNamedLeavesAfterMaxStale(t *testing.T) {
 	a, b := newStubNode(t), newStubNode(t)
 	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
 	s := newSource(t, a.addr())
@@ -93,9 +93,33 @@ func TestAPeerNoLongerNamedLeavesAtItsFirstSilence(t *testing.T) {
 
 	a.set(func(n *stubNode) { n.peers = nil })
 	b.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
+	for range defaultMaxStale {
+		s.tick(t.Context())
+		assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "an unnamed peer keeps its snapshot for MaxStale ticks")
+		assert.Contains(t, s.members, b.addr())
+	}
 	s.tick(t.Context())
 	assert.Equal(t, []string{a.addr()}, listNodes(t, s))
 	assert.NotContains(t, s.members, b.addr())
+}
+
+func TestAGracefulRestartOfADiscoveredPeerKeepsItPublished(t *testing.T) {
+	a, b := newStubNode(t), newStubNode(t)
+	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	s := newSource(t, a.addr())
+	require.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+
+	b.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
+	a.set(func(n *stubNode) { n.peers = nil })
+	s.tick(t.Context())
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "left the mesh, sandboxes still running")
+	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	s.tick(t.Context())
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "rejoined, not yet listening")
+	b.set(func(n *stubNode) { n.status = 0 })
+	s.tick(t.Context())
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+	assert.Equal(t, 0, s.members[b.addr()].fails)
 }
 
 func TestNewFailsLoud(t *testing.T) {
@@ -142,6 +166,8 @@ func TestASeedSpelledDifferentlyIsOneNode(t *testing.T) {
 	s.tick(t.Context())
 	assert.Equal(t, 1, a.calls()-before, "the gossiped spelling of the seed must not be dialed as a second member")
 	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+	assert.Contains(t, s.members, seed, "the seed is the member kept")
+	assert.NotContains(t, s.members, a.addr())
 }
 
 func TestAMeshWideSilenceKeepsTheDiscoveredPeersForMaxStale(t *testing.T) {
@@ -186,6 +212,8 @@ func TestASeedDownAtStartAndSpelledDifferentlyEndsUpPolledOnce(t *testing.T) {
 	s.tick(t.Context())
 	assert.Equal(t, 1, a.calls()-before, "the gossiped spelling leaves once the seed answers with it")
 	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+	assert.Contains(t, s.members, seed, "the seed is the member kept")
+	assert.NotContains(t, s.members, a.addr())
 }
 
 func TestARepeatedSeedStillRunsTheDiscoveryTick(t *testing.T) {
@@ -200,14 +228,23 @@ func TestAGossipedAddressKeepsANodeWhoseSeedTransportFails(t *testing.T) {
 	front.set(func(n *stubNode) {
 		n.advertise = a.addr()
 		n.peers = []string{b.addr()}
+		n.rows = []sandboxd.SandboxSummary{{ID: "sb_stale", ClaimRef: "ns/stale"}}
 	})
-	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	a.set(func(n *stubNode) {
+		n.peers = []string{b.addr()}
+		n.rows = []sandboxd.SandboxSummary{{ID: "sb_fresh", ClaimRef: "ns/fresh"}}
+	})
 	b.set(func(n *stubNode) { n.peers = []string{a.addr()} })
 	s := newSource(t, front.addr())
 	require.Equal(t, sortedAddrs(a, b), listNodes(t, s))
 
 	front.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
-	for range defaultMaxStale + 3 {
+	s.tick(t.Context())
+	s.tick(t.Context())
+	inv, err := s.NodeInventory(t.Context(), a.addr())
+	require.NoError(t, err)
+	assert.Equal(t, "ns/fresh", inv.Entries[0].Name, "the member that answered publishes the key, not the stale seed")
+	for range defaultMaxStale + 1 {
 		s.tick(t.Context())
 	}
 	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "node a answers at the address the mesh gossips")

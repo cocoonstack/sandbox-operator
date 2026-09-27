@@ -43,8 +43,9 @@ func run(seeds []string, tokenFile, template string) error {
 	token := strings.TrimSpace(string(raw))
 
 	t0 := time.Now()
+	hc := scale.NewSandboxdHTTPClient()
 	src, err := meshinventory.New(ctx, func(addr string) meshinventory.NodeReader {
-		return sandboxd.New(scale.SandboxdBaseURL(addr), token)
+		return sandboxd.New(scale.SandboxdBaseURL(addr), token, sandboxd.WithHTTPClient(hc))
 	}, meshinventory.Options{Seeds: seeds})
 	if err != nil {
 		return err
