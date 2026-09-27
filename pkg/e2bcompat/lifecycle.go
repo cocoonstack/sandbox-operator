@@ -397,7 +397,8 @@ func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) templateAlias(w http.ResponseWriter, r *http.Request) {
 	alias := r.PathValue("alias")
-	image, ok := s.aliases[alias]
+	key, ok := s.aliases[alias]
+	image := key.Template
 	if !ok && s.advertised(r, alias) {
 		image, ok = alias, true
 	}

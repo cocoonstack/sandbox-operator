@@ -30,9 +30,10 @@ apiserver:
     apiKeySecret:
       name: ""
       key: keys
-    # templateAliases maps a templateID the SDK sends onto a pool image, one
-    # per line as "alias pool-image". Sandbox.create() with no template asks
-    # for base, so name it here for that call to work.
+    # templateAliases maps a templateID the SDK sends onto a pool image and
+    # size, one per line as "alias pool-image [size]" (size defaults to small).
+    # Sandbox.create() with no template asks for base, and the code-interpreter
+    # SDK for code-interpreter-v1, so name them here for that call to work.
     templateAliases: ""
     # envdSecret keys every sandbox's envd access token, which this surface
     # hands the SDK and the envd-proxy verifies. Required once enabled: set

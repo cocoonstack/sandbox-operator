@@ -178,7 +178,7 @@ node never goes stale, so an upgrade never empties the fleet.
 | `--e2b-default-timeout` | `300` when `0` | Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for. |
 | `--e2b-api-key-file` | — | Path to a file (Secret mount) of accepted e2b API keys, one per line as `key` or `key namespace`, presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, `--e2b-namespace` when none is given. |
 | `--e2b-allow-anonymous` | `false` | Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port. |
-| `--e2b-template-alias-file` | — | Path to a file of template aliases, one per line as `alias pool-image`, so a create naming the alias (the SDK's default is `base`) claims from that image's pool. The chart writes `apiserver.e2b.templateAliases` to it. |
+| `--e2b-template-alias-file` | — | Path to a file of template aliases, one per line as `alias pool-image [size]`, so a create naming the alias (the SDK's default is `base`) claims from that image's pool at that size, `small` when none is given. The chart writes `apiserver.e2b.templateAliases` to it. |
 | `--e2b-envd-secret-file` | — | Path to a file (Secret mount) holding the key every sandbox's envd access token derives from; the e2b surface and the envd-proxy must read the same one. Required with `--enable-e2b-api`. |
 
 Startup fails when `--enable-e2b-api` is set with neither a key file nor
