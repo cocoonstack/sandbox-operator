@@ -90,7 +90,7 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSand
 	node, claimID := sb.Status.NodeName, claimIDOf(sb)
 	rec, err := s.store.Read(r.Context(), node, claimID)
 	if err != nil {
-		s.writeVerbError(w, r, err, "connect: read", "failed to connect the sandbox")
+		s.writeVerbError(w, r, err, "connect: read", connectFailure)
 		return
 	}
 	if !rec.Paused && refuseRunning {
@@ -105,13 +105,13 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSand
 		}
 		status = http.StatusCreated
 		if rec, err = s.store.Read(r.Context(), node, claimID); err != nil {
-			s.writeVerbError(w, r, err, "connect: read", "failed to connect the sandbox")
+			s.writeVerbError(w, r, err, "connect: read", connectFailure)
 			return
 		}
 	}
 	if ttl := s.timeoutSeconds(req.Timeout); time.Now().Add(time.Duration(ttl) * time.Second).After(rec.Deadline) {
 		if _, err := s.store.Renew(r.Context(), node, claimID, ttl); err != nil {
-			s.writeVerbError(w, r, err, "connect: renew", "failed to connect the sandbox")
+			s.writeVerbError(w, r, err, "connect: renew", connectFailure)
 			return
 		}
 	}
@@ -311,20 +311,14 @@ func (s *Server) sandboxMetrics(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
-func (s *Server) sandboxLogs(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.lookup(r, r.PathValue("sandboxID")); err != nil {
-		s.writeLookupError(w, r, err, "logs")
-		return
+func (s *Server) sandboxLogs(reply any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := s.lookup(r, r.PathValue("sandboxID")); err != nil {
+			s.writeLookupError(w, r, err, "logs")
+			return
+		}
+		writeJSON(w, http.StatusOK, reply)
 	}
-	writeJSON(w, http.StatusOK, SandboxLogs{Logs: []struct{}{}, LogEntries: []struct{}{}})
-}
-
-func (s *Server) sandboxLogsV2(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.lookup(r, r.PathValue("sandboxID")); err != nil {
-		s.writeLookupError(w, r, err, "logs")
-		return
-	}
-	writeJSON(w, http.StatusOK, SandboxLogsV2{Logs: []struct{}{}})
 }
 
 // listTemplates reports the advertised warm-pool keys, the values create accepts as templateID.

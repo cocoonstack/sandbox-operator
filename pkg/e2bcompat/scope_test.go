@@ -187,15 +187,7 @@ func TestListHonorsStateAndTemplateAndRefusesMetadata(t *testing.T) {
 		{"?startedAfter=2999-01-01T00:00:00Z", []string{}},
 		{"?metadata=", []string{"sb-a", "sb-b"}},
 	} {
-		w := do(t, h, http.MethodGet, "/v2/sandboxes"+tc.query, "", testKey)
-		var listed []SandboxDetail
-		if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil || w.Code != http.StatusOK {
-			t.Fatalf("%s: status %d, decode %v: %s", tc.query, w.Code, err, w.Body.String())
-		}
-		ids := make([]string, 0, len(listed))
-		for _, d := range listed {
-			ids = append(ids, d.SandboxID)
-		}
+		ids, _ := pageOfList(t, h, "/v2/sandboxes"+tc.query)
 		slices.Sort(ids)
 		if !slices.Equal(ids, tc.want) {
 			t.Errorf("%s lists %v, want %v", tc.query, ids, tc.want)

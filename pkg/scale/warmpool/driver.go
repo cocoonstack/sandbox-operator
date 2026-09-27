@@ -198,11 +198,7 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 		if addr == "" {
 			continue
 		}
-		warmBy := make(map[scale.PoolKey]int, len(pools))
-		for _, pc := range pools {
-			warmBy[scale.PoolKey{Template: pc.Template, Net: pc.Net, Size: pc.Size}] = pc.Warm
-		}
-		views = append(views, nodeView{name: name, addr: addr, warmBy: warmBy})
+		views = append(views, nodeView{name: name, addr: addr, warmBy: warmByKey(pools)})
 	}
 	slices.SortFunc(views, func(a, b nodeView) int { return cmp.Compare(a.name, b.name) })
 	return views, nil
@@ -270,7 +266,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 			// interval+publish instead of the resync interval. A node whose PUT
 			// failed keeps its inventory-derived counts. Only this goroutine
 			// touches nodes[i], so no lock is needed.
-			nodes[i].warmBy = warmByFrom(info)
+			nodes[i].warmBy = warmByKey(scale.PoolCapacityFromInfo(info))
 			return nil
 		})
 	}
@@ -296,13 +292,11 @@ func (d *Driver) writeStatus(ctx context.Context, p *extv1beta1.SandboxWarmPool,
 	}
 }
 
-// warmByFrom indexes a sandboxd PUT /v1/pools response by pool key. A key the
-// response omits is genuinely 0 warm — sandboxd echoes back every pool it holds,
-// and one it no longer holds is drained.
-func warmByFrom(info *sandboxd.NodeInfo) map[scale.PoolKey]int {
-	warmBy := make(map[scale.PoolKey]int, len(info.Pools))
-	for _, p := range info.Pools {
-		warmBy[scale.PoolKey{Template: p.Key.Template, Net: p.Key.Net, Size: p.Key.Size}] = p.Warm
+// warmByKey indexes pools by pool key; a key a PUT /v1/pools response omits is genuinely 0 warm, since sandboxd echoes every pool it holds.
+func warmByKey(pools []scale.PoolCapacity) map[scale.PoolKey]int {
+	warmBy := make(map[scale.PoolKey]int, len(pools))
+	for _, pc := range pools {
+		warmBy[scale.PoolKey{Template: pc.Template, Net: pc.Net, Size: pc.Size}] = pc.Warm
 	}
 	return warmBy
 }

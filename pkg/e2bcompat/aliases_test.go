@@ -52,13 +52,7 @@ func TestReadsKeepTheImageAndCarryTheAlias(t *testing.T) {
 		"?template=reg/rt:24.04": {"sb-a"},
 		"?template=reg/py:3.12":  {"sb-b"},
 	} {
-		w := do(t, h, http.MethodGet, "/v2/sandboxes"+query, "", testKey)
-		var listed []SandboxDetail
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed), query)
-		ids := make([]string, 0, len(listed))
-		for _, d := range listed {
-			ids = append(ids, d.SandboxID)
-		}
+		ids, _ := pageOfList(t, h, "/v2/sandboxes"+query)
 		slices.Sort(ids)
 		assert.Equal(t, want, ids, query)
 	}
