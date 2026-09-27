@@ -172,7 +172,7 @@ func TestSnapshotListFiltersBySandboxAndName(t *testing.T) {
 
 func TestListHonorsStateTemplateAndMetadata(t *testing.T) {
 	running, paused := liveSandbox("a", "sb_a", "node-a", "img"), pausedSandbox("b", "sb_b", "node-a", "other")
-	running.Annotations[scale.MetadataAnnotation] = `{"app":"a b&c=d","owner":"me"}`
+	running.Annotations[scale.MetadataAnnotation] = `{"app":"a b&c=d","owner":"me","pct":"50%","sum":"a+b"}`
 	paused.Annotations[scale.MetadataAnnotation] = `{"owner":"me"}`
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{running, paused}}
 	h := newTestServer(t, store)
@@ -191,6 +191,7 @@ func TestListHonorsStateTemplateAndMetadata(t *testing.T) {
 		{"?metadata=", []string{"sb-a", "sb-b"}},
 		{"?metadata=owner%3Dme", []string{"sb-a", "sb-b"}},
 		{"?metadata=owner%3Dme%26app%3Da%252520b%252526c%25253Dd", []string{"sb-a"}},
+		{"?metadata=pct%3D50%252525%26sum%3Da%25252Bb", []string{"sb-a"}},
 		{"?metadata=owner%3Dyou", []string{}},
 		{"?metadata=app%3D", []string{}},
 	} {
