@@ -11,14 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
-	extv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
@@ -345,26 +339,6 @@ func TestWatchSeesAShortLivedSandbox(t *testing.T) {
 	}
 }
 
-func TestSSAApplier_UpsertsOneObjectPerNode(t *testing.T) {
-	ctx := t.Context()
-	cli := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).Build()
-	_, err := publish(ctx, "n1", sliceLive{entry("ns/a", "Running")}, NewSSAInventoryApplier(cli, "vk-test"))
-	require.NoError(t, err)
-
-	got := &cocoonv1beta1.NodeInventory{}
-	require.NoError(t, cli.Get(ctx, client.ObjectKey{Name: "n1"}, got))
-	require.Len(t, got.Entries, 1)
-
-	_, err = publish(ctx, "n1", sliceLive{entry("ns/a", "Running"), entry("ns/b", "Running")},
-		NewSSAInventoryApplier(cli, "vk-test"))
-	require.NoError(t, err)
-
-	list := &cocoonv1beta1.NodeInventoryList{}
-	require.NoError(t, cli.List(ctx, list))
-	require.Len(t, list.Items, 1)
-	assert.Len(t, list.Items[0].Entries, 2)
-}
-
 func publish(ctx context.Context, node string, live NodeLiveSource, applier InventoryApplier) (int, error) {
 	entries, err := live.LiveSandboxes(ctx)
 	if err != nil {
@@ -418,13 +392,4 @@ func waitForType(t *testing.T, w watch.Interface, want watch.EventType, timeout 
 			return watch.Event{}
 		}
 	}
-}
-
-func newScaleScheme(t *testing.T) *runtime.Scheme {
-	t.Helper()
-	s := runtime.NewScheme()
-	require.NoError(t, sandboxv1beta1.AddToScheme(s))
-	require.NoError(t, extv1beta1.AddToScheme(s))
-	require.NoError(t, cocoonv1beta1.AddToScheme(s))
-	return s
 }

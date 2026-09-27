@@ -28,6 +28,7 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/envdproxy"
 	"github.com/cocoonstack/sandbox-operator/pkg/logbridge"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/kubeinventory"
 	"github.com/cocoonstack/sandbox-operator/version"
 )
 
@@ -87,11 +88,11 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := scale.NewInventoryCache(ctx, restCfg)
+	reader, err := kubeinventory.NewCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
-	inv := scale.NewClientInventorySource(reader)
+	inv := kubeinventory.New(reader)
 	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), inv, o.Namespace)
 	if err != nil {
 		return err

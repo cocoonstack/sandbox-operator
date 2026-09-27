@@ -1,4 +1,4 @@
-package scale
+package scale_test
 
 import (
 	"context"
@@ -18,28 +18,33 @@ import (
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/kubeinventory"
 )
+
+const cacheSyncTimeout = 2 * time.Minute
 
 // errWatchListUnserved sends the reflector down the LIST/WATCH path, which the fake ListWatch serves.
 var errWatchListUnserved = errors.New("watch-list is not served")
 
 func BenchmarkClientInventoryWarmCandidates(b *testing.B) {
-	for _, fleet := range benchFleets {
+	for _, fleet := range scale.BenchFleets {
 		for _, arm := range []struct {
 			name   string
 			noCopy bool
 		}{{"copy", false}, {"nocopy", true}} {
-			b.Run(fleet.name+"/"+arm.name, func(b *testing.B) {
-				store, pool := benchCachedStore(b, fleet.nodes, fleet.perNode, arm.noCopy)
+			b.Run(fleet.Name+"/"+arm.name, func(b *testing.B) {
+				store, pool := benchCachedStore(b, fleet.Nodes, fleet.PerNode, arm.noCopy)
 				ctx := b.Context()
 				b.ReportAllocs()
 				for b.Loop() {
-					candidates, err := store.warmCandidates(ctx, pool)
+					candidates, err := scale.WarmCandidates(store, ctx, pool)
 					if err != nil {
 						b.Fatalf("warm candidates: %v", err)
 					}
-					if len(candidates) != fleet.nodes {
-						b.Fatalf("got %d candidates, want %d", len(candidates), fleet.nodes)
+					if len(candidates) != fleet.Nodes {
+						b.Fatalf("got %d candidates, want %d", len(candidates), fleet.Nodes)
 					}
 				}
 			})
@@ -48,15 +53,15 @@ func BenchmarkClientInventoryWarmCandidates(b *testing.B) {
 }
 
 func BenchmarkClientInventoryWatchTick(b *testing.B) {
-	for _, fleet := range benchFleets {
-		b.Run(fleet.name, func(b *testing.B) {
-			store, _ := benchCachedStore(b, fleet.nodes, fleet.perNode, true)
-			ns, name := splitNamespacedName(fmt.Sprintf("default/sb-%s-%d", benchNodeName(fleet.nodes-1), fleet.perNode-1))
-			labelSel, fieldSel, err := parseSelectors(ListOptions{Namespace: ns, FieldSelector: "metadata.name=" + name})
+	for _, fleet := range scale.BenchFleets {
+		b.Run(fleet.Name, func(b *testing.B) {
+			store, _ := benchCachedStore(b, fleet.Nodes, fleet.PerNode, true)
+			ns, name := scale.SplitNamespacedName(fmt.Sprintf("default/sb-%s-%d", scale.BenchNodeName(fleet.Nodes-1), fleet.PerNode-1))
+			labelSel, fieldSel, err := scale.ParseSelectors(scale.ListOptions{Namespace: ns, FieldSelector: "metadata.name=" + name})
 			if err != nil {
 				b.Fatalf("parse selectors: %v", err)
 			}
-			held, err := store.lookupName(b.Context(), ns, name)
+			held, err := scale.LookupName(store, b.Context(), ns, name)
 			if err != nil || held == nil {
 				b.Fatalf("look up %s/%s: %v", ns, name, err)
 			}
@@ -65,10 +70,10 @@ func BenchmarkClientInventoryWatchTick(b *testing.B) {
 				poll func(context.Context) ([]sandboxv1beta1.Sandbox, error)
 			}{
 				{"fleet", func(ctx context.Context) ([]sandboxv1beta1.Sandbox, error) {
-					return store.listInventories(ctx, ns, labelSel, fieldSel)
+					return scale.ListInventories(store, ctx, ns, labelSel, fieldSel)
 				}},
 				{"pinned", func(ctx context.Context) ([]sandboxv1beta1.Sandbox, error) {
-					return store.pollPinned(ctx, ns, name, held, labelSel, fieldSel)
+					return scale.PollPinned(store, ctx, ns, name, held, labelSel, fieldSel)
 				}},
 			} {
 				b.Run(arm.name, func(b *testing.B) {
@@ -86,9 +91,9 @@ func BenchmarkClientInventoryWatchTick(b *testing.B) {
 }
 
 // benchCachedStore serves the fleet through a real informer-fed cache reader, the production read path.
-func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scatterGatherStore, PoolKey) {
+func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scale.ScatterGatherStore, scale.PoolKey) {
 	b.Helper()
-	invs, pool := benchInventories(nodes, perNode)
+	invs, pool := scale.BenchInventories(nodes, perNode)
 	list := &unstructured.UnstructuredList{}
 	for _, inv := range invs {
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(inv)
@@ -96,13 +101,13 @@ func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scatterGa
 			b.Fatalf("encode node inventory: %v", err)
 		}
 		u := unstructured.Unstructured{Object: raw}
-		u.SetGroupVersionKind(NodeInventoryGVK)
+		u.SetGroupVersionKind(scale.NodeInventoryGVK)
 		list.Items = append(list.Items, u)
 	}
 	inv := &unstructured.Unstructured{}
-	inv.SetGroupVersionKind(NodeInventoryGVK)
-	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{NodeInventoryGVK.GroupVersion()})
-	mapper.Add(NodeInventoryGVK, meta.RESTScopeRoot)
+	inv.SetGroupVersionKind(scale.NodeInventoryGVK)
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{scale.NodeInventoryGVK.GroupVersion()})
+	mapper.Add(scale.NodeInventoryGVK, meta.RESTScopeRoot)
 	invCache, err := cache.New(&restclient.Config{Host: "http://127.0.0.1:1"}, cache.Options{
 		Mapper:   mapper,
 		ByObject: map[client.Object]cache.ByObject{inv: {UnsafeDisableDeepCopy: &noCopy}},
@@ -127,10 +132,10 @@ func benchCachedStore(b *testing.B, nodes, perNode int, noCopy bool) (*scatterGa
 		b.Fatalf("register node inventory informer: %v", err)
 	}
 	go func() { _ = invCache.Start(ctx) }()
-	syncCtx, cancelSync := context.WithTimeout(ctx, inventoryCacheSyncTimeout)
+	syncCtx, cancelSync := context.WithTimeout(ctx, cacheSyncTimeout)
 	defer cancelSync()
 	if !invCache.WaitForCacheSync(syncCtx) {
 		b.Fatal("node inventory cache did not sync")
 	}
-	return NewScatterGatherStore(NewClientInventorySource(invCache)).(*scatterGatherStore), pool
+	return scale.NewScatterGatherStore(kubeinventory.New(invCache)).(*scale.ScatterGatherStore), pool
 }
