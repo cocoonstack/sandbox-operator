@@ -14,7 +14,7 @@ import (
 
 const (
 	readHeaderTimeout = 10 * time.Second
-	// data-plane streams are long, so this bounds restart latency and does not wait for idleness
+	// Data-plane streams are long, so this bounds restart latency and does not wait for idleness.
 	shutdownTimeout = 10 * time.Second
 )
 

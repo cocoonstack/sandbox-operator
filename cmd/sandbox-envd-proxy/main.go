@@ -61,7 +61,7 @@ func main() {
 }
 
 func run(ctx context.Context, o *options) error {
-	log.WithFunc("main.run").Infof(ctx, "starting sandbox-envd-proxy version=%s revision=%s builtAt=%s", version.VERSION, version.REVISION, version.BUILTAT)
+	log.WithFunc("main.run").Infof(ctx, "starting sandbox-envd-proxy version=%s revision=%s builtAt=%s domain=%s", version.VERSION, version.REVISION, version.BUILTAT, o.Domain)
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)

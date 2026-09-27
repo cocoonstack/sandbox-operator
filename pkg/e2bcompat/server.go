@@ -26,6 +26,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -52,6 +53,9 @@ const (
 	autoPauseRefusal = "autoPause is not supported; pause explicitly, or let the lease expire"
 	maxListLimit     = 100
 	nextTokenHeader  = "X-Next-Token"
+
+	readHeaderTimeout = 10 * time.Second
+	shutdownTimeout   = 10 * time.Second
 )
 
 var (
@@ -176,6 +180,34 @@ func (s *Server) Handler() http.Handler {
 	// e2b addresses a snapshot as a template on delete.
 	mux.Handle("DELETE /templates/{snapshotID}", s.auth(http.HandlerFunc(s.deleteSnapshot)))
 	return mux
+}
+
+// Serve listens on addr and serves the surface in the background; the returned stop drains it.
+func (s *Server) Serve(ctx context.Context, addr string) (func(), error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen on e2b address %q: %w", addr, err)
+	}
+	httpSrv := &http.Server{Addr: addr, Handler: s.Handler(), ReadHeaderTimeout: readHeaderTimeout}
+	logger := log.WithFunc("e2bcompat.Serve")
+	logger.Infof(ctx, "serving e2b-compatible API address=%s namespace=%s authenticated=%t", addr, s.opts.Namespace, len(s.keys) > 0)
+	go func() {
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error(ctx, err, "e2b-compatible API server exited")
+		}
+	}()
+	e2bCtx, stop := context.WithCancel(ctx)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-e2bCtx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			logger.Error(ctx, err, "e2b-compatible API server shutdown")
+		}
+	}()
+	return func() { stop(); <-drained }, nil
 }
 
 // auth enforces the X-API-KEY header unless anonymous access is allowed and

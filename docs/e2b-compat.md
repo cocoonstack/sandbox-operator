@@ -47,9 +47,9 @@ address.
 sandbox repo's `docs/cluster.md`) with no Kubernetes: no kubeconfig, no
 `NodeInventory`, no APIService. It dials the seeds, learns the rest of the mesh
 from each node's `GET /v1/info` peers, and reads every node's `GET
-/v1/sandboxes` on a tick. Claims, reads and watches are served from that
-in-memory snapshot, as the aggregated apiserver serves them from its informer
-cache.
+/v1/sandboxes` on a tick. Reads and watches are served from that in-memory
+snapshot and claims are routed from it, as the aggregated apiserver does from
+its informer cache.
 
 ```bash
 sandbox-e2b \
@@ -71,13 +71,14 @@ sandbox-e2b \
 - **The node key is the node's `advertise_addr` as `GET /v1/info` reports
   it**, which is its `client_advertise` when that is set. The process must
   reach every node at that address with the root token.
-- **sandboxd v0.1.15 or later** — the first release whose `GET /v1/info`
-  carries `advertise_addr`. A seed without it fails startup (`advertises no
-  host`); a discovered peer without it is skipped.
+- **The first sandboxd release carrying `advertise_addr` in `GET /v1/info`**
+  (sandbox main `acfca8b` today). A seed without it fails startup (`reports no
+  advertise_addr`); a discovered peer without it is skipped.
 - **Startup fails loud** when no seed answers or a seed refuses the token
   (`GET /v1/info needs the fleet root api_token`).
 - **A silent node** keeps its last snapshot for 3 ticks and then leaves the
-  listing; its sandboxes die with it, as on the Kubernetes path.
+  listing, while a peer the mesh no longer names leaves at once; its sandboxes
+  die with it, as on the Kubernetes path.
 - **Warm pools** are set through the sandbox SDK's `SetPoolsCluster` or
   sandboxd's own config; mesh mode has no warm-pool driver.
 - **Claims follow sandboxd's redirects**: a warm miss at one node lands on the
