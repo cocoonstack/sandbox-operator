@@ -509,10 +509,6 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
 
-func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
-	return sandboxd.SandboxStats{}, c.f.verbErr
-}
-
 func (c *recordingClient) EnvdMetrics(_ context.Context, id, token string) (sandboxd.EnvdMetrics, error) {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()

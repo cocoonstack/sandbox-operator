@@ -315,10 +315,6 @@ func (f *fakeStore) Metrics(context.Context, string, string) (scale.SandboxMetri
 	return scale.SandboxMetrics{}, false, f.verbErr
 }
 
-func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{}, nil
-}
-
 func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {
 	return scale.SandboxRecord{}, nil
 }

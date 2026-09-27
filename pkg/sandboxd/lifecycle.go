@@ -84,20 +84,6 @@ type SandboxSummary struct {
 	MemTotalBytes int64 `json:"mem_total_bytes,omitzero"`
 }
 
-// SandboxStats is one sandbox's resource usage. CPUCount and MemTotalBytes are
-// the tier the VM was booted with (authoritative); MemUsedBytes is the host
-// VMM's resident set and is only meaningful when MemUsedMeasured is true — a
-// hibernated sandbox has no process to measure.
-type SandboxStats struct {
-	ID              string    `json:"id"`
-	CPUCount        int       `json:"cpu_count"`
-	MemTotalBytes   int64     `json:"mem_total_bytes"`
-	MemUsedBytes    int64     `json:"mem_used_bytes"`
-	Hibernated      bool      `json:"hibernated"`
-	MeasuredAt      time.Time `json:"measured_at"`
-	MemUsedMeasured bool      `json:"mem_used_measured"`
-}
-
 // Hibernate performs POST /v1/sandboxes/{id}/hibernate: it snapshots the
 // sandbox and stops its VM, freeing the node's memory. This is the pause verb;
 // its cost is proportional to guest RAM because the memory is written out.
@@ -164,16 +150,6 @@ func (c *Client) DeleteCheckpoint(ctx context.Context, checkpointID string) erro
 		return fmt.Errorf("sandboxd: delete checkpoint requires a checkpoint id")
 	}
 	return c.sendNoBody(ctx, http.MethodDelete, "/v1/checkpoints/"+url.PathEscape(checkpointID), c.token, "delete checkpoint", http.StatusNoContent, http.StatusNotFound)
-}
-
-// Stats performs GET /v1/sandboxes/{id}/stats.
-func (c *Client) Stats(ctx context.Context, id string) (SandboxStats, error) {
-	var out SandboxStats
-	if id == "" {
-		return out, fmt.Errorf("sandboxd: stats requires a sandbox id")
-	}
-	err := c.getJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/stats", &out)
-	return out, err
 }
 
 // Sandbox performs GET /v1/sandboxes/{id}, one live claim in the index-row shape.

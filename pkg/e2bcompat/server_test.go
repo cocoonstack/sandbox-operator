@@ -646,10 +646,6 @@ func (f *fakeStore) Metrics(context.Context, string, string) (scale.SandboxMetri
 	return scale.SandboxMetrics{}, false, nil
 }
 
-func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{}, nil
-}
-
 func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, error) {
 	return scale.SandboxRecord{Deadline: time.Now().Add(time.Hour)}, nil
 }

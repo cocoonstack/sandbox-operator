@@ -578,10 +578,6 @@ func (f *lifecycleStore) Metrics(_ context.Context, _, id string) (scale.Sandbox
 	return m, live, f.metricsErr[id]
 }
 
-func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{CPUCount: 1, MemTotalBytes: 512 << 20}, f.statsErr
-}
-
 func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
 	f.pausedNode, f.pausedID = node, id
 	return f.err

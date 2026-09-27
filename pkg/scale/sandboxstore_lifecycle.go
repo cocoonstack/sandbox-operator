@@ -141,24 +141,6 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 	return nil
 }
 
-func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (SandboxStats, error) {
-	cl, err := s.nodeClient(ctx, node, "stats", id)
-	if err != nil {
-		return SandboxStats{}, err
-	}
-	st, err := cl.Stats(ctx, id)
-	if err != nil {
-		return SandboxStats{}, nodeVerbError(err, "stats", id, node)
-	}
-	return SandboxStats{
-		CPUCount:        st.CPUCount,
-		MemTotalBytes:   st.MemTotalBytes,
-		MemUsedBytes:    st.MemUsedBytes,
-		MemUsedMeasured: st.MemUsedMeasured,
-		MeasuredAt:      st.MeasuredAt,
-	}, nil
-}
-
 func (s *scatterGatherStore) Read(ctx context.Context, node, id string) (SandboxRecord, error) {
 	cl, err := s.nodeClient(ctx, node, "read", id)
 	if err != nil {

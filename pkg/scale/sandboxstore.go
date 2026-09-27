@@ -80,8 +80,6 @@ type SandboxLifecycle interface {
 	Snapshots(ctx context.Context, node string) ([]Snapshot, error)
 	// DeleteSnapshot removes a checkpoint. A missing checkpoint is success.
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
-	// Stats reports one sandbox's resource usage.
-	Stats(ctx context.Context, node, id string) (SandboxStats, error)
 	// Metrics reads envd's metrics inside a running sandbox through its node; live is false for a paused one, which is never woken.
 	Metrics(ctx context.Context, node, id string) (m SandboxMetrics, live bool, err error)
 	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.
@@ -112,15 +110,6 @@ type SandboxRecord struct {
 	Token    string
 	Paused   bool
 	Deadline time.Time
-}
-
-// SandboxStats is one sandbox's resource usage, where MemUsedBytes is valid only when MemUsedMeasured is true.
-type SandboxStats struct {
-	CPUCount        int
-	MemTotalBytes   int64
-	MemUsedBytes    int64
-	MemUsedMeasured bool
-	MeasuredAt      time.Time
 }
 
 // SandboxMetrics is the guest's own view of one sandbox's CPU, memory and root disk.

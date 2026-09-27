@@ -24,13 +24,13 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 	ctx := t.Context()
 
-	_, statsErr := store.Stats(ctx, "n1", "sb_gone")
+	_, _, metricsErr := store.Metrics(ctx, "n1", "sb_gone")
 	_, forkErr := store.Fork(ctx, "ns", "n1", "sb_gone", 1, 0)
 	_, snapErr := store.Snapshot(ctx, "n1", "sb_gone", "")
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
 		"resume":   store.Resume(ctx, "n1", "sb_gone"),
-		"stats":    statsErr,
+		"metrics":  metricsErr,
 		"fork":     forkErr,
 		"snapshot": snapErr,
 	} {
