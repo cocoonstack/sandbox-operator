@@ -23,11 +23,13 @@ import (
 	"cmp"
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +50,8 @@ const (
 	apiKeyHeader = "X-API-KEY"
 
 	autoPauseRefusal = "autoPause is not supported; pause explicitly, or let the lease expire"
+	maxListLimit     = 100
+	nextTokenHeader  = "X-Next-Token"
 )
 
 var (
@@ -130,7 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /sandboxes", s.auth(http.HandlerFunc(s.createSandbox)))
 	mux.Handle("POST /v2/sandboxes", s.auth(http.HandlerFunc(s.createSandbox)))
 	mux.Handle("GET /sandboxes", s.auth(http.HandlerFunc(s.listSandboxes)))
-	mux.Handle("GET /v2/sandboxes", s.auth(http.HandlerFunc(s.listSandboxes)))
+	mux.Handle("GET /v2/sandboxes", s.auth(http.HandlerFunc(s.listSandboxesV2)))
 	mux.Handle("GET /sandboxes/{sandboxID}", s.auth(http.HandlerFunc(s.getSandbox)))
 	mux.Handle("DELETE /sandboxes/{sandboxID}", s.auth(http.HandlerFunc(s.deleteSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/timeout", s.auth(http.HandlerFunc(s.setTimeout)))
@@ -240,16 +244,39 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 
 // listSandboxes reports the live sandboxes in the caller's namespace.
 func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
-	filter, err := listFilterOf(r.URL.Query())
+	if out, ok := s.listed(w, r); ok {
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+func (s *Server) listSandboxesV2(w http.ResponseWriter, r *http.Request) {
+	page, err := listPageOf(r.URL.Query())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	out, ok := s.listed(w, r)
+	if !ok {
+		return
+	}
+	out, next := page.cut(out)
+	if next != "" {
+		w.Header().Set(nextTokenHeader, next)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail, bool) {
+	filter, err := listFilterOf(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
-		log.WithFunc("e2bcompat.listSandboxes").Error(r.Context(), err, "e2b list: store list failed")
+		log.WithFunc("e2bcompat.listed").Error(r.Context(), err, "e2b list: store list failed")
 		writeError(w, http.StatusInternalServerError, "failed to list sandboxes")
-		return
+		return nil, false
 	}
 	out := make([]SandboxDetail, 0, len(list.Items))
 	for i := range list.Items {
@@ -257,7 +284,7 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request) {
 			out = append(out, d)
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, true
 }
 
 // getSandbox resolves one sandbox by its e2b sandboxID (the sandboxd claim id).
@@ -434,6 +461,63 @@ func (f listFilter) keeps(d SandboxDetail) bool {
 	}
 	return true
 }
+
+type pageKey struct{ startedAt, sandboxID string }
+
+type listPage struct {
+	limit int
+	desc  bool
+	after pageKey
+}
+
+func listPageOf(q url.Values) (listPage, error) {
+	p := listPage{limit: maxListLimit, desc: true}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > maxListLimit {
+			return listPage{}, fmt.Errorf("limit must be between 1 and %d, got %q", maxListLimit, v)
+		}
+		p.limit = n
+	}
+	switch q.Get("order") {
+	case "", "desc":
+	case "asc":
+		p.desc = false
+	default:
+		return listPage{}, fmt.Errorf("order must be asc or desc, got %q", q.Get("order"))
+	}
+	if v := q.Get("nextToken"); v != "" {
+		raw, err := base64.RawURLEncoding.DecodeString(v)
+		started, id, ok := strings.Cut(string(raw), " ")
+		if err != nil || !ok {
+			return listPage{}, fmt.Errorf("nextToken %q was not issued by this server", v)
+		}
+		p.after = pageKey{started, id}
+	}
+	return p, nil
+}
+
+func (p listPage) cut(items []SandboxDetail) ([]SandboxDetail, string) {
+	slices.SortFunc(items, func(a, b SandboxDetail) int { return p.compare(keyOf(a), keyOf(b)) })
+	if p.after != (pageKey{}) {
+		items = slices.DeleteFunc(items, func(d SandboxDetail) bool { return p.compare(keyOf(d), p.after) <= 0 })
+	}
+	if len(items) <= p.limit {
+		return items, ""
+	}
+	last := keyOf(items[p.limit-1])
+	return items[:p.limit], base64.RawURLEncoding.EncodeToString([]byte(last.startedAt + " " + last.sandboxID))
+}
+
+func (p listPage) compare(a, b pageKey) int {
+	c := cmp.Or(strings.Compare(a.startedAt, b.startedAt), strings.Compare(a.sandboxID, b.sandboxID))
+	if p.desc {
+		return -c
+	}
+	return c
+}
+
+func keyOf(d SandboxDetail) pageKey { return pageKey{d.StartedAt, d.SandboxID} }
 
 // templateOf reads the store's label because a synthesized Sandbox holds no pod spec.
 func templateOf(sb *sandboxv1beta1.Sandbox) string {
