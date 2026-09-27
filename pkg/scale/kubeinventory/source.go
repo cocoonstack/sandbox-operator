@@ -2,29 +2,53 @@
 package kubeinventory
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
+	"sync/atomic"
+	"time"
 
+	"github.com/spf13/pflag"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
+const defaultStaleAfter = 90 * time.Second
+
+var nodeInventories = schema.GroupResource{Group: scale.NodeInventoryGVK.Group, Resource: "nodeinventories"}
+
+// Options tunes a Source.
+type Options struct {
+	// StaleAfter is how old publishedAt may get before its node leaves the fleet; zero means 90 s.
+	StaleAfter time.Duration
+}
+
+// AddFlags registers the source flags on fs.
+func (o *Options) AddFlags(fs *pflag.FlagSet) {
+	fs.DurationVar(&o.StaleAfter, "inventory-stale-after", cmp.Or(o.StaleAfter, defaultStaleAfter),
+		"Drop a node from this process's inventory reads once its NodeInventory publishedAt trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without publishedAt, from a vk-sandbox that predates the field, always stays.")
+}
+
 var _ scale.InventorySource = (*Source)(nil)
 
 // Source is the production InventorySource over a cache-fed NodeInventory reader.
 // It never mutates what it reads, since NewCache hands out its cached objects themselves.
 type Source struct {
-	reader client.Reader
+	reader     client.Reader
+	staleAfter time.Duration
+	reference  atomic.Int64
 }
 
 // New builds a Source over reader.
-func New(reader client.Reader) *Source {
-	return &Source{reader: reader}
+func New(reader client.Reader, opts Options) *Source {
+	return &Source{reader: reader, staleAfter: cmp.Or(opts.StaleAfter, defaultStaleAfter)}
 }
 
 func (s *Source) ListNodes(ctx context.Context) ([]string, error) {
@@ -33,19 +57,29 @@ func (s *Source) ListNodes(ctx context.Context) ([]string, error) {
 	if err := s.reader.List(ctx, ul); err != nil {
 		return nil, fmt.Errorf("kubeinventory: list node inventories: %w", err)
 	}
-	nodes := make([]string, 0, len(ul.Items))
+	nodes := make([]string, len(ul.Items))
+	stamps := make([]int64, len(ul.Items))
+	var newest int64
 	for i := range ul.Items {
-		nodes = append(nodes, ul.Items[i].GetName())
+		nodes[i], stamps[i] = ul.Items[i].GetName(), publishedAt(ul.Items[i].Object)
+		newest = max(newest, stamps[i])
 	}
-	slices.Sort(nodes)
-	return nodes, nil
+	ref := min(newest, time.Now().UnixNano())
+	s.reference.Store(ref)
+	kept := nodes[:0]
+	for i, node := range nodes {
+		if !s.stale(stamps[i], ref) {
+			kept = append(kept, node)
+		}
+	}
+	slices.Sort(kept)
+	return kept, nil
 }
 
 func (s *Source) NodeInventory(ctx context.Context, node string) (*scale.NodeInventory, error) {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(scale.NodeInventoryGVK)
-	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
-		return nil, fmt.Errorf("kubeinventory: get node %q inventory: %w", node, err)
+	u, err := s.get(ctx, node)
+	if err != nil {
+		return nil, err
 	}
 	inv := &scale.NodeInventory{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, inv); err != nil {
@@ -55,10 +89,9 @@ func (s *Source) NodeInventory(ctx context.Context, node string) (*scale.NodeInv
 }
 
 func (s *Source) NodeCapacity(ctx context.Context, node string) (string, []scale.PoolCapacity, error) {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(scale.NodeInventoryGVK)
-	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
-		return "", nil, fmt.Errorf("kubeinventory: get node %q inventory: %w", node, err)
+	u, err := s.get(ctx, node)
+	if err != nil {
+		return "", nil, err
 	}
 	addr, _, err := unstructured.NestedString(u.Object, "address")
 	if err != nil {
@@ -81,4 +114,32 @@ func (s *Source) NodeCapacity(ctx context.Context, node string) (string, []scale
 		pools = append(pools, pc)
 	}
 	return addr, pools, nil
+}
+
+func (s *Source) get(ctx context.Context, node string) (*unstructured.Unstructured, error) {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(scale.NodeInventoryGVK)
+	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
+		return nil, fmt.Errorf("kubeinventory: get node %q inventory: %w", node, err)
+	}
+	if s.stale(publishedAt(u.Object), s.reference.Load()) {
+		return nil, fmt.Errorf("kubeinventory: node %q inventory is stale: %w", node, k8serrors.NewNotFound(nodeInventories, node))
+	}
+	return u, nil
+}
+
+func (s *Source) stale(stamp, ref int64) bool {
+	return stamp != 0 && ref-stamp > int64(s.staleAfter)
+}
+
+func publishedAt(obj map[string]any) int64 {
+	raw, _ := obj["publishedAt"].(string)
+	if raw == "" {
+		return 0
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return 0
+	}
+	return at.UnixNano()
 }

@@ -143,6 +143,13 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   once by `files`/`commands` works. The proxy's node lookups share one budget
   per replica (200 new sandboxes/s, see [envd-proxy](envd-proxy.md)); past it a
   sandbox its node has not published answers `502` until the node publishes.
+- **A node that stops publishing leaves after `--inventory-stale-after`**
+  (90 s by default). Until then a dead node's sandboxes stay listed and a
+  claim can still sample it; past it they leave `GET /sandboxes`, and
+  `GET`, `DELETE` and the verbs on them answer `404`. The window is measured
+  against the fleet's newest publish, so a control-plane outage never drops
+  a node, and a vk-sandbox restart inside the window is invisible. A
+  vk-sandbox that predates `publishedAt` never goes stale.
 - **`envdVersion`** is reported as `0.4.0` unless `--e2b-envd-version` says
   otherwise. The SDK version-compares it and *kills the sandbox* if it cannot
   parse it, so it is always sent. Set it to the version actually installed in

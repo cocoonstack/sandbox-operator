@@ -32,10 +32,12 @@ type options struct {
 	Domain    string
 	Namespace string
 	Proxy     envdproxy.Flags
+	Inventory kubeinventory.Options
 }
 
 func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.Proxy.AddFlags(fs, "")
+	o.Inventory.AddFlags(fs)
 	fs.StringVar(&o.Domain, "domain", o.Domain,
 		"Base domain sandbox hosts are derived from, as {port}-{sandboxID}.{domain}. Must match the apiserver's --e2b-domain.")
 	fs.StringVar(&o.Namespace, "namespace", o.Namespace,
@@ -70,7 +72,7 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return err
 	}
-	inv := kubeinventory.New(reader)
+	inv := kubeinventory.New(reader, o.Inventory)
 	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), inv, o.Namespace)
 	if err != nil {
 		return err
