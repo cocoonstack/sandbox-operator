@@ -18,7 +18,7 @@ var benchFleets = []struct {
 func BenchmarkStoreGet(b *testing.B) {
 	for _, fleet := range benchFleets {
 		b.Run(fleet.Name, func(b *testing.B) {
-			store, _ := benchStore(b, fleet.Nodes, fleet.PerNode)
+			store, _ := benchStore(b, fleet.Nodes, fleet.PerNode, 0)
 			last := benchNodeName(fleet.Nodes - 1)
 			target := fmt.Sprintf("default/sb-%s-%d", last, fleet.PerNode-1)
 			ns, name := splitNamespacedName(target)
@@ -36,7 +36,7 @@ func BenchmarkStoreGet(b *testing.B) {
 func BenchmarkStoreWarmCandidates(b *testing.B) {
 	for _, fleet := range benchFleets {
 		b.Run(fleet.Name, func(b *testing.B) {
-			store, pool := benchStore(b, fleet.Nodes, fleet.PerNode)
+			store, pool := benchStore(b, fleet.Nodes, fleet.PerNode, 0)
 			ctx := b.Context()
 			b.ReportAllocs()
 			for b.Loop() {
@@ -52,9 +52,27 @@ func BenchmarkStoreWarmCandidates(b *testing.B) {
 	}
 }
 
-func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey) {
+func BenchmarkStoreList(b *testing.B) {
+	for _, fleet := range benchFleets[:2] {
+		for _, pairs := range []int{0, 3} {
+			b.Run(fmt.Sprintf("%s/meta%d", fleet.Name, pairs), func(b *testing.B) {
+				store, _ := benchStore(b, fleet.Nodes, fleet.PerNode, pairs)
+				ctx := b.Context()
+				b.ReportAllocs()
+				for b.Loop() {
+					list, err := store.List(ctx, ListOptions{Namespace: "default"})
+					if err != nil || len(list.Items) != fleet.Nodes*fleet.PerNode {
+						b.Fatalf("list: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func benchStore(b *testing.B, nodes, perNode, metadataPairs int) (*scatterGatherStore, PoolKey) {
 	b.Helper()
-	invs, pool := benchInventories(nodes, perNode)
+	invs, pool := benchInventories(nodes, perNode, metadataPairs)
 	src := NewStaticInventorySource()
 	for _, inv := range invs {
 		src.Put(inv)
@@ -62,7 +80,7 @@ func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey)
 	return NewScatterGatherStore(src).(*scatterGatherStore), pool
 }
 
-func benchInventories(nodes, perNode int) ([]*NodeInventory, PoolKey) {
+func benchInventories(nodes, perNode, metadataPairs int) ([]*NodeInventory, PoolKey) {
 	pool := PoolKey{Template: "ghcr.io/cocoonstack/sandbox/rt:24.04", Net: NetDefault, Size: SizeClassSmall}
 	invs := make([]*NodeInventory, 0, nodes)
 	for n := range nodes {
@@ -70,10 +88,15 @@ func benchInventories(nodes, perNode int) ([]*NodeInventory, PoolKey) {
 		entries := make([]InventoryEntry, perNode)
 		for i := range entries {
 			entries[i] = InventoryEntry{
-				Name:    fmt.Sprintf("default/sb-%s-%d", name, i),
-				ID:      fmt.Sprintf("sb_%s_%d", name, i),
-				Phase:   "Running",
-				Address: "10.0.0.1:7777",
+				Name:        fmt.Sprintf("default/sb-%s-%d", name, i),
+				ID:          fmt.Sprintf("sb_%s_%d", name, i),
+				Phase:       "Running",
+				Address:     "10.0.0.1:7777",
+				CPUCount:    2,
+				MemoryBytes: 1 << 30,
+			}
+			if metadataPairs > 0 {
+				entries[i].Metadata = encodeMetadata(benchMetadata(metadataPairs))
 			}
 		}
 		invs = append(invs, &NodeInventory{
@@ -88,3 +111,11 @@ func benchInventories(nodes, perNode int) ([]*NodeInventory, PoolKey) {
 }
 
 func benchNodeName(n int) string { return fmt.Sprintf("node-%03d", n) }
+
+func benchMetadata(pairs int) map[string]string {
+	md := make(map[string]string, pairs)
+	for i := range pairs {
+		md[fmt.Sprintf("key-%d", i)] = fmt.Sprintf("value-%d", i)
+	}
+	return md
+}

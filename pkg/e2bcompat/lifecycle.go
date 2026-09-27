@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"time"
@@ -15,6 +16,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -61,7 +63,7 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
-	s.connect(w, r, req, false)
+	s.connect(w, r, req, false, nil)
 }
 
 func (s *Server) resumeSandbox(w http.ResponseWriter, r *http.Request) {
@@ -69,14 +71,10 @@ func (s *Server) resumeSandbox(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
-	if req.AutoPause != nil && *req.AutoPause {
-		writeError(w, http.StatusBadRequest, autoPauseRefusal)
-		return
-	}
-	s.connect(w, r, req.ConnectSandbox, true)
+	s.connect(w, r, req.ConnectSandbox, true, req.AutoPause)
 }
 
-func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSandbox, refuseRunning bool) {
+func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSandbox, refuseRunning bool, autoPause *bool) {
 	if req.Memory != nil && !*req.Memory {
 		writeError(w, http.StatusBadRequest, "memory=false is not supported; a paused sandbox resumes from its memory snapshot")
 		return
@@ -109,8 +107,9 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSand
 			return
 		}
 	}
-	if ttl := s.timeoutSeconds(req.Timeout); time.Now().Add(time.Duration(ttl) * time.Second).After(rec.Deadline) {
-		if _, err := s.store.Renew(r.Context(), node, claimID, ttl); err != nil {
+	ttl, left := s.timeoutSeconds(req.Timeout), int(math.Ceil(time.Until(rec.Deadline).Seconds()))
+	if onExpire := expireFor(autoPause); ttl > left || onExpire != "" {
+		if _, err := s.store.Renew(r.Context(), node, claimID, max(ttl, left), onExpire); err != nil {
 			s.writeVerbError(w, r, err, "connect: renew", connectFailure)
 			return
 		}
@@ -472,4 +471,15 @@ func snapshotInfo(snap scale.Snapshot) SnapshotInfo {
 		names = append(names, snap.Name)
 	}
 	return SnapshotInfo{SnapshotID: snap.ID, Names: names}
+}
+
+// expireFor maps a resume's autoPause onto the claim's lease-end action; nil keeps the current one.
+func expireFor(autoPause *bool) sandboxd.ExpireAction {
+	switch {
+	case autoPause == nil:
+		return ""
+	case *autoPause:
+		return sandboxd.ExpireArchive
+	}
+	return sandboxd.ExpireDestroy
 }

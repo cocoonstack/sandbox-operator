@@ -37,6 +37,9 @@ _Appears in:_
 | `addr` _string_ | addr is the sandbox "host:port" address, if published. |  | Optional: \{\} <br /> |
 | `deadline` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | deadline is the node-granted lease expiry, if published. |  | Optional: \{\} <br /> |
 | `claimedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | claimedAt is when the node first granted the claim, if published; a renew<br />or a wake moves deadline, never this. |  | Optional: \{\} <br /> |
+| `claimMetadata` _string_ | claimMetadata is the claim's caller metadata as one JSON object, at most 4 KiB. |  | Optional: \{\} <br /> |
+| `cpuCount` _integer_ | cpuCount is the vCPU count of the size tier the VM was booted with. |  | Optional: \{\} <br /> |
+| `memoryBytes` _integer_ | memoryBytes is the memory of the size tier the VM was booted with. |  | Optional: \{\} <br /> |
 
 
 #### NodeInventory

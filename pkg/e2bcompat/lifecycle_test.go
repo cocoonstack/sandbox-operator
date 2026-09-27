@@ -11,6 +11,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -186,7 +187,7 @@ func TestConnectExtendsALeaseShorterThanItsTimeout(t *testing.T) {
 			if w := do(t, h, http.MethodPost, "/v2/sandboxes/sb-abc/connect", tc.body, testKey); w.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 			}
-			if called := store.renewedID != ""; called != tc.wantCall || store.renewedTTL != tc.wantTTL {
+			if called := store.renewedID != ""; called != tc.wantCall || store.renewedTTL != tc.wantTTL || store.renewedExpire != "" {
 				t.Errorf("renew called %v for %d s, want %v for %d s", called, store.renewedTTL, tc.wantCall, tc.wantTTL)
 			}
 		})
@@ -421,7 +422,7 @@ func TestResumeOfARunningSandboxIs409(t *testing.T) {
 }
 
 func TestResumeRefusesWhatConnectCannotGive(t *testing.T) {
-	for _, body := range []string{`{"autoPause":true}`, `{"memory":false}`} {
+	for _, body := range []string{`{"memory":false}`} {
 		t.Run(body, func(t *testing.T) {
 			store := &lifecycleStore{}
 			nodeReportsPaused(store)
@@ -433,6 +434,29 @@ func TestResumeRefusesWhatConnectCannotGive(t *testing.T) {
 			}
 			if store.readID != "" || store.resumedID != "" {
 				t.Errorf("a refused resume reached the node (read %q, resumed %q)", store.readID, store.resumedID)
+			}
+		})
+	}
+}
+
+func TestResumeAutoPauseSetsTheLeaseEndActionWithoutShorteningTheLease(t *testing.T) {
+	for _, tc := range []struct {
+		body       string
+		wantExpire sandboxd.ExpireAction
+	}{
+		{`{"timeout":30,"autoPause":true}`, sandboxd.ExpireArchive},
+		{`{"timeout":30,"autoPause":false}`, sandboxd.ExpireDestroy},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			store := &lifecycleStore{wakeDeadline: time.Now().Add(time.Hour)}
+			nodeReportsPaused(store)
+			store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+			if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/resume", tc.body, testKey); w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+			}
+			if store.renewedExpire != tc.wantExpire || store.renewedTTL < 3599 {
+				t.Errorf("renew(%d s, %q), want the hour left and %q", store.renewedTTL, store.renewedExpire, tc.wantExpire)
 			}
 		})
 	}
@@ -472,6 +496,7 @@ type lifecycleStore struct {
 	snapshot               scale.Snapshot
 	renewedID              string
 	renewedTTL             int
+	renewedExpire          sandboxd.ExpireAction
 	renewDeadline          time.Time
 	token                  string
 	deadline, wakeDeadline time.Time
@@ -506,8 +531,8 @@ func (f *lifecycleStore) Resume(_ context.Context, node, id string) error {
 	return f.err
 }
 
-func (f *lifecycleStore) Renew(_ context.Context, _, id string, ttlSeconds int) (time.Time, error) {
-	f.renewedID, f.renewedTTL = id, ttlSeconds
+func (f *lifecycleStore) Renew(_ context.Context, _, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error) {
+	f.renewedID, f.renewedTTL, f.renewedExpire = id, ttlSeconds, onExpire
 	return f.renewDeadline, f.err
 }
 

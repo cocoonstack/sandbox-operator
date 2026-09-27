@@ -3,6 +3,7 @@ package scale
 import (
 	"cmp"
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"time"
@@ -54,13 +55,16 @@ func EntryFromSummary(row sandboxd.SandboxSummary) InventoryEntry {
 		phase = PhaseHibernated
 	}
 	return InventoryEntry{
-		Name:      name,
-		ID:        row.ID,
-		Phase:     phase,
-		ClaimRef:  name,
-		Template:  row.Key.Template,
-		Deadline:  optionalTime(row.Deadline),
-		ClaimedAt: optionalTime(row.ClaimedAt),
+		Name:        name,
+		ID:          row.ID,
+		Phase:       phase,
+		ClaimRef:    name,
+		Template:    row.Key.Template,
+		Deadline:    optionalTime(row.Deadline),
+		ClaimedAt:   optionalTime(row.ClaimedAt),
+		Metadata:    encodeMetadata(row.Metadata),
+		CPUCount:    row.CPUCount,
+		MemoryBytes: row.MemTotalBytes,
 	}
 }
 
@@ -99,4 +103,15 @@ func optionalTime(t time.Time) *metav1.Time {
 		return nil
 	}
 	return new(metav1.NewTime(t))
+}
+
+func encodeMetadata(md map[string]string) string {
+	if len(md) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(md, json.Deterministic(true))
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

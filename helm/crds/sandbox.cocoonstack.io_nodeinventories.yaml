@@ -34,16 +34,24 @@ spec:
               properties:
                 addr:
                   type: string
+                claimMetadata:
+                  type: string
                 claimRef:
                   type: string
                 claimedAt:
                   format: date-time
                   type: string
+                cpuCount:
+                  format: int32
+                  type: integer
                 deadline:
                   format: date-time
                   type: string
                 id:
                   type: string
+                memoryBytes:
+                  format: int64
+                  type: integer
                 name:
                   type: string
                 phase:

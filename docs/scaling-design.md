@@ -143,7 +143,7 @@ type NodeInventory struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
     Node    string           `json:"node"`
-    Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline, claimedAt}
+    Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline, claimedAt, claimMetadata, cpuCount, memoryBytes}
     Address string           `json:"address"` // the node's sandboxd advertise address
     Pools   []PoolCapacity   `json:"pools"`   // per-pool warm capacity
 }
@@ -238,7 +238,11 @@ API). Reads do not wait for it:
 
 Neither touches etcd. **Publishing inventory on change was considered and
 rejected:** `NodeInventory` carries one 105 B entry per live sandbox
-(measured), so a node holding 2500 of them is a 263 KB object. Re-applying that
+(measured), so a node holding 2500 of them is a 263 KB object. An entry also
+carries its claim's caller metadata, at most 4 KiB of raw keys and values, so
+under etcd's 1.5 MiB object limit a node holds about 370 claims at that maximum
+and about 5000 with 200 B of metadata each; JSON escaping grows a value of
+control characters up to 7x, which lowers the maximum-size count to about 50. Re-applying that
 on a 2 s debounce costs 52.6 MB/s of large-object server-side-apply traffic
 across 400 nodes at 1 M sandboxes, against 3.5 MB/s for the current 30 s
 cadence — and it would still leave the `O(total inventory entries)` lookup in

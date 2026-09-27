@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -107,6 +108,28 @@ func TestClaimSendsNoRedirectOnlyWhenSet(t *testing.T) {
 	assert.NotContains(t, bodies[1], "no_redirect")
 }
 
+func TestClaimAndRenewCarryMetadataAndOnExpireOnlyWhenSet(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, strings.TrimSpace(string(b)))
+		_ = json.NewEncoder(w).Encode(ClaimResult{ID: "sb_1", Token: "tok", Deadline: time.Now()})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "root-token")
+	_, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
+	require.NoError(t, err)
+	_, err = c.Claim(t.Context(), ClaimSpec{Template: "base:24.04", Metadata: map[string]string{"user": "u1"}, OnExpire: ExpireArchive})
+	require.NoError(t, err)
+	_, err = c.Renew(t.Context(), "sb_1", RenewSpec{TTLSeconds: 60, OnExpire: ExpireDestroy})
+	require.NoError(t, err)
+	require.Len(t, bodies, 3)
+	assert.JSONEq(t, `{"template":"base:24.04"}`, bodies[0])
+	assert.JSONEq(t, `{"template":"base:24.04","metadata":{"user":"u1"},"on_expire":"archive"}`, bodies[1])
+	assert.JSONEq(t, `{"ttl_seconds":60,"on_expire":"destroy"}`, bodies[2])
+}
+
 func TestClaimServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -170,7 +193,7 @@ func TestSandboxesDecodesTheClaimTime(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/sandboxes", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"sandboxes":[{"id":"sb_1","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z","claimed_at":"2030-01-02T03:04:05Z"},{"id":"sb_2","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z"}]}`))
+		_, _ = w.Write([]byte(`{"sandboxes":[{"id":"sb_1","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z","claimed_at":"2030-01-02T03:04:05Z","metadata":{"user":"u1"},"on_expire":"archive","cpu_count":2,"mem_total_bytes":1073741824},{"id":"sb_2","key":{"template":"base:24.04"},"deadline":"2030-01-02T03:14:05Z"}]}`))
 	}))
 	defer srv.Close()
 
@@ -179,6 +202,9 @@ func TestSandboxesDecodesTheClaimTime(t *testing.T) {
 	require.Len(t, rows, 2)
 	assert.Equal(t, time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC), rows[0].ClaimedAt)
 	assert.True(t, rows[1].ClaimedAt.IsZero(), "a node that publishes no claimed_at leaves it zero")
+	assert.Equal(t, map[string]string{"user": "u1"}, rows[0].Metadata)
+	assert.Equal(t, int32(2), rows[0].CPUCount)
+	assert.Equal(t, int64(1<<30), rows[0].MemTotalBytes)
 }
 
 func TestSandboxesByClaimRefAsksForOneName(t *testing.T) {

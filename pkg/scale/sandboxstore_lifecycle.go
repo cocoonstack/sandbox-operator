@@ -28,12 +28,12 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	return nil
 }
 
-func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int) (time.Time, error) {
+func (s *scatterGatherStore) Renew(ctx context.Context, node, id string, ttlSeconds int, onExpire sandboxd.ExpireAction) (time.Time, error) {
 	cl, err := s.nodeClient(ctx, node, "renew", id)
 	if err != nil {
 		return time.Time{}, err
 	}
-	deadline, err := cl.Renew(ctx, id, sandboxd.RenewSpec{TTLSeconds: ttlSeconds})
+	deadline, err := cl.Renew(ctx, id, sandboxd.RenewSpec{TTLSeconds: ttlSeconds, OnExpire: onExpire})
 	if err != nil {
 		return time.Time{}, nodeVerbError(err, "renew", id, node)
 	}
