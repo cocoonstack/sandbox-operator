@@ -356,11 +356,21 @@ func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 func (s *Server) templateAlias(w http.ResponseWriter, r *http.Request) {
 	alias := r.PathValue("alias")
 	image, ok := s.aliases[alias]
+	if !ok && s.advertised(r, alias) {
+		image, ok = alias, true
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("template alias %q not found", alias))
 		return
 	}
 	writeJSON(w, http.StatusOK, TemplateAliasResponse{TemplateID: image, Public: true})
+}
+
+func (s *Server) advertised(r *http.Request, image string) bool {
+	nodes, err := s.inventories(r)
+	return err == nil && slices.ContainsFunc(nodes, func(inv *scale.NodeInventory) bool {
+		return slices.ContainsFunc(inv.Pools, func(pc scale.PoolCapacity) bool { return pc.Template == image })
+	})
 }
 
 // inventories returns every node's published inventory, the fleet view the

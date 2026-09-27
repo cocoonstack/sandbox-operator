@@ -59,11 +59,16 @@ func TestReadsKeepTheImageAndCarryTheAlias(t *testing.T) {
 }
 
 func TestTheAliasLookupAnswersTheSpecShape(t *testing.T) {
-	h := newTestServer(t, &fakeStore{}, withAliases("base reg/rt:24.04"))
+	inv := scale.NewStaticInventorySource()
+	inv.Put(&scale.NodeInventory{Node: "node-a", Pools: []scale.PoolCapacity{{Template: "reg/py:3.12", Warm: 1}}})
+	h := newTestServer(t, &fakeStore{}, withAliases("base reg/rt:24.04"), func(o *Options) { o.Inventory = inv })
 
 	w := do(t, h, http.MethodGet, "/templates/aliases/base", "", testKey)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `{"templateID":"reg/rt:24.04","public":true}`, w.Body.String())
+	w = do(t, h, http.MethodGet, "/templates/aliases/reg%2Fpy:3.12", "", testKey)
+	assert.Equal(t, http.StatusOK, w.Code, "an image the fleet advertises is a name exists() accepts")
+	assert.JSONEq(t, `{"templateID":"reg/py:3.12","public":true}`, w.Body.String())
 	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodGet, "/templates/aliases/code-interpreter-v1", "", testKey).Code)
 	assert.Equal(t, http.StatusUnauthorized, do(t, h, http.MethodGet, "/templates/aliases/base", "", "").Code)
 }
