@@ -239,10 +239,10 @@ API). Reads do not wait for it:
 Neither touches etcd. **Publishing inventory on change was considered and
 rejected:** `NodeInventory` carries one 105 B entry per live sandbox
 (measured), so a node holding 2500 of them is a 263 KB object. An entry also
-carries its claim's caller metadata, at most 4 KiB of raw keys and values, so
-under etcd's 1.5 MiB object limit a node holds about 370 claims at that maximum
-and about 5000 with 200 B of metadata each; JSON escaping grows a value of
-control characters up to 7x, which lowers the maximum-size count to about 50. Re-applying that
+carries its claim's caller metadata, which sandboxd (57fefe9 or later) caps at
+4 KiB as JSON; the entry stores that JSON as a string, so a quote-heavy maximum
+doubles to about 8 KiB, and under etcd's 1.5 MiB object limit a node holds
+about 190 such claims and about 5000 with 200 B of metadata each. Re-applying that
 on a 2 s debounce costs 52.6 MB/s of large-object server-side-apply traffic
 across 400 nodes at 1 M sandboxes, against 3.5 MB/s for the current 30 s
 cadence — and it would still leave the `O(total inventory entries)` lookup in
