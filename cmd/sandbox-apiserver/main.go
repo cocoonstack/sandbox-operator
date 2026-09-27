@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -65,6 +66,7 @@ type options struct {
 	E2BTimeoutSeconds int
 	E2BAPIKeyFile     string
 	E2BAllowAnonymous bool
+	E2BAliasesFile    string
 }
 
 func newOptions() *options {
@@ -114,25 +116,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"Path to a file (Secret mount) of accepted e2b API keys, one per line as \"key\" or \"key namespace\", presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, --e2b-namespace when none is given.")
 	fs.BoolVar(&o.E2BAllowAnonymous, "e2b-allow-anonymous", o.E2BAllowAnonymous,
 		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
-}
-
-// e2bAPIKeys reads the accepted e2b API keys from the key file, one per line as
-// "key" or "key namespace". Blank lines and #-comments are ignored.
-func (o *options) e2bAPIKeys() ([]string, error) {
-	if o.E2BAPIKeyFile == "" {
-		return nil, nil
-	}
-	b, err := os.ReadFile(o.E2BAPIKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("read e2b api key file %q: %w", o.E2BAPIKeyFile, err)
-	}
-	var keys []string
-	for line := range strings.SplitSeq(string(b), "\n") {
-		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
-			keys = append(keys, line)
-		}
-	}
-	return keys, nil
+	fs.StringVar(&o.E2BAliasesFile, "e2b-template-aliases", o.E2BAliasesFile,
+		"Path to a file of e2b template aliases, one per line as \"alias pool-image\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool.")
 }
 
 // resolveSandboxdToken returns the sandboxd token, reading it from the token file
@@ -270,7 +255,11 @@ func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, rest
 // startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
 // the same way, and listed by the same scatter-gather read.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) (func(), error) {
-	keys, err := o.e2bAPIKeys()
+	keys, err := e2bFileLines(o.E2BAPIKeyFile, "api key")
+	if err != nil {
+		return nil, err
+	}
+	aliases, err := e2bFileLines(o.E2BAliasesFile, "template aliases")
 	if err != nil {
 		return nil, err
 	}
@@ -282,6 +271,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 		Inventory:             inv,
 		APIKeys:               keys,
 		AllowAnonymous:        o.E2BAllowAnonymous,
+		TemplateAliases:       aliases,
 	})
 	if err != nil {
 		return nil, err
@@ -314,6 +304,25 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, i
 		}
 	}()
 	return func() { stop(); <-drained }, nil
+}
+
+// e2bFileLines reads the entries of an e2b key or alias file, one per line.
+// Blank lines and #-comments are ignored.
+func e2bFileLines(path, what string) ([]string, error) {
+	if path == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("read e2b %s file %q: %w", what, path, err)
+	}
+	var lines []string
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
 }
 
 // currentNamespace returns the pod's namespace (for the leader-election lease),

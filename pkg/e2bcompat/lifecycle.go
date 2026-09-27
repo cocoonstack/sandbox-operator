@@ -117,6 +117,7 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSand
 	}
 	writeJSON(w, status, Sandbox{
 		TemplateID:      templateOf(sb),
+		Alias:           s.aliasOf(templateOf(sb)),
 		SandboxID:       PublicID(claimID),
 		ClientID:        node,
 		EnvdVersion:     s.opts.EnvdVersion,
@@ -165,10 +166,12 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	template := templateOf(sb)
+	alias := s.aliasOf(template)
 	out := make([]SandboxForkResult, 0, len(children))
 	for _, child := range children {
 		out = append(out, SandboxForkResult{Sandbox: &Sandbox{
 			TemplateID:      template,
+			Alias:           alias,
 			SandboxID:       PublicID(child.SandboxName),
 			ClientID:        child.Node,
 			EnvdVersion:     s.opts.EnvdVersion,
@@ -347,13 +350,23 @@ func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 				TemplateID:  pc.Template,
 				BuildID:     pc.Template,
 				Public:      true,
-				Aliases:     []string{},
+				Aliases:     append([]string{}, s.imageAliases[pc.Template]...),
 				Names:       []string{pc.Template},
 				EnvdVersion: s.opts.EnvdVersion,
 			})
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) templateAlias(w http.ResponseWriter, r *http.Request) {
+	alias := r.PathValue("alias")
+	image, ok := s.aliases[alias]
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("template alias %q not found", alias))
+		return
+	}
+	writeJSON(w, http.StatusOK, TemplateAliasResponse{TemplateID: image, Public: true})
 }
 
 // inventories returns every node's published inventory, the fleet view the

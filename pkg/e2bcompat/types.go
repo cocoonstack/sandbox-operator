@@ -169,6 +169,12 @@ type Template struct {
 	EnvdVersion string   `json:"envdVersion"`
 }
 
+// TemplateAliasResponse is the GET /templates/aliases/{alias} reply (spec: TemplateAliasResponse).
+type TemplateAliasResponse struct {
+	TemplateID string `json:"templateID"`
+	Public     bool   `json:"public"`
+}
+
 // APIError is the e2b error envelope. The SDK surfaces `message` on failures.
 type APIError struct {
 	Code    int32  `json:"code"`
