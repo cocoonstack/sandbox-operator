@@ -667,6 +667,9 @@ func AddressIPs(addr string) []string {
 	if addr == "" {
 		return nil
 	}
+	if _, rest, ok := strings.Cut(addr, "://"); ok {
+		addr = rest
+	}
 	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
 		return []string{host}
 	}
