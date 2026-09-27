@@ -72,7 +72,10 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return err
 	}
-	inv := kubeinventory.New(reader, o.Inventory)
+	inv, err := kubeinventory.New(ctx, reader, o.Inventory)
+	if err != nil {
+		return err
+	}
 	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), inv, o.Namespace)
 	if err != nil {
 		return err

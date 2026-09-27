@@ -148,7 +148,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	invSource := kubeinventory.New(reader, o.Inventory)
+	invSource, err := kubeinventory.New(ctx, reader, o.Inventory)
+	if err != nil {
+		return err
+	}
 	store := scale.NewScatterGatherStore(
 		invSource,
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),
