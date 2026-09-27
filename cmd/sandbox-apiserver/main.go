@@ -254,7 +254,7 @@ func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, rest
 	if err != nil {
 		return fmt.Errorf("build warm-pool manager: %w", err)
 	}
-	driver := warmpool.New(nil, inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{Interval: interval})
+	driver := warmpool.New(mgr.GetClient(), inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{Interval: interval})
 	if err := driver.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("set up warm-pool controller: %w", err)
 	}

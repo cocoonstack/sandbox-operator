@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/client-go/util/flowcontrol"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
@@ -56,7 +56,7 @@ type storeResolver struct {
 	namespace string
 
 	hc         *http.Client
-	probeLimit flowcontrol.RateLimiter
+	probeLimit *rate.Limiter
 	recent     *recentOwners
 }
 
@@ -75,7 +75,7 @@ func NewResolver(store scale.SandboxStore, inventory scale.InventorySource, name
 		inventory:  inventory,
 		namespace:  namespace,
 		hc:         scale.NewSandboxdHTTPClient(),
-		probeLimit: flowcontrol.NewTokenBucketRateLimiter(probeQPS, probeBurst),
+		probeLimit: rate.NewLimiter(probeQPS, probeBurst),
 		recent:     &recentOwners{m: map[string]recentOwner{}},
 	}, nil
 }
@@ -110,7 +110,7 @@ func (s *storeResolver) Owner(ctx context.Context, sandboxID, token string) (Own
 
 // probe asks every node whether it holds claimID under token; only the owner answers, and a hit is kept past its next publish.
 func (s *storeResolver) probe(ctx context.Context, sandboxID, claimID, token string) (Owner, error) {
-	if !s.probeLimit.TryAccept() {
+	if !s.probeLimit.Allow() {
 		return Owner{}, ErrSandboxNotFound
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
