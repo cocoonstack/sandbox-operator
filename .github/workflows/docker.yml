@@ -17,6 +17,7 @@ jobs:
         image:
           - sandbox-apiserver
           - sandbox-envd-proxy
+          - sandbox-e2b
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1

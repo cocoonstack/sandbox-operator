@@ -46,4 +46,5 @@ jobs:
           path: |
             bin/sandbox-apiserver
             bin/sandbox-envd-proxy
+            bin/sandbox-e2b
           retention-days: 30

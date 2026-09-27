@@ -14,9 +14,11 @@ controller of its own.
 |---|---|
 | `cmd/sandbox-apiserver` | Aggregated apiserver for `sandboxes.agents.x-k8s.io/v1beta1`: scatter-gather reads, node-local claim/release on create/delete, the pause/resume/fork/snapshot subresources, the optional e2b REST surface, and the in-process `SandboxWarmPool` driver |
 | `cmd/sandbox-envd-proxy` | The e2b data plane: one public entry point that carries `files`, `commands` and `pty` into a sandbox's guest port |
+| `cmd/sandbox-e2b` | The e2b surface on a sandboxd mesh with no Kubernetes, with the envd data plane in the same process when asked; see [mesh mode](e2b-compat.md#mesh-mode-no-kubernetes) |
 | `nodeinventories.sandbox.cocoonstack.io` | The one CRD this repository owns: per-node summary of live sandboxes, warm capacity and the node's sandboxd address |
 | `api/v1beta1` | `NodeInventory` plus the lifecycle subresource payloads |
 | `pkg/scale`, `pkg/sandboxd`, `pkg/e2bcompat`, `pkg/envdproxy` | The store, the sandboxd client, the e2b translation layer, the proxy |
+| `pkg/scale/kubeinventory`, `pkg/scale/meshinventory` | The two inventory sources the store reads: `NodeInventory` objects through an informer cache, or a sandboxd mesh polled over HTTP |
 
 ## The three paths
 

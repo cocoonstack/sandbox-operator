@@ -39,6 +39,11 @@ flowchart LR
   `sandbox-envd-proxy` carries the SDK's `files`, `commands` and `pty` traffic
   into the sandbox.
 
+Outside Kubernetes, `sandbox-e2b` serves the same e2b surface on a sandboxd
+mesh: it finds the nodes through sandboxd's own gossip and can carry the envd
+data plane in the same process; see
+[mesh mode](docs/e2b-compat.md#mesh-mode-no-kubernetes).
+
 ## Quick start
 
 Install the L3 path on a cluster with sandboxd nodes and cert-manager:

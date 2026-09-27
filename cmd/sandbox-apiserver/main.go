@@ -10,10 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,16 +30,12 @@ import (
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/sandbox-operator/pkg/logbridge"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/kubeinventory"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
 	"github.com/cocoonstack/sandbox-operator/version"
-)
-
-const (
-	e2bReadHeaderTimeout = 10 * time.Second
-	e2bShutdownTimeout   = 10 * time.Second
 )
 
 // options has no etcd option because this server stores nothing.
@@ -58,15 +51,8 @@ type options struct {
 	WarmPoolDriver   bool
 	WarmPoolInterval time.Duration
 
-	E2BAPI            bool
-	E2BAddr           string
-	E2BNamespace      string
-	E2BDomain         string
-	E2BEnvdVersion    string
-	E2BTimeoutSeconds int
-	E2BAPIKeyFile     string
-	E2BAllowAnonymous bool
-	E2BAliasesFile    string
+	E2BAPI bool
+	E2B    *e2bcompat.Flags
 }
 
 func newOptions() *options {
@@ -76,8 +62,7 @@ func newOptions() *options {
 		Authorization:  genericoptions.NewDelegatingAuthorizationOptions(),
 		Features:       genericoptions.NewFeatureOptions(),
 		WarmPoolDriver: true,
-		E2BAddr:        ":8080",
-		E2BNamespace:   "default",
+		E2B:            e2bcompat.NewFlags(),
 	}
 	o.SecureServing.BindPort = 6443
 	o.Features.EnablePriorityAndFairness = false
@@ -102,35 +87,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"Resync cadence for the SandboxWarmPool driver, and with it the sampling period of the warm count in pool status (0 = default 5s).")
 	fs.BoolVar(&o.E2BAPI, "enable-e2b-api", o.E2BAPI,
 		"Serve the e2b-compatible REST surface, so an unmodified e2b SDK can claim from the same warm pools (point E2B_API_URL at it).")
-	fs.StringVar(&o.E2BAddr, "e2b-bind-address", o.E2BAddr,
-		"Address the e2b-compatible surface listens on.")
-	fs.StringVar(&o.E2BNamespace, "e2b-namespace", o.E2BNamespace,
-		"Namespace a key that names none claims in, and where anonymous claims land; e2b has no namespace concept.")
-	fs.StringVar(&o.E2BDomain, "e2b-domain", o.E2BDomain,
-		"Base domain the SDK derives the in-sandbox envd host from, as {port}-{sandboxID}.{domain}. Required with --enable-e2b-api: without it a created sandbox has no reachable data plane.")
-	fs.StringVar(&o.E2BEnvdVersion, "e2b-envd-version", o.E2BEnvdVersion,
-		"envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one.")
-	fs.IntVar(&o.E2BTimeoutSeconds, "e2b-default-timeout", o.E2BTimeoutSeconds,
-		"Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for.")
-	fs.StringVar(&o.E2BAPIKeyFile, "e2b-api-key-file", o.E2BAPIKeyFile,
-		"Path to a file (Secret mount) of accepted e2b API keys, one per line as \"key\" or \"key namespace\", presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, --e2b-namespace when none is given.")
-	fs.BoolVar(&o.E2BAllowAnonymous, "e2b-allow-anonymous", o.E2BAllowAnonymous,
-		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
-	fs.StringVar(&o.E2BAliasesFile, "e2b-template-aliases", o.E2BAliasesFile,
-		"Path to a file of e2b template aliases, one per line as \"alias pool-image\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool.")
-}
-
-// resolveSandboxdToken returns the sandboxd token, reading it from the token file
-// (a Secret mount) when one is configured, else the literal flag value.
-func (o *options) resolveSandboxdToken() (string, error) {
-	if o.SandboxdTokenFile == "" {
-		return o.SandboxdToken, nil
-	}
-	b, err := os.ReadFile(o.SandboxdTokenFile)
-	if err != nil {
-		return "", fmt.Errorf("read sandboxd token file %q: %w", o.SandboxdTokenFile, err)
-	}
-	return strings.TrimSpace(string(b)), nil
+	o.E2B.AddFlags(fs)
 }
 
 // serverConfig assembles a GenericAPIServer config from the options.
@@ -179,7 +136,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	token, err := o.resolveSandboxdToken()
+	token, err := sandboxd.TokenFrom(o.SandboxdToken, o.SandboxdTokenFile)
 	if err != nil {
 		return err
 	}
@@ -255,74 +212,15 @@ func startWarmPoolDriver(ctx context.Context, fail context.CancelCauseFunc, rest
 // startE2BServer shares the aggregated apiserver's store, so a claim made here is the same node-local claim, released
 // the same way, and listed by the same scatter-gather read.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) (func(), error) {
-	keys, err := e2bFileLines(o.E2BAPIKeyFile, "api key")
+	opts, err := o.E2B.ServerOptions(inv)
 	if err != nil {
 		return nil, err
 	}
-	aliases, err := e2bFileLines(o.E2BAliasesFile, "template aliases")
+	srv, err := e2bcompat.NewServer(store, opts)
 	if err != nil {
 		return nil, err
 	}
-	srv, err := e2bcompat.NewServer(store, e2bcompat.Options{
-		Namespace:             o.E2BNamespace,
-		Domain:                o.E2BDomain,
-		EnvdVersion:           o.E2BEnvdVersion,
-		DefaultTimeoutSeconds: o.E2BTimeoutSeconds,
-		Inventory:             inv,
-		APIKeys:               keys,
-		AllowAnonymous:        o.E2BAllowAnonymous,
-		TemplateAliases:       aliases,
-	})
-	if err != nil {
-		return nil, err
-	}
-	httpSrv := &http.Server{
-		Addr:              o.E2BAddr,
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: e2bReadHeaderTimeout,
-	}
-	ln, err := net.Listen("tcp", o.E2BAddr)
-	if err != nil {
-		return nil, fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
-	}
-	logger := log.WithFunc("main.startE2BServer")
-	logger.Infof(ctx, "serving e2b-compatible API address=%s namespace=%s authenticated=%t", o.E2BAddr, o.E2BNamespace, len(keys) > 0)
-	go func() {
-		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error(ctx, err, "e2b-compatible API server exited")
-		}
-	}()
-	e2bCtx, stop := context.WithCancel(ctx)
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		<-e2bCtx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e2bShutdownTimeout)
-		defer cancel()
-		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-			logger.Error(ctx, err, "e2b-compatible API server shutdown")
-		}
-	}()
-	return func() { stop(); <-drained }, nil
-}
-
-// e2bFileLines reads the entries of an e2b key or alias file, one per line.
-// Blank lines and #-comments are ignored.
-func e2bFileLines(path, what string) ([]string, error) {
-	if path == "" {
-		return nil, nil
-	}
-	b, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read e2b %s file %q: %w", what, path, err)
-	}
-	var lines []string
-	for line := range strings.SplitSeq(string(b), "\n") {
-		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
-			lines = append(lines, line)
-		}
-	}
-	return lines, nil
+	return srv.Serve(ctx, o.E2B.Addr)
 }
 
 // currentNamespace returns the pod's namespace (for the leader-election lease),

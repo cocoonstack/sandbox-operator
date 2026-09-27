@@ -37,6 +37,22 @@ builds:
       - arm64
     main: ./cmd/sandbox-envd-proxy
 
+  - id: sandbox-e2b-linux
+    binary: sandbox-e2b
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/cocoonstack/sandbox-operator/version.REVISION={{.Commit}}
+      - -X github.com/cocoonstack/sandbox-operator/version.VERSION={{.Env.VERSION}}
+      - -X github.com/cocoonstack/sandbox-operator/version.BUILTAT={{.Date}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/sandbox-e2b
+
 archives:
   - id: apiserver
     ids:
@@ -77,6 +93,28 @@ archives:
       - sandbox-envd-proxy-linux
     name_template: >-
       sandbox-envd-proxy_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+
+  - id: e2b
+    ids:
+      - sandbox-e2b-linux
+    name_template: >-
+      sandbox-e2b_{{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+
+  - id: e2b-latest
+    ids:
+      - sandbox-e2b-linux
+    name_template: >-
+      sandbox-e2b_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
