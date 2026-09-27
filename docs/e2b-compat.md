@@ -106,7 +106,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 |---|---|---|
 | `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane; `metadata` → the claim's metadata; `autoPause: true` → the claim is paused (hibernated and archived) at lease end instead of destroyed, and connect resumes it. Both ride on the same claim call and need sandboxd built from 3fd7af2 or later. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable). SDK 2.51 creates through `/v2`. |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored, and so is `metadata`: `key=value` pairs joined by `&`, each key and value URL-encoded as the JS and Python SDKs send `query.metadata`; every pair must match; a pair without `=`, an empty key or a repeated key is `400`. Each item carries its `metadata`, `cpuCount` and `memoryMB`. `/v2` pages as the spec says: `limit` (1 to 100, default 100), `order` by start time (`desc`, newest first, by default, or `asc`) and `nextToken`, the opaque cursor the previous page returned in `X-Next-Token`. The cursor names the last sandbox served, so a sandbox created or released between pages neither repeats nor skips the rest. An out-of-range `limit`, an unknown `order` or a malformed `nextToken` is `400`. The legacy `GET /sandboxes` takes no page parameters and returns every match. |
-| `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
+| `GET /sandboxes/{id}` | `store.GetByClaimID`, then `store.Read` | Resolves the owning node and materializes only that entry; `state` and `endAt` come from the node's own record, so they reflect a pause, resume or renew at once; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |
 | `POST /sandboxes/{id}/timeout` | `store.Renew` | Moves the owning node's lease to `timeout` seconds from now. `204` once the node has renewed; a node's refusal keeps its 4xx status (`409` for an archived sandbox), and any other failure is `500`. |
 | `POST /sandboxes/{id}/refreshes` | `store.Renew` | The SDK keepalive. Renews for the body's `duration` when it carries one, otherwise `--e2b-default-timeout`. |
@@ -136,9 +136,10 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   `Sandbox.create()` works and `files`/`commands`/`pty` do not. The pool must
   also run an image that carries `envd` — the sandbox repo's `e2b-rt` flavor —
   or there is nothing on the other end of the proxy.
-- **`GET /sandboxes` lags a create by up to one inventory publish.** The list
-  is assembled from `NodeInventory`, which each node republishes on a cadence
-  (30 s by default). `GET /sandboxes/{id}`, the lifecycle verbs and
+- **`GET /sandboxes` lags a create, a pause and a resume by up to one inventory
+  publish.** The list is assembled from `NodeInventory`, which each node
+  republishes on a cadence (30 s by default), so a listed `state` can trail a
+  pause; `GET /sandboxes/{id}` reads the state live. `GET /sandboxes/{id}`, the lifecycle verbs and
   `sandbox-envd-proxy` do not wait for it: a sandbox the inventory does not list
   yet is looked up on the nodes themselves, so `Sandbox.create()` followed at
   once by `files`/`commands` works. The proxy's node lookups share one budget

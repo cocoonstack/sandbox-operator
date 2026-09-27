@@ -471,6 +471,27 @@ func TestResumeAutoPauseSetsTheLeaseEndActionWithoutShorteningTheLease(t *testin
 	}
 }
 
+func TestGetReadsStateAndEndAtFromTheOwningNode(t *testing.T) {
+	deadline := time.Date(2031, 5, 6, 7, 8, 9, 0, time.UTC)
+	stale := liveSandbox("s1", "sb_abc", "node-a", "img")
+	stale.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"
+	store := &lifecycleStore{nodePaused: true, deadline: deadline}
+	store.items = []sandboxv1beta1.Sandbox{stale}
+	h := newTestServer(t, store)
+
+	got := getDetailWith(t, h, "sb-abc")
+	assert.Equal(t, StatePaused, got.State, "the node's record wins over the published phase")
+	assert.Equal(t, "2031-05-06T07:08:09Z", got.EndAt)
+	assert.Equal(t, "node-a sb_abc", store.readNode+" "+store.readID)
+
+	store.nodePaused = false
+	assert.Equal(t, StateRunning, getDetailWith(t, h, "sb-abc").State)
+
+	store.nodeErr = k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "sb_abc")
+	w := do(t, h, http.MethodGet, "/sandboxes/sb-abc", ``, testKey)
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}
+
 func TestMetricsReportEnvdsSampleAndNothingForAPausedSandbox(t *testing.T) {
 	store := &lifecycleStore{metrics: map[string]envdMetrics{"sb_run": {Timestamp: 1790517471, CPUCount: 1, CPUUsedPct: 97.5, MemTotal: 490504192, MemUsed: 209805312, MemCache: 125820928, DiskUsed: 27705344, DiskTotal: 10464022528}}}
 	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_run", "node-a", "img"), pausedSandbox("s2", "sb_paused", "node-a", "img")}
