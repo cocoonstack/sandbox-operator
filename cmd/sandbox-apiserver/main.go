@@ -39,7 +39,10 @@ import (
 	"github.com/cocoonstack/sandbox-operator/version"
 )
 
-const driverRestartDelay = 5 * time.Second
+const (
+	driverRestartDelay = 5 * time.Second
+	watchDrainGrace    = 2 * time.Second
+)
 
 // options has no etcd option because this server stores nothing.
 type options struct {
@@ -101,6 +104,7 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 		return nil, fmt.Errorf("create self-signed certificates: %w", err)
 	}
 	cfg := genericapiserver.NewConfig(sandboxapiserver.Codecs)
+	cfg.ShutdownWatchTerminationGracePeriod = watchDrainGrace
 	cfg.EffectiveVersion = apiservercompatibility.DefaultBuildEffectiveVersion()
 	cfg.OpenAPIV3Config = sandboxapiserver.NewOpenAPIV3Config()
 	if err := o.Features.ApplyTo(cfg, nil, nil); err != nil {
