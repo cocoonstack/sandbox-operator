@@ -72,7 +72,7 @@ var (
 
 // InventorySource enumerates nodes and fetches each one's NodeInventory, so a partitioned node drops out of a List instead of failing it.
 type InventorySource interface {
-	// ListNodes returns the nodes that publish inventory. O(nodes), cache-fed.
+	// ListNodes returns the nodes the source holds inventory for. O(nodes), from memory.
 	ListNodes(ctx context.Context) ([]string, error)
 	// NodeInventory returns one node's inventory, or an error for an unreadable or unpublished node.
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
