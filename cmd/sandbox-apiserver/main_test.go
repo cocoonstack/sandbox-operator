@@ -135,6 +135,7 @@ func TestShutdownClosesAnOpenWatchPromptly(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	o.SecureServing.Listener = ln
+	o.SecureServing.ServerCert.CertDirectory, o.SecureServing.ServerCert.PairName = "", ""
 	cfg, err := o.serverConfig()
 	if err != nil {
 		t.Fatalf("serverConfig: %v", err)
