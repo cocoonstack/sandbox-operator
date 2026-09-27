@@ -63,6 +63,50 @@ func TestSandboxdClaimRedirectIsCapacityMiss(t *testing.T) {
 	require.ErrorIs(t, err, ErrNodeAtCapacity)
 }
 
+func TestClaimRedirectCarriesItsTargets(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(ClaimResult{Redirect: []string{"10.0.0.6:7777", "10.0.0.7:7777"}})
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "root-token").Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
+	re, ok := errors.AsType[*RedirectError](err)
+	require.True(t, ok, "a redirect-only 200 is a *RedirectError, got %v", err)
+	assert.Equal(t, []string{"10.0.0.6:7777", "10.0.0.7:7777"}, re.Targets)
+}
+
+func TestClaimEmptyBodyIsCapacityMissNotRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	_, err := New(srv.URL, "root-token").Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
+	require.ErrorIs(t, err, ErrNodeAtCapacity)
+	_, isRedirect := errors.AsType[*RedirectError](err)
+	assert.False(t, isRedirect)
+}
+
+func TestClaimSendsNoRedirectOnlyWhenSet(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		bodies = append(bodies, b)
+		_ = json.NewEncoder(w).Encode(ClaimResult{ID: "sb_1", Token: "tok"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "root-token")
+	_, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04", NoRedirect: true})
+	require.NoError(t, err)
+	_, err = c.Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
+	require.NoError(t, err)
+	require.Len(t, bodies, 2)
+	assert.Equal(t, true, bodies[0]["no_redirect"])
+	assert.NotContains(t, bodies[1], "no_redirect")
+}
+
 func TestClaimServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

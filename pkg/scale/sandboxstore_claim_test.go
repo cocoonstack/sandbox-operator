@@ -148,7 +148,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 	for range 200 {
 		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
 		require.NoError(t, err)
-		best, _ := pickPowerOfTwo(candidates)
+		best := pickPowerOfTwo(candidates)
 		picked[best.node]++
 	}
 
@@ -165,7 +165,7 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 	for range 200 {
 		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
 		require.NoError(t, err)
-		best, _ := pickPowerOfTwo(candidates)
+		best := pickPowerOfTwo(candidates)
 		if best.node == "warm" {
 			warmPicks++
 		}
@@ -179,7 +179,7 @@ func TestStoreClaimFallsBackWhenTheSampledNodeRacedToZero(t *testing.T) {
 	src.Put(poolInv("stale", "stale:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
 
-	f := &raceFactory{emptyAddr: "stale:7777", result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
+	f := &raceFactory{answers: map[string]error{"stale:7777": sandboxd.ErrNodeAtCapacity}, result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	for range 40 {
@@ -202,7 +202,7 @@ func TestStoreClaimSkipsANodeThatDeliveredNothing(t *testing.T) {
 			src := NewStaticInventorySource()
 			src.Put(poolInv("dead", "dead:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
 			src.Put(poolInv("live", "live:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
-			f := &raceFactory{deadAddr: "dead:7777", deadErr: tt.err, result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
+			f := &raceFactory{answers: map[string]error{"dead:7777": tt.err}, result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
 			store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 			for range 20 {
@@ -217,19 +217,19 @@ func TestStoreClaimSkipsANodeThatDeliveredNothing(t *testing.T) {
 func TestStoreClaimDoesNotRetryElsewhereAfterATimeout(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("slow", "slow:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
-	f := &raceFactory{deadAddr: "slow:7777", deadErr: fmt.Errorf("claim: %w", context.DeadlineExceeded)}
+	f := &raceFactory{answers: map[string]error{"slow:7777": fmt.Errorf("claim: %w", context.DeadlineExceeded)}}
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.False(t, IsNoWarmCapacity(err), "a lost reply may have delivered a microVM; it must not read as no capacity")
-	assert.Equal(t, 1, f.calls, "the claim must not be re-issued")
+	assert.Len(t, f.calls, 1, "the claim must not be re-issued")
 }
 
 func TestStoreClaimIsRetryableWhenEveryNodeIsDown(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
-	f := &raceFactory{deadAddr: "n1:7777", deadErr: fmt.Errorf("claim: %w", &sandboxd.HTTPError{StatusCode: 503})}
+	f := &raceFactory{answers: map[string]error{"n1:7777": fmt.Errorf("claim: %w", &sandboxd.HTTPError{StatusCode: 503})}}
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
@@ -242,22 +242,120 @@ func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
 	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
 	src.Put(poolInv("n2", "n2:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
 
-	f := &raceFactory{emptyAll: true}
+	f := &raceFactory{answers: map[string]error{"n1:7777": sandboxd.ErrNodeAtCapacity, "n2:7777": sandboxd.ErrNodeAtCapacity}}
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
 	assert.True(t, IsNoWarmCapacity(err), "exhausting every node must stay the retryable no-capacity signal")
-	assert.Equal(t, 2, f.calls, "each node must be tried exactly once")
+	assert.Len(t, f.calls, 2, "each node must be tried exactly once")
+}
+
+func TestStoreClaimFollowsARedirectToTheNodeThatDelivers(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("a", "a:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+	src.Put(poolInv("b", "b:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
+	f := &raceFactory{answers: map[string]error{"a:7777": &sandboxd.RedirectError{Targets: []string{"b:7777"}}}, result: sandboxd.ClaimResult{ID: "sb_b", Token: "tok"}}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory())).(*scatterGatherStore)
+
+	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "b", a.Node)
+	assert.Equal(t, "sb_b", a.SandboxName)
+	assert.Equal(t, []claimCall{{"a:7777", false}, {"b:7777", true}}, f.calls)
+	for _, key := range []string{nameKey("ns", "s1"), claimKey("ns", "sb_b")} {
+		node, ok := store.index.lookup(key)
+		require.True(t, ok, key)
+		assert.Equal(t, "b", node, key)
+	}
+}
+
+func TestStoreClaimSkipsARedirectItCannotFollow(t *testing.T) {
+	for name, target := range map[string]string{"the target redirects again": "b:7777", "the target is no known node": "unknown:7777"} {
+		t.Run(name, func(t *testing.T) {
+			for range 20 {
+				src := NewStaticInventorySource()
+				src.Put(poolInv("a", "a:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+				src.Put(poolInv("b", "b:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
+				src.Put(poolInv("c", "c:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+				f := &raceFactory{answers: map[string]error{
+					"a:7777": &sandboxd.RedirectError{Targets: []string{target}},
+					"b:7777": &sandboxd.RedirectError{Targets: []string{"a:7777"}},
+				}, result: sandboxd.ClaimResult{ID: "sb_c", Token: "tok"}}
+				store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+
+				a, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+				require.NoError(t, err)
+				assert.Equal(t, "c", a.Node)
+				assert.NotContains(t, f.calls, claimCall{"a:7777", true})
+				assert.NotContains(t, f.calls, claimCall{"unknown:7777", true})
+			}
+		})
+	}
+}
+
+func TestStoreClaimDropsARedirectTargetThatDeliveredNothing(t *testing.T) {
+	for range 20 {
+		src := NewStaticInventorySource()
+		src.Put(poolInv("a", "a:7777", PoolCapacity{Template: "img", Warm: 100, Target: 100}))
+		src.Put(poolInv("b", "b:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
+		f := &raceFactory{answers: map[string]error{
+			"a:7777": &sandboxd.RedirectError{Targets: []string{"b:7777"}},
+			"b:7777": sandboxd.ErrNodeAtCapacity,
+		}}
+		store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+
+		_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+		require.True(t, IsNoWarmCapacity(err), "want ErrNoWarmCapacity, got %v", err)
+		if f.calls[0].addr == "a:7777" {
+			assert.Equal(t, []claimCall{{"a:7777", false}, {"b:7777", true}}, f.calls, "b answered the redirect, so it is not sampled again")
+		}
+	}
+}
+
+func TestStoreClaimDoesNotRetryElsewhereAfterARedirectTargetTimesOut(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("a", "a:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+	src.Put(poolInv("b", "b:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
+	src.Put(poolInv("c", "c:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
+	f := &raceFactory{answers: map[string]error{
+		"a:7777": &sandboxd.RedirectError{Targets: []string{"b:7777", "c:7777"}},
+		"b:7777": fmt.Errorf("claim: %w", context.DeadlineExceeded),
+	}}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+
+	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorContains(t, err, `on node "b"`)
+	assert.Equal(t, []claimCall{{"a:7777", false}, {"b:7777", true}}, f.calls, "a lost reply may have delivered a microVM, so no other target is asked")
+}
+
+func TestStoreClaimReportsNoCapacityWhenEveryRedirectTargetIsFull(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("a", "a:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+	src.Put(poolInv("b", "b:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
+	src.Put(poolInv("c", "c:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
+	f := &raceFactory{answers: map[string]error{
+		"a:7777": &sandboxd.RedirectError{Targets: []string{"b:7777", "c:7777"}},
+		"b:7777": sandboxd.ErrNodeAtCapacity,
+		"c:7777": sandboxd.ErrNodeAtCapacity,
+	}}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+
+	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
+	assert.True(t, IsNoWarmCapacity(err), "want ErrNoWarmCapacity, got %v", err)
+	assert.Equal(t, []claimCall{{"a:7777", false}, {"b:7777", true}, {"c:7777", true}}, f.calls)
+}
+
+type claimCall struct {
+	addr       string
+	noRedirect bool
 }
 
 type raceFactory struct {
-	emptyAddr string
-	emptyAll  bool
-	deadAddr  string
-	deadErr   error
-	result    sandboxd.ClaimResult
-	calls     int
+	answers map[string]error
+	result  sandboxd.ClaimResult
+	calls   []claimCall
 }
 
 func (r *raceFactory) factory() SandboxdClientFactory {
@@ -272,13 +370,10 @@ type raceClient struct {
 	addr string
 }
 
-func (c *raceClient) Claim(context.Context, sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
-	c.f.calls++
-	if c.f.emptyAll || c.addr == c.f.emptyAddr {
-		return sandboxd.ClaimResult{}, sandboxd.ErrNodeAtCapacity
-	}
-	if c.addr == c.f.deadAddr {
-		return sandboxd.ClaimResult{}, c.f.deadErr
+func (c *raceClient) Claim(_ context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
+	c.f.calls = append(c.f.calls, claimCall{c.addr, spec.NoRedirect})
+	if err := c.f.answers[c.addr]; err != nil {
+		return sandboxd.ClaimResult{}, err
 	}
 	return c.f.result, nil
 }
