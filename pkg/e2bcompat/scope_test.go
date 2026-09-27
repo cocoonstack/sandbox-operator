@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -240,6 +241,23 @@ func TestV2ListCursorSurvivesASandboxLeaving(t *testing.T) {
 	store.items = slices.DeleteFunc(store.items, func(sb sandboxv1beta1.Sandbox) bool { return sb.Name == "s3" })
 	second, _ := pageOfList(t, h, "/v2/sandboxes?limit=2&nextToken="+token)
 	assert.Equal(t, []string{"sb-2", "sb-1"}, second)
+}
+
+func TestV2ListPagesSandboxesWithoutAClaimTimeOnce(t *testing.T) {
+	unstamped := []sandboxv1beta1.Sandbox{liveSandbox("s0", "sb_0", "node-a", "img"), liveSandbox("s1", "sb_1", "node-a", "img")}
+	for i := range unstamped {
+		unstamped[i].CreationTimestamp = metav1.Time{}
+	}
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestServer(t, &fakeStore{items: unstamped})
+		for _, order := range []string{"desc", "asc"} {
+			first, token := pageOfList(t, h, "/v2/sandboxes?limit=1&order="+order)
+			time.Sleep(1100 * time.Millisecond)
+			second, last := pageOfList(t, h, "/v2/sandboxes?limit=1&order="+order+"&nextToken="+token)
+			assert.ElementsMatch(t, []string{"sb-0", "sb-1"}, append(first, second...), order)
+			assert.Empty(t, last, order)
+		}
+	})
 }
 
 func TestV2ListRefusesPageParametersOutsideTheSpec(t *testing.T) {

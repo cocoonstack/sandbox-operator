@@ -472,15 +472,16 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 		endAt = deadline
 	}
 	return SandboxDetail{
-		TemplateID:  templateOf(sb),
-		Alias:       s.aliasOf(templateOf(sb)),
-		SandboxID:   PublicID(claimIDOf(sb)),
-		ClientID:    sb.Status.NodeName,
-		StartedAt:   started.UTC().Format(time.RFC3339),
-		EndAt:       endAt.UTC().Format(time.RFC3339),
-		State:       state,
-		EnvdVersion: s.opts.EnvdVersion,
-		Domain:      s.opts.Domain,
+		TemplateID:   templateOf(sb),
+		Alias:        s.aliasOf(templateOf(sb)),
+		SandboxID:    PublicID(claimIDOf(sb)),
+		ClientID:     sb.Status.NodeName,
+		StartedAt:    started.UTC().Format(time.RFC3339),
+		EndAt:        endAt.UTC().Format(time.RFC3339),
+		State:        state,
+		EnvdVersion:  s.opts.EnvdVersion,
+		Domain:       s.opts.Domain,
+		startedAtKey: sb.CreationTimestamp.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -585,7 +586,7 @@ func (p listPage) compare(a, b pageKey) int {
 	return c
 }
 
-func keyOf(d SandboxDetail) pageKey { return pageKey{d.StartedAt, d.SandboxID} }
+func keyOf(d SandboxDetail) pageKey { return pageKey{d.startedAtKey, d.SandboxID} }
 
 // templateOf reads the store's label because a synthesized Sandbox holds no pod spec.
 func templateOf(sb *sandboxv1beta1.Sandbox) string {

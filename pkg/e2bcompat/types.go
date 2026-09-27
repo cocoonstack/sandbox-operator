@@ -68,6 +68,8 @@ type SandboxDetail struct {
 	EnvdAccessToken     string            `json:"envdAccessToken,omitempty"`
 	Domain              string            `json:"domain,omitempty"`
 	AllowInternetAccess *bool             `json:"allowInternetAccess,omitempty"`
+
+	startedAtKey string
 }
 
 // SandboxTimeoutRequest is the POST /sandboxes/{sandboxID}/timeout request body
