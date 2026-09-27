@@ -352,18 +352,18 @@ func TestLookupHandsTheStoreTheNodeLocalID(t *testing.T) {
 	}
 }
 
-func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
+func TestListReportsThePublishedDeadlineAsEndAt(t *testing.T) {
 	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
 	sb.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"
-	if got := getDetail(t, sb); got.EndAt != "2030-01-02T03:04:05Z" {
+	if got := listDetail(t, sb); got.EndAt != "2030-01-02T03:04:05Z" {
 		t.Errorf("endAt = %q, want the granted deadline", got.EndAt)
 	}
 }
 
-func TestGetReportsTheDefaultEndAtWithoutADeadline(t *testing.T) {
+func TestListReportsTheDefaultEndAtWithoutADeadline(t *testing.T) {
 	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
 	sb.CreationTimestamp = metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
-	if got := getDetail(t, sb); got.EndAt != "2030-01-02T03:09:05Z" {
+	if got := listDetail(t, sb); got.EndAt != "2030-01-02T03:09:05Z" {
 		t.Errorf("endAt = %q, want startedAt + %ds", got.EndAt, DefaultTimeoutSeconds)
 	}
 }
@@ -654,6 +654,16 @@ func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, 
 func getDetail(t *testing.T, sb sandboxv1beta1.Sandbox) SandboxDetail {
 	t.Helper()
 	return getDetailWith(t, newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}}), "sb_one")
+}
+
+func listDetail(t *testing.T, sb sandboxv1beta1.Sandbox) SandboxDetail {
+	t.Helper()
+	w := do(t, newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}}), http.MethodGet, "/sandboxes", "", testKey)
+	var got []SandboxDetail
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil || len(got) != 1 {
+		t.Fatalf("list: status %d body %s, want one sandbox", w.Code, w.Body.String())
+	}
+	return got[0]
 }
 
 func getDetailWith(t *testing.T, h http.Handler, id string) SandboxDetail {

@@ -353,7 +353,7 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail
 	return out, true
 }
 
-// getSandbox resolves one sandbox by its e2b sandboxID (the sandboxd claim id).
+// getSandbox resolves one sandbox by its e2b sandboxID (the sandboxd claim id); state and endAt come from the owning node, which a published inventory lags.
 func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
@@ -361,7 +361,20 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request) {
 		s.writeLookupError(w, r, err, "get")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.detailFor(sb))
+	rec, err := s.store.Read(r.Context(), sb.Status.NodeName, claimIDOf(sb))
+	if err != nil {
+		s.writeVerbError(w, r, err, "get: read", "failed to read the sandbox")
+		return
+	}
+	d := s.detailFor(sb)
+	d.State = StateRunning
+	if rec.Paused {
+		d.State = StatePaused
+	}
+	if !rec.Deadline.IsZero() {
+		d.EndAt = rec.Deadline.UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 // deleteSandbox releases the claim, which destroys its microVM on the owning node.
