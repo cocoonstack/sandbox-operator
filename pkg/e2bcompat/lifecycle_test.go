@@ -291,6 +291,7 @@ func TestLifecycleVerbsOnUnknownSandboxAre404(t *testing.T) {
 	for _, path := range []string{
 		"/sandboxes/sb-missing/pause",
 		"/sandboxes/sb-missing/connect",
+		"/sandboxes/sb-missing/resume",
 		"/sandboxes/sb-missing/fork",
 		"/sandboxes/sb-missing/snapshots",
 	} {
@@ -379,6 +380,80 @@ func TestPauseAndForkTreatAnArchivedSandboxAsPaused(t *testing.T) {
 			}
 			if store.pausedID != "" || store.forkedID != "" {
 				t.Errorf("the verb reached the node (paused %q, forked %q) for an archived sandbox", store.pausedID, store.forkedID)
+			}
+		})
+	}
+}
+
+func TestResumeRestoresAPausedSandboxWith201(t *testing.T) {
+	store := &lifecycleStore{token: "sandbox-secret"}
+	nodeReportsPaused(store)
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/resume", `{"timeout":30}`, testKey)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+	if store.resumedNode != "node-a" || store.resumedID != "sb_abc" {
+		t.Errorf("Resume(%q, %q), want (node-a, sb_abc)", store.resumedNode, store.resumedID)
+	}
+	var got Sandbox
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.SandboxID != "sb-abc" || got.EnvdAccessToken != "sandbox-secret" {
+		t.Errorf("sandbox = %+v, want sb-abc with the token the owning node holds", got)
+	}
+}
+
+func TestResumeOfARunningSandboxIs409(t *testing.T) {
+	store := &lifecycleStore{}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
+
+	if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/resume", ``, testKey); w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
+	}
+	if store.resumedID != "" || store.renewedID != "" {
+		t.Errorf("a running sandbox was resumed %q or renewed %q", store.resumedID, store.renewedID)
+	}
+}
+
+func TestResumeRefusesWhatConnectCannotGive(t *testing.T) {
+	for _, body := range []string{`{"autoPause":true}`, `{"memory":false}`} {
+		t.Run(body, func(t *testing.T) {
+			store := &lifecycleStore{}
+			nodeReportsPaused(store)
+			store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+
+			if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/resume", body, testKey); w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+			}
+			if store.readID != "" || store.resumedID != "" {
+				t.Errorf("a refused resume reached the node (read %q, resumed %q)", store.readID, store.resumedID)
+			}
+		})
+	}
+}
+
+func TestLogsAnswerAnEmptyPageForAKnownSandbox(t *testing.T) {
+	for path, want := range map[string]string{
+		"/sandboxes/sb-abc/logs":    `{"logs":[],"logEntries":[]}`,
+		"/v2/sandboxes/sb-abc/logs": `{"logs":[]}`,
+	} {
+		t.Run(path, func(t *testing.T) {
+			store := &lifecycleStore{}
+			store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
+			h := newTestServer(t, store)
+
+			w := do(t, h, http.MethodGet, path, "", testKey)
+			if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != want {
+				t.Fatalf("got %d %s, want 200 %s", w.Code, w.Body.String(), want)
+			}
+			if w := do(t, h, http.MethodGet, strings.Replace(path, "sb-abc", "sb-missing", 1), "", testKey); w.Code != http.StatusNotFound {
+				t.Fatalf("unknown sandbox status = %d, want 404: %s", w.Code, w.Body.String())
 			}
 		})
 	}
