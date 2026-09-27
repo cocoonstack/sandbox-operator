@@ -2,11 +2,15 @@ package e2bcompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -192,6 +196,7 @@ func TestListHonorsStateAndTemplateAndRefusesMetadata(t *testing.T) {
 		for _, d := range listed {
 			ids = append(ids, d.SandboxID)
 		}
+		slices.Sort(ids)
 		if !slices.Equal(ids, tc.want) {
 			t.Errorf("%s lists %v, want %v", tc.query, ids, tc.want)
 		}
@@ -207,4 +212,73 @@ func TestAKeyEntryIsAKeyOrAKeyAndANamespace(t *testing.T) {
 	if _, err := NewServer(&fakeStore{}, Options{Domain: testDomain, APIKeys: []string{"key ns extra"}}); err == nil {
 		t.Fatal("a three-field key entry must fail startup")
 	}
+}
+
+func TestV2ListPagesNewestFirstAndV1ListsEverything(t *testing.T) {
+	h := newTestServer(t, &fakeStore{items: sandboxesStartedInTurn(5)})
+
+	var got []string
+	next := ""
+	for range 5 {
+		ids, token := pageOfList(t, h, "/v2/sandboxes?limit=2&nextToken="+next)
+		got = append(got, ids...)
+		if next = token; next == "" {
+			break
+		}
+	}
+	assert.Equal(t, []string{"sb-4", "sb-3", "sb-2", "sb-1", "sb-0"}, got)
+
+	asc, token := pageOfList(t, h, "/v2/sandboxes?order=asc&limit=3")
+	assert.Equal(t, []string{"sb-0", "sb-1", "sb-2"}, asc)
+	rest, last := pageOfList(t, h, "/v2/sandboxes?order=asc&limit=3&nextToken="+token)
+	assert.Equal(t, []string{"sb-3", "sb-4"}, rest)
+	assert.Empty(t, last)
+
+	all, none := pageOfList(t, h, "/sandboxes?limit=1")
+	assert.Len(t, all, 5, "the v1 list takes no page parameters")
+	assert.Empty(t, none)
+}
+
+func TestV2ListCursorSurvivesASandboxLeaving(t *testing.T) {
+	store := &fakeStore{items: sandboxesStartedInTurn(5)}
+	h := newTestServer(t, store)
+
+	first, token := pageOfList(t, h, "/v2/sandboxes?limit=2")
+	require.Equal(t, []string{"sb-4", "sb-3"}, first)
+	store.items = slices.DeleteFunc(store.items, func(sb sandboxv1beta1.Sandbox) bool { return sb.Name == "s3" })
+	second, _ := pageOfList(t, h, "/v2/sandboxes?limit=2&nextToken="+token)
+	assert.Equal(t, []string{"sb-2", "sb-1"}, second)
+}
+
+func TestV2ListRefusesPageParametersOutsideTheSpec(t *testing.T) {
+	h := newTestServer(t, &fakeStore{items: sandboxesStartedInTurn(1)})
+	for _, query := range []string{"limit=0", "limit=101", "limit=many", "order=sideways", "nextToken=not-a-token"} {
+		if w := do(t, h, http.MethodGet, "/v2/sandboxes?"+query, "", testKey); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400: %s", query, w.Code, w.Body.String())
+		}
+	}
+}
+
+func sandboxesStartedInTurn(n int) []sandboxv1beta1.Sandbox {
+	base := time.Date(2026, 9, 27, 7, 0, 0, 0, time.UTC)
+	out := make([]sandboxv1beta1.Sandbox, 0, n)
+	for i := range n {
+		sb := liveSandbox(fmt.Sprintf("s%d", i), fmt.Sprintf("sb_%d", i), "node-a", "img")
+		sb.CreationTimestamp = metav1.NewTime(base.Add(time.Duration(i) * time.Minute))
+		out = append(out, sb)
+	}
+	return out
+}
+
+func pageOfList(t *testing.T, h http.Handler, path string) ([]string, string) {
+	t.Helper()
+	w := do(t, h, http.MethodGet, path, "", testKey)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var listed []SandboxDetail
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listed))
+	ids := make([]string, 0, len(listed))
+	for _, d := range listed {
+		ids = append(ids, d.SandboxID)
+	}
+	return ids, w.Header().Get(nextTokenHeader)
 }
