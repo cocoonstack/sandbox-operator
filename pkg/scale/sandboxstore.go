@@ -86,6 +86,8 @@ type SandboxLifecycle interface {
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
 	// DeleteTemplate removes a promoted template on node alone. A missing template is success.
 	DeleteTemplate(ctx context.Context, node string, key PoolKey) error
+	// Promote publishes a claimed sandbox on node as the template name, keeping its net and size; it returns the full key and the content digest.
+	Promote(ctx context.Context, node, id, template string) (PoolKey, string, error)
 	// SetTemplateLabels replaces a promoted template's labels on node alone.
 	SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error
 	// NodeTemplates reads the promoted templates node holds now, ahead of its next inventory publish.

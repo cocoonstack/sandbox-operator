@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 
@@ -24,11 +25,16 @@ type Flags struct {
 	AllowAnonymous bool
 	AliasesFile    string
 	EnvdSecretFile string
+
+	Builds        bool
+	BuildParallel int
+	BuildTimeout  time.Duration
+	BuildLogLines int
 }
 
 // NewFlags returns the flag defaults.
 func NewFlags() *Flags {
-	return &Flags{Addr: ":8080", Namespace: "default"}
+	return &Flags{Addr: ":8080", Namespace: "default", BuildParallel: 2, BuildTimeout: 30 * time.Minute, BuildLogLines: 10000}
 }
 
 // AddFlags registers the --e2b-* flags on fs.
@@ -50,6 +56,14 @@ func (f *Flags) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&f.AliasesFile, "e2b-template-alias-file", f.AliasesFile,
 		"Path to a file of e2b template aliases, one per line as \"alias pool-image [size]\", so a create naming the alias (the SDK's default is \"base\") claims from that image's pool at size, small when none is given.")
 	AddEnvdSecretFlag(fs, &f.EnvdSecretFile)
+	fs.BoolVar(&f.Builds, "e2b-builds", f.Builds,
+		"Serve the e2b template build API (Template.build). Builds run in the process that took the request and live in its memory, so every status poll must reach the same replica.")
+	fs.IntVar(&f.BuildParallel, "e2b-build-parallel", f.BuildParallel,
+		"Builds that run at once; a start beyond them answers 429 and the build stays waiting.")
+	fs.DurationVar(&f.BuildTimeout, "e2b-build-timeout", f.BuildTimeout,
+		"Bound on one build, claim through publish; it is also the lease of the build's sandbox.")
+	fs.IntVar(&f.BuildLogLines, "e2b-build-log-lines", f.BuildLogLines,
+		"Log lines kept per build; later lines are dropped.")
 }
 
 // ServerOptions reads the key and alias files and returns the server options over inv.
@@ -66,6 +80,9 @@ func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
+	if f.Builds && (f.BuildParallel < 1 || f.BuildTimeout <= 0) {
+		return Options{}, errors.New("--e2b-builds needs --e2b-build-parallel of at least 1 and a positive --e2b-build-timeout")
+	}
 	return Options{
 		Namespace:             f.Namespace,
 		Domain:                f.Domain,
@@ -76,7 +93,15 @@ func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
 		Inventory:             inv,
 		TemplateAliases:       aliases,
 		EnvdSecret:            secret,
+		Builds:                f.buildOptions(),
 	}, nil
+}
+
+func (f *Flags) buildOptions() BuildOptions {
+	if !f.Builds {
+		return BuildOptions{}
+	}
+	return BuildOptions{Parallel: f.BuildParallel, Timeout: f.BuildTimeout, LogLines: f.BuildLogLines}
 }
 
 // AddEnvdSecretFlag registers --e2b-envd-secret-file, which the e2b surface and the envd-proxy must share.

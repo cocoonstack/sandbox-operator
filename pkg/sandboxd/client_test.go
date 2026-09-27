@@ -320,6 +320,24 @@ func TestSetTemplateLabelsPutsTheWholeMap(t *testing.T) {
 	}, got)
 }
 
+func TestPromoteActsAsTheOperatorByID(t *testing.T) {
+	var gotPath, gotAuth, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotPath, gotAuth, gotBody = r.Method+" "+r.URL.Path, r.Header.Get("Authorization"), string(b)
+		_, _ = w.Write([]byte(`{"key":{"template":"ns/app","net":"none","size":"small"},"content_digest":"sha256:aa"}`))
+	}))
+	defer srv.Close()
+
+	key, digest, err := New(srv.URL, "root-token").Promote(t.Context(), "sb_1", "ns/app")
+	require.NoError(t, err)
+	assert.Equal(t, PoolKey{Template: "ns/app", Net: "none", Size: "small"}, key)
+	assert.Equal(t, "sha256:aa", digest)
+	assert.Equal(t, "POST /v1/sandboxes/sb_1/promote", gotPath)
+	assert.Equal(t, "Bearer root-token", gotAuth)
+	assert.JSONEq(t, `{"template":"ns/app"}`, gotBody, "no body token: the root token acts on the sandbox by id")
+}
+
 func TestSetPoolsReplacesTheNodeTargetsAndDecodesTheEcho(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPut, r.Method)

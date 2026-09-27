@@ -59,6 +59,10 @@ spec:
         {{- if $e2b.templateAliases }}
         - --e2b-template-alias-file=/etc/sandbox-apiserver/e2b-template-aliases/aliases
         {{- end }}
+        {{- if $e2b.builds.enabled }}
+        - --e2b-builds
+        - --e2b-build-parallel={{ $e2b.builds.parallel }}
+        {{- end }}
         {{- end }}
         ports:
         - name: https

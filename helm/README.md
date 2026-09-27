@@ -89,6 +89,8 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `apiserver.e2b.envdSecret.value` | Key every sandbox's envd access token derives from; the chart renders it into a Secret. Set this or `secretName` once enabled | `""` |
 | `apiserver.e2b.envdSecret.secretName` | Existing Secret holding that key, used when `value` is empty; mounted into the apiserver and the envd-proxy | `""` |
 | `apiserver.e2b.envdSecret.key` | Key within that Secret | `secret` |
+| `apiserver.e2b.builds.enabled` | Serve `Template.build`; the e2b Service `sandbox-apiserver-e2b` then pins each client address to one replica (`sessionAffinity: ClientIP`) | `false` |
+| `apiserver.e2b.builds.parallel` | Builds that run at once per replica | `2` |
 | `apiserver.resources` | Apiserver requests and limits | 100m/128Mi, limit 512Mi |
 | `envdProxy.image.repository` | Proxy image | `ghcr.io/cocoonstack/sandbox-envd-proxy` |
 | `envdProxy.image.tag` | Image tag; pin a release | `latest` |

@@ -365,19 +365,19 @@ func (s *Server) sandboxLogs(reply any) http.HandlerFunc {
 
 // inventories returns every node's published inventory, the fleet view the
 // pool-derived surfaces (templates, snapshot listing) are assembled from.
-func (s *Server) inventories(r *http.Request) ([]*scale.NodeInventory, error) {
+func (s *Server) inventories(ctx context.Context) ([]*scale.NodeInventory, error) {
 	if s.opts.Inventory == nil {
 		return nil, errors.New("e2bcompat: no inventory source configured")
 	}
-	nodes, err := s.opts.Inventory.ListNodes(r.Context())
+	nodes, err := s.opts.Inventory.ListNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*scale.NodeInventory, 0, len(nodes))
 	for _, node := range nodes {
-		inv, err := s.opts.Inventory.NodeInventory(r.Context(), node)
+		inv, err := s.opts.Inventory.NodeInventory(ctx, node)
 		if err != nil {
-			log.WithFunc("e2bcompat.inventories").Warnf(r.Context(), "e2b: node inventory unavailable node=%s err=%v", node, err)
+			log.WithFunc("e2bcompat.inventories").Warnf(ctx, "e2b: node inventory unavailable node=%s err=%v", node, err)
 			continue
 		}
 		out = append(out, inv)

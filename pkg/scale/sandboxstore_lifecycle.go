@@ -152,6 +152,18 @@ func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, ke
 	return nil
 }
 
+func (s *scatterGatherStore) Promote(ctx context.Context, node, id, template string) (PoolKey, string, error) {
+	cl, err := s.nodeClient(ctx, node, "promote", id)
+	if err != nil {
+		return PoolKey{}, "", err
+	}
+	key, digest, err := cl.Promote(ctx, id, template)
+	if err != nil {
+		return PoolKey{}, "", nodeVerbError(err, "promote", id, node)
+	}
+	return PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, digest, nil
+}
+
 func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error {
 	cl, err := s.nodeClient(ctx, node, "template labels", key.Template)
 	if err != nil {

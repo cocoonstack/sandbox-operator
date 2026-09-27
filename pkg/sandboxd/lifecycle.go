@@ -143,6 +143,21 @@ func (c *Client) Checkpoint(ctx context.Context, id string, spec CheckpointSpec)
 	return out.Checkpoint, err
 }
 
+// Promote performs POST /v1/sandboxes/{id}/promote as the operator and returns the template's full key and content digest.
+func (c *Client) Promote(ctx context.Context, id, template string) (PoolKey, string, error) {
+	if id == "" {
+		return PoolKey{}, "", fmt.Errorf("sandboxd: promote requires a sandbox id")
+	}
+	var out struct {
+		Key           PoolKey `json:"key"`
+		ContentDigest string  `json:"content_digest"`
+	}
+	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/promote", struct {
+		Template string `json:"template"`
+	}{template}, &out)
+	return out.Key, out.ContentDigest, err
+}
+
 // Checkpoints performs GET /v1/checkpoints, newest first.
 func (c *Client) Checkpoints(ctx context.Context) ([]Checkpoint, error) {
 	var out struct {

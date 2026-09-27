@@ -28,6 +28,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	_, portErr := store.DialGuestPort(ctx, "n1", "sb_gone", 8080)
 	_, forkErr := store.Fork(ctx, "ns", "n1", "sb_gone", 1, 0)
 	_, snapErr := store.Snapshot(ctx, "n1", "sb_gone", "")
+	_, _, promoteErr := store.Promote(ctx, "n1", "sb_gone", "tpl:x")
 	for name, err := range map[string]error{
 		"pause":    store.Pause(ctx, "n1", "sb_gone"),
 		"metadata": store.SetInstanceMetadata(ctx, "n1", "sb_gone", []byte(`{}`)),
@@ -37,6 +38,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 		"port":     portErr,
 		"fork":     forkErr,
 		"snapshot": snapErr,
+		"promote":  promoteErr,
 	} {
 		require.Error(t, err, name)
 		assert.True(t, k8serrors.IsNotFound(err), "%s: a sandboxd 404 must surface as NotFound, got %v", name, err)

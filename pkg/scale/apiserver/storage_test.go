@@ -314,6 +314,10 @@ func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { retu
 
 func (f *fakeStore) DeleteTemplate(context.Context, string, scale.PoolKey) error { return f.verbErr }
 
+func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, string, error) {
+	return scale.PoolKey{}, "", f.verbErr
+}
+
 func (f *fakeStore) SetTemplateLabels(context.Context, string, scale.PoolKey, map[string]string) error {
 	return f.verbErr
 }

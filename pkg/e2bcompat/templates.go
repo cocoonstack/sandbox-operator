@@ -61,11 +61,7 @@ func (b *builtTemplate) current() templateHolder {
 }
 
 func (b *builtTemplate) names() []string {
-	names := []string{b.name}
-	for _, tag := range slices.Sorted(maps.Keys(b.liveOnly(b.current().labels))) {
-		names = append(names, b.name+":"+tag)
-	}
-	return names
+	return taggedNames(b.name, slices.Sorted(maps.Keys(b.liveOnly(b.current().labels))))
 }
 
 // liveOnly keeps the tags whose digest a holder still reports; a tag on a replaced build is gone.
@@ -81,7 +77,7 @@ func (b *builtTemplate) liveOnly(labels map[string]string) map[string]string {
 
 // listTemplates reports the advertised warm-pool keys and the namespace's built templates, the values create accepts as templateID.
 func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
-	nodes, err := s.inventories(r)
+	nodes, err := s.inventories(r.Context())
 	if err != nil {
 		log.WithFunc("e2bcompat.listTemplates").Error(r.Context(), err, "e2b list templates failed")
 		writeError(w, http.StatusInternalServerError, "failed to list templates")
@@ -275,7 +271,7 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 		s.deleteSnapshot(w, r)
 		return
 	}
-	if err := forEachHolder(b, func(h templateHolder) error { return s.store.DeleteTemplate(r.Context(), h.node, h.key) }); err != nil {
+	if err := forEachHolder(b.holders, func(h templateHolder) error { return s.store.DeleteTemplate(r.Context(), h.node, h.key) }); err != nil {
 		logger.Errorf(r.Context(), err, "e2b delete template failed template=%s", name)
 		writeError(w, http.StatusInternalServerError, "failed to delete the template")
 		return
@@ -313,7 +309,7 @@ func (s *Server) knownTemplate(r *http.Request, templateID string) bool {
 // resolveTemplate reports name's built template in the caller's namespace, and whether an alias or an advertised pool image names it.
 func (s *Server) resolveTemplate(r *http.Request, name string) (*builtTemplate, bool, error) {
 	_, aliased := s.aliases[name]
-	nodes, err := s.inventories(r)
+	nodes, err := s.inventories(r.Context())
 	if err != nil {
 		return nil, aliased, err
 	}
@@ -341,7 +337,7 @@ func (s *Server) liveTags(r *http.Request, b *builtTemplate) (map[string]string,
 }
 
 func (s *Server) writeTags(r *http.Request, b *builtTemplate, tags map[string]string) error {
-	return forEachHolder(b, func(h templateHolder) error { return s.store.SetTemplateLabels(r.Context(), h.node, h.key, tags) })
+	return forEachHolder(b.holders, func(h templateHolder) error { return s.store.SetTemplateLabels(r.Context(), h.node, h.key, tags) })
 }
 
 func (s *Server) writeTagError(w http.ResponseWriter, r *http.Request, err error, name string) {
@@ -380,10 +376,10 @@ func builtTemplates(nodes []*scale.NodeInventory, scope string) map[string]*buil
 }
 
 // forEachHolder runs fn on every holder at the fleet fan-out bound; a node's failure fails the whole, which a retry converges.
-func forEachHolder(b *builtTemplate, fn func(templateHolder) error) error {
+func forEachHolder(holders []templateHolder, fn func(templateHolder) error) error {
 	var g errgroup.Group
 	g.SetLimit(maxNodeConcurrency)
-	for _, h := range b.holders {
+	for _, h := range holders {
 		g.Go(func() error {
 			if err := fn(h); err != nil {
 				return fmt.Errorf("node %s: %w", h.node, err)
@@ -392,6 +388,15 @@ func forEachHolder(b *builtTemplate, fn func(templateHolder) error) error {
 		})
 	}
 	return g.Wait()
+}
+
+// taggedNames is how e2b spells a template's names: the bare name, then name:tag per tag.
+func taggedNames(name string, tags []string) []string {
+	names := []string{name}
+	for _, tag := range tags {
+		names = append(names, name+":"+tag)
+	}
+	return names
 }
 
 func buildUUID(digest string) string {
