@@ -89,6 +89,7 @@ func New(ctx context.Context, dial DialFunc, opts Options) (*Source, error) {
 	for _, addr := range opts.Seeds {
 		s.members[addr] = &member{reader: dial(addr), seed: true}
 	}
+	seeded := len(s.members)
 	answers := s.tick(ctx)
 	answered := false
 	for _, addr := range opts.Seeds {
@@ -104,7 +105,7 @@ func New(ctx context.Context, dial DialFunc, opts Options) (*Source, error) {
 	if !answered {
 		return nil, fmt.Errorf("meshinventory: no seed answered: %w", answers[opts.Seeds[0]].err)
 	}
-	if len(s.members) > len(opts.Seeds) {
+	if len(s.members) > seeded {
 		s.tick(ctx)
 	}
 	go s.run(ctx)
@@ -146,8 +147,9 @@ func (s *Source) run(ctx context.Context) {
 func (s *Source) tick(ctx context.Context) map[string]answer {
 	logger := log.WithFunc("meshinventory.tick")
 	answers := s.poll(ctx)
-	named := map[string]bool{}
+	named, heard := map[string]bool{}, false
 	for _, a := range answers {
+		heard = heard || a.err == nil
 		for _, p := range a.peers {
 			named[p] = true
 		}
@@ -160,14 +162,18 @@ func (s *Source) tick(ctx context.Context) map[string]answer {
 		}
 		m.fails++
 		logger.Warnf(ctx, "mesh member did not answer addr=%s fails=%d err=%v", addr, m.fails, a.err)
-		if !m.seed && !named[addr] {
+		if !m.seed && heard && !named[addr] {
 			delete(s.members, addr)
 		}
 	}
 	keys := map[string]bool{}
 	for _, m := range s.members {
-		if m.inv != nil {
-			keys[m.inv.Node] = true
+		if m.inv == nil {
+			continue
+		}
+		keys[m.inv.Node] = true
+		if dup, ok := s.members[m.inv.Node]; ok && m.seed && !dup.seed {
+			delete(s.members, m.inv.Node)
 		}
 	}
 	for addr := range named {
@@ -180,6 +186,8 @@ func (s *Source) tick(ctx context.Context) map[string]answer {
 }
 
 func (s *Source) poll(ctx context.Context) map[string]answer {
+	ctx, cancel := context.WithTimeout(ctx, s.opts.PollInterval)
+	defer cancel()
 	var mu sync.Mutex
 	answers := make(map[string]answer, len(s.members))
 	g := &errgroup.Group{}

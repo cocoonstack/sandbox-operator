@@ -144,6 +144,53 @@ func TestASeedSpelledDifferentlyIsOneNode(t *testing.T) {
 	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
 }
 
+func TestAMeshWideSilenceKeepsTheDiscoveredPeersForMaxStale(t *testing.T) {
+	a, b := newStubNode(t), newStubNode(t)
+	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	s := newSource(t, a.addr())
+	require.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+
+	for _, n := range []*stubNode{a, b} {
+		n.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
+	}
+	s.tick(t.Context())
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s), "no member answered, so nothing says the peer left")
+	assert.Contains(t, s.members, b.addr())
+}
+
+func TestAHungMemberCannotStallTheSnapshot(t *testing.T) {
+	a, b := newStubNode(t), newStubNode(t)
+	a.set(func(n *stubNode) { n.hang = true })
+
+	start := time.Now()
+	s, err := New(t.Context(), dial, Options{Seeds: []string{a.addr(), b.addr()}, PollInterval: 300 * time.Millisecond})
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second, "a tick is bounded by the poll interval")
+	assert.Equal(t, []string{b.addr()}, listNodes(t, s))
+}
+
+func TestASeedDownAtStartAndSpelledDifferentlyEndsUpPolledOnce(t *testing.T) {
+	a, b := newStubNode(t), newStubNode(t)
+	a.set(func(n *stubNode) { n.status = http.StatusServiceUnavailable })
+	b.set(func(n *stubNode) { n.peers = []string{a.addr()} })
+	seed := strings.Replace(a.addr(), "127.0.0.1", "localhost", 1)
+	s := newSource(t, seed, b.addr())
+
+	a.set(func(n *stubNode) { n.status = 0 })
+	s.tick(t.Context())
+	before := a.calls()
+	s.tick(t.Context())
+	assert.Equal(t, 1, a.calls()-before, "the gossiped spelling leaves once the seed answers with it")
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+}
+
+func TestARepeatedSeedStillRunsTheDiscoveryTick(t *testing.T) {
+	a, b := newStubNode(t), newStubNode(t)
+	a.set(func(n *stubNode) { n.peers = []string{b.addr()} })
+	s := newSource(t, a.addr(), a.addr())
+	assert.Equal(t, sortedAddrs(a, b), listNodes(t, s))
+}
+
 type stubNode struct {
 	mu        sync.Mutex
 	srv       *httptest.Server
@@ -151,6 +198,7 @@ type stubNode struct {
 	peers     []string
 	rows      []sandboxd.SandboxSummary
 	status    int
+	hang      bool
 	infoCalls int
 }
 
@@ -178,6 +226,11 @@ func (n *stubNode) calls() int {
 
 func (n *stubNode) serve(w http.ResponseWriter, r *http.Request) {
 	n.mu.Lock()
+	if n.hang {
+		n.mu.Unlock()
+		<-r.Context().Done()
+		return
+	}
 	defer n.mu.Unlock()
 	if r.URL.Path == "/v1/info" {
 		n.infoCalls++
