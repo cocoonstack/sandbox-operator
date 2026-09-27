@@ -122,11 +122,7 @@ func (d *Driver) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, er
 
 // SetupWithManager registers the driver as a controller watching SandboxWarmPool
 // (the desired-state object) and NodeInventory (the node set to spread across).
-// It uses the manager's cached client for pool/template reads and status writes.
 func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
-	if d.kube == nil {
-		d.kube = mgr.GetClient()
-	}
 	// Any NodeInventory change (a node joined, restarted, changed address) must
 	// re-spread every pool, so map it to a single global reconcile trigger.
 	enqueueAll := handler.EnqueueRequestsFromMapFunc(syncRequest)
