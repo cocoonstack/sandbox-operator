@@ -583,8 +583,12 @@ func (f *fakeStore) Read(context.Context, string, string) (scale.SandboxRecord, 
 
 func getDetail(t *testing.T, sb sandboxv1beta1.Sandbox) SandboxDetail {
 	t.Helper()
-	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
-	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
+	return getDetailWith(t, newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}}), "sb_one")
+}
+
+func getDetailWith(t *testing.T, h http.Handler, id string) SandboxDetail {
+	t.Helper()
+	w := do(t, h, http.MethodGet, "/sandboxes/"+id, "", testKey)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}

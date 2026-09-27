@@ -14,7 +14,7 @@
 //	POST /sandboxes/{id}/pause|connect|resume|fork -> pause, resume, fork
 //	POST /sandboxes/{id}/snapshots                -> create checkpoint
 //	GET /snapshots, DELETE /templates/{id}        -> list or delete checkpoints
-//	GET /templates, /v2/templates                 -> advertised warm-pool keys
+//	GET /templates, /v2/templates, aliases/{a}    -> warm-pool keys, alias lookup
 //	GET /sandboxes/{id}/metrics|logs              -> node statistics, an empty log page
 //	POST timeout|refreshes, GET /health           -> lease renewal, liveness
 package e2bcompat
@@ -75,6 +75,8 @@ type Options struct {
 	AllowAnonymous bool
 	// Inventory enumerates the fleet's nodes; without it template and snapshot listing fail rather than report none.
 	Inventory scale.InventorySource
+	// TemplateAliases maps a templateID to a pool image, each entry "alias image"; the SDK's default "base" is one.
+	TemplateAliases []string
 }
 
 type namespaceKey struct{}
@@ -85,6 +87,9 @@ type Server struct {
 	resolver scale.ClaimIDResolver
 	opts     Options
 	keys     map[string]string
+
+	aliases      map[string]string
+	imageAliases map[string][]string
 }
 
 // NewServer builds a compat server. It fails when no API key is configured and
@@ -120,7 +125,22 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("e2bcompat: no domain configured; the SDK cannot reach a sandbox without one")
 	}
-	return &Server{store: store, resolver: resolver, opts: opts, keys: keys}, nil
+	aliases, imageAliases := map[string]string{}, map[string][]string{}
+	for _, entry := range opts.TemplateAliases {
+		fields := strings.Fields(entry)
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("e2bcompat: template alias entry %q: want \"alias image\"", entry)
+		}
+		if _, dup := aliases[fields[0]]; dup {
+			return nil, fmt.Errorf("e2bcompat: template alias %q is named twice", fields[0])
+		}
+		aliases[fields[0]] = fields[1]
+		imageAliases[fields[1]] = append(imageAliases[fields[1]], fields[0])
+	}
+	for _, aliasNames := range imageAliases {
+		slices.Sort(aliasNames)
+	}
+	return &Server{store: store, resolver: resolver, opts: opts, keys: keys, aliases: aliases, imageAliases: imageAliases}, nil
 }
 
 // Handler returns the routed, authenticated HTTP handler.
@@ -152,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v2/sandboxes/{sandboxID}/logs", s.auth(http.HandlerFunc(s.sandboxLogsV2)))
 	mux.Handle("GET /templates", s.auth(http.HandlerFunc(s.listTemplates)))
 	mux.Handle("GET /v2/templates", s.auth(http.HandlerFunc(s.listTemplates)))
+	mux.Handle("GET /templates/aliases/{alias}", s.auth(http.HandlerFunc(s.templateAlias)))
 	// e2b addresses a snapshot as a template on delete.
 	mux.Handle("DELETE /templates/{snapshotID}", s.auth(http.HandlerFunc(s.deleteSnapshot)))
 	return mux
@@ -215,8 +236,9 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := names.SimpleNameGenerator.GenerateName(namePrefix)
+	image := s.poolImage(req.TemplateID)
 	pool := scale.PoolKey{
-		Template: req.TemplateID,
+		Template: image,
 		Net:      netFor(req.AllowInternetAccess),
 		Size:     scale.SizeClassSmall,
 	}
@@ -233,7 +255,8 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, Sandbox{
-		TemplateID:      req.TemplateID,
+		TemplateID:      image,
+		Alias:           s.aliasOf(image),
 		SandboxID:       PublicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,
@@ -271,6 +294,9 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
+	}
+	if filter.template != "" {
+		filter.template = s.poolImage(filter.template)
 	}
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.namespace(r)})
 	if err != nil {
@@ -388,6 +414,17 @@ func (s *Server) writeLookupError(w http.ResponseWriter, r *http.Request, err er
 	s.writeVerbError(w, r, err, op+": lookup", "failed to resolve the sandbox")
 }
 
+func (s *Server) aliasOf(image string) string {
+	if aliasNames := s.imageAliases[image]; len(aliasNames) > 0 {
+		return aliasNames[0]
+	}
+	return ""
+}
+
+func (s *Server) poolImage(templateID string) string {
+	return cmp.Or(s.aliases[templateID], templateID)
+}
+
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
 // but cocoon does not track per sandbox (disk size) are reported as zero values
 // rather than omitted, so the SDK's decoder stays happy.
@@ -406,6 +443,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 	return SandboxDetail{
 		TemplateID:  templateOf(sb),
+		Alias:       s.aliasOf(templateOf(sb)),
 		SandboxID:   PublicID(claimIDOf(sb)),
 		ClientID:    sb.Status.NodeName,
 		StartedAt:   started.UTC().Format(time.RFC3339),
