@@ -77,8 +77,9 @@ sandbox-e2b \
 - **Startup fails loud** when no seed answers or a seed refuses the token
   (`GET /v1/info needs the fleet root api_token`).
 - **A silent node** keeps its last snapshot for 3 ticks and then leaves the
-  listing, while a peer the mesh no longer names leaves at once; its sandboxes
-  die with it, as on the Kubernetes path.
+  listing; a peer the mesh no longer names is dropped after those same ticks,
+  so a graceful restart inside that window is invisible. A dead node's
+  sandboxes die with it, as on the Kubernetes path.
 - **Warm pools** are set through the sandbox SDK's `SetPoolsCluster` or
   sandboxd's own config; mesh mode has no warm-pool driver.
 - **Claims follow sandboxd's redirects**: a warm miss at one node lands on the
