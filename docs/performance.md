@@ -218,8 +218,8 @@ k8s Pod `exec` is **not** available to `vk-cocoon` microVMs on a managed cluster
 (the control plane cannot reach virtual-node kubelets over the microVM network);
 the microVM data plane is `cocoon vm exec` / silkd (in-VM agent), validated in
 test evidence. For the sandboxd tier the data plane is the e2b path —
-`sandbox-envd-proxy` into the guest's `envd` — and `test/envdproxysmoke` is its
-hardware harness. The portable standard-kubelet backend uses ordinary Pod exec.
+`sandbox-envd-proxy` into the guest's `envd` — and `test/envdproxysmoke` and
+`test/envdsmoke` are its hardware harnesses. The portable standard-kubelet backend uses ordinary Pod exec.
 
 ## Reproduce
 
@@ -236,9 +236,13 @@ go test -run '^$' -bench . ./pkg/scale ./pkg/e2bcompat
 # envd-proxy against a live sandbox (see envd-proxy.md for the node half)
 go run -tags envdproxysmoke ./test/envdproxysmoke \
   -node <owner> -sandbox <id> -token <token> -port 49983
+
+# envd in a real guest (see e2b-compat.md, Proving envd on hardware)
+K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-rt:24.04 bash scripts/envd-e2e.sh
 ```
 
-`make vet` type-checks both tagged harnesses.
+`make vet` type-checks the four tagged harnesses: `l3bench`, `envdproxysmoke`,
+`meshinventorysmoke` and `envdsmoke`.
 
 ## Retired: the CRD-path fork controllers (measured at `0719d33`)
 

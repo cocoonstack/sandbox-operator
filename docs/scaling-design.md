@@ -237,9 +237,9 @@ API). Reads do not wait for it:
   node holds costs one such request per node, so a client-side `kubectl
   apply`, which reads before it creates, pays it once per new object, and a
   list or watch pinned to that name pays it when it opens. The envd
-  proxy, which holds no fleet token, asks `GET /v1/sandboxes/{id}/owner` with
-  the caller's sandbox token under a per-replica budget and keeps the answer
-  for a minute, past the node's next publish. A node that has not answered
+  proxy reads `GET /v1/sandboxes/{id}` on each node with the fleet token under
+  a per-replica budget, admits the caller only when its token derives from the
+  claim token that read returns, and keeps the owner for a minute, past the node's next publish. A node that has not answered
   within 500 ms counts as a miss, so a node that is gone while its inventory
   object remains does not hold a lookup up.
 

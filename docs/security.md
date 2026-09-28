@@ -16,7 +16,10 @@
 - `sandbox-envd-proxy` holds the fleet sandboxd token and the envd secret. It
   reads a sandbox's claim token from the owning node, admits a request only
   when the presented token derives from it, and opens the relay with the claim
-  token, which no client ever sees. A caller never learns a node address.
+  token, which no client ever sees. A signed file URL on 49983 is the one
+  request it admits without a token; it relays that with the fleet token, which
+  sandboxd keeps passive, so it never wakes a paused sandbox, and `envd` checks
+  the signature. A caller never learns a node address.
 - Sandboxes are hardware-isolated microVMs. A guest escape is a vulnerability
   in the hypervisor stack underneath, coordinated with the relevant upstream.
 

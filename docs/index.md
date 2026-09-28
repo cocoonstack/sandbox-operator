@@ -17,7 +17,7 @@ controller of its own.
 | `cmd/sandbox-e2b` | The e2b surface on a sandboxd mesh with no Kubernetes, with the envd data plane in the same process when asked; see [mesh mode](e2b-compat.md#mesh-mode-no-kubernetes) |
 | `nodeinventories.sandbox.cocoonstack.io` | The one CRD this repository owns: per-node summary of live sandboxes, warm capacity, promoted templates and the node's sandboxd address |
 | `api/v1beta1` | `NodeInventory` plus the lifecycle subresource payloads |
-| `pkg/scale`, `pkg/sandboxd`, `pkg/e2bcompat`, `pkg/envdproxy` | The store, the sandboxd client, the e2b translation layer, the proxy |
+| `pkg/scale`, `pkg/sandboxd`, `pkg/e2bcompat`, `pkg/e2bbuild`, `pkg/envdproxy` | The store, the sandboxd client, the e2b translation layer, its template build executor, the proxy |
 | `pkg/scale/kubeinventory`, `pkg/scale/meshinventory` | The two inventory sources the store reads: `NodeInventory` objects through an informer cache, or a sandboxd mesh polled over HTTP |
 
 ## The three paths
@@ -54,7 +54,7 @@ and the envd proxy — asks the nodes directly.
 
 - [Using the API](usage.md) — claiming through the aggregated apiserver, the
   pool key a create derives, warm capacity, and what the Pod path does instead
-- [Configuration](configuration.md) — both binaries' flags, the chart values,
+- [Configuration](configuration.md) — the apiserver's and the envd proxy's flags, the chart values,
   and the two install shapes
 - [Runtime backends](runtime-backends.md) — the explicit pod-template contract
   for vk-sandbox and vk-cocoon, and what fails now that no mutator fills it in

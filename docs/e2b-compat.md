@@ -145,7 +145,7 @@ and its first `runCode` fails with `502`.
 
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
-| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane; `metadata` → the claim's metadata; `autoPause: true` → the claim is paused (hibernated and archived) at lease end instead of destroyed, and connect resumes it. Both ride on the same claim call and need sandboxd built from 3fd7af2 or later. `envVars` becomes `envd`'s default environment through the `/init` that follows the claim (see the access token below); a failed `/init` releases the claim and answers `500`. `201` on success, `400` for an option this backend cannot honor (see below), `503` when the pool is drained (retryable), `404` when no warm capacity answers and the `templateID` names nothing known — no alias, no [built template](#built-templates) of the namespace, no advertised pool image. The check runs only on that failure branch. SDK 2.51 creates through `/v2`. |
+| `POST /sandboxes`, `POST /v2/sandboxes` | `store.Claim` | `templateID` → pool template, through `--e2b-template-alias-file` when it names an alias; `timeout` → the claim's TTL (`--e2b-default-timeout` when omitted); `allow_internet_access: true` → `egress` lane, anything else the hardened `none` lane; `metadata` → the claim's metadata; `autoPause: true` → the claim is paused (hibernated and archived) at lease end instead of destroyed, and connect resumes it. Both ride on the same claim call and need sandboxd built from 3fd7af2 or later. `envVars` becomes `envd`'s default environment through the `/init` that follows the claim (see the access token below); a failed `/init` releases the claim and answers `500`. `201` on success, `400` for an option this backend cannot honor (see below), `404` at once for a `templateID` spelled as a full `e2b/` key (a built template is named bare and scoped by the key's namespace), `503` when the pool is drained (retryable), `404` when no warm capacity answers and the `templateID` names nothing known — no alias, no [built template](#built-templates) of the namespace, no advertised pool image. The check runs only on that failure branch. SDK 2.51 creates through `/v2`. |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the key's namespace. The `state` (`running`, `paused`), `template` and `startedAfter` (at the second precision `startedAt` carries) filters are honored, and so is `metadata`: `key=value` pairs joined by `&`, each key and value URL-encoded as the JS and Python SDKs send `query.metadata`; every pair must match; a pair without `=`, an empty key or a repeated key is `400`. Each item carries its `metadata`, `cpuCount` and `memoryMB`. `/v2` pages as the spec says: `limit` (1 to 100, default 100), `order` by start time (`desc`, newest first, by default, or `asc`) and `nextToken`, the opaque cursor the previous page returned in `X-Next-Token`. The cursor names the last sandbox served, so a sandbox created or released between pages neither repeats nor skips the rest. An out-of-range `limit`, an unknown `order` or a malformed `nextToken` is `400`. The legacy `GET /sandboxes` takes no page parameters and returns every match. |
 | `GET /sandboxes/{id}` | `store.GetByClaimID`, then `store.Read` | Resolves the owning node and materializes only that entry; `state` and `endAt` come from the node's own record, so they reflect a pause, resume or renew at once; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`, also when the owning node already reaped it: release is idempotent. `404` when the read view no longer lists the id. |
@@ -159,7 +159,7 @@ and its first `runCode` fails with `502`.
 | `GET /snapshots` | `store.Snapshots` across nodes | Lists the key's checkpoints: create stamps the namespace on the checkpoint name (`<namespace>/<name>`), listing keeps only that prefix and strips it; the `sandboxID` and `name` filters are honored, `limit` and `nextToken` are ignored. One unreachable node is skipped rather than blanking the whole result. |
 | `DELETE /templates/{templateID}` | `store.DeleteTemplate` on every holder, else `store.DeleteSnapshot` on the holding node | A [built template](#built-templates) of the namespace is deleted on every node whose inventory lists it, alone (`no_redirect`), and its tags, being its labels, go with it; a node that no longer holds it counts as done, and one that fails answers `500`, which a retry converges. Otherwise e2b addresses snapshot deletion through the templates path: the id is looked up among the key's checkpoints first, so `404` for one in another namespace, then deleted on the node that holds it; `500` when the id is not listed and a node did not answer, so an outage never reads as already gone. |
 | `GET /templates`, `GET /v2/templates` | advertised warm-pool keys and the namespace's built templates | Lists the distinct pool images the fleet can currently claim, each entry's `aliases` the aliases that name its image, then one entry per built template: `templateID` its name, `buildID` a UUIDv5 of its content digest (the same on every replica and across restarts), `names` the name plus `name:tag` per tag, `cpuCount`/`memoryMB` its size tier. `buildStatus` is `ready` on every entry. Entries are read from node inventory, so a promote, delete or tag shows up within one publish tick. |
-| `GET /templates/{templateID}` | the namespace's built templates | One `TemplateBuild` (`ready`) per content digest the holders report, its `buildID` that digest's UUIDv5. `404` for anything else, a pool image included (its message says so), `400` for a name over the budget. |
+| `GET /templates/{templateID}` | the namespace's built templates | One `TemplateBuild` (`ready`) per content digest the holders report, its `buildID` that digest's UUIDv5. `404` for anything else, a pool image included (its message says so). |
 | `PATCH /templates/{templateID}` | nothing | `200` for a built template, `public` accepted and ignored: every template is visible to every key of the namespace. `404` otherwise. |
 | `POST /templates/tags`, `DELETE /templates/tags`, `GET /templates/{templateID}/tags` | the template's sandboxd labels (`PUT /v1/templates/labels`) on every holder | A tag is a label on the template's record, its name the key and the content digest it points at the value, so every replica and the mesh front agree and a restart keeps it. `target` is `name` or `name:tag`; a tag points at the target's build (`default` or none means the current one). A write reads the current labels from a holder itself, merges, and writes the whole map to every holder; two writes racing from two replicas keep the later one. A tag whose digest no holder reports any more is dropped, and a rebuild (re-promote) clears the template's tags. |
 | `POST /v3/templates`, `POST /v2/templates/{templateID}/builds/{buildID}`, `GET /templates/{templateID}/builds/{buildID}/status` | the [build executor](#template-builds) | Served with `--e2b-builds`. |
@@ -180,7 +180,9 @@ next to its pools, so there is no separate record to keep in sync; it needs
 sandboxd built from 7e9f9a8 or later, which lists templates with their labels and
 takes `PUT /v1/templates/labels`. `<namespace>`,
 the slash and `<name>` together fit sandboxd's 63-character name budget after the
-`e2b/` prefix; a longer name is refused with `400` naming the room left.
+`e2b/` prefix; a longer name is refused with `400` naming the room left, and a
+name with a character outside sandboxd's grammar (letters, digits and `. _ : / -`)
+with `400` before the build runs.
 
 A create naming a built template claims it: when no warm pool serves the name,
 the create looks the name up among the namespace's built templates and claims
@@ -213,9 +215,14 @@ image's alias size (else `small`) holds. `POST
 needs an alias line such as `e2bdev/base ghcr.io/cocoonstack/sandbox/e2b-rt:24.04`.
 The build then claims a sandbox of that pool on the `none` lane, runs its steps
 and start command in it, promotes it as `e2b/<namespace>/<name>`, deletes the
-name on every other node that held an earlier build, sets the requested tags,
-and releases the claim; a rebuild replaces the previous build. `fromTemplate`
-and `fromImageRegistry` answer `400`, as does a malformed step;
+holders promoted before its own, each by the digest it observed, sets the
+requested tags, and releases the claim; a rebuild replaces the previous build.
+Two builds of one name converge on the newer promote: the older still reports
+`ready` when its publish ran first, and ends `error` at step `finalize` (could
+not publish the build over the previous one) when the newer promote replaced
+its record on the same node before its publish or tag write. `fromTemplate`,
+`fromImageRegistry` and a `fromImage` naming a built template (`e2b/…`)
+answer `400`, as does a malformed step;
 `force` is accepted and ignored (there is no layer cache); `waiting` stays
 reported while every build slot runs, and the start answers `429`.
 
@@ -223,7 +230,8 @@ Steps run through envd's process API, the one `commands.run` uses, as upstream
 e2b runs them. A `RUN` runs `bash -l -c` as the current user (or the step's own)
 in the current workdir with the environment so far, its output in the build log
 and a non-zero exit failing the build. `ENV` evaluates each value in the guest's
-shell, so `$PATH` resolves, and adds it for later steps; `WORKDIR` creates the
+shell, so `$PATH` resolves: the value is the expansion's stdout, its stderr goes
+to the build log, and it is added for later steps; `WORKDIR` creates the
 directory as root, owned by the current user, and `USER` creates a missing user;
 the user starts as `user` and the workdir as that user's home. After the last
 step the build hands envd the final user, workdir and environment as its
@@ -343,7 +351,11 @@ guest-port relay: health, the version the compat API reports, `POST`/`GET
 over the Connect server stream, the `user` account with passwordless sudo, and
 that envd serves HTTP/1.1 only. `CODE_INTERPRETER=1` also gates warmup on 49999
 and runs `1+1` the way the SDK's `runCode` does; `-hold` keeps the sandbox for
-an out-of-tree harness that puts an edge proxy in front of it.
+an out-of-tree harness that puts an edge proxy in front of it. `envdsmoke` takes
+`-addr` (a host:port or an http(s) origin), `-token`, `-template`,
+`-envd-version`, `-size`, `-hold` and `-code-interpreter`; the script passes
+`ADDR`, `TOKEN`, `TEMPLATE`, `ENVD_VERSION`, `SIZE`, `HOLD` and
+`CODE_INTERPRETER` through.
 
 ```bash
 K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-rt:24.04 bash scripts/envd-e2e.sh
@@ -376,8 +388,9 @@ K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-ci:24.04 SIZE=medium CODE_INTER
   claim can still sample it; past it they leave `GET /sandboxes`, and
   `GET`, `DELETE` and the verbs on them answer `404`. The window is measured
   against the fleet's newest publish, so a control-plane outage never drops
-  a node, and a vk-sandbox restart inside the window is invisible. A
-  vk-sandbox that predates `publishedAt` never goes stale.
+  a node, and a vk-sandbox restart inside the window is invisible. An
+  inventory without `publishedAt` (an older vk-sandbox or CRD) is stale once
+  any node stamps one; a fleet where none does keeps every node.
 - **`envdVersion`** is reported as `0.8.0`, the version the e2b flavors ship,
   unless `--e2b-envd-version` says otherwise. The SDK version-compares it and
   *kills the sandbox* if it cannot parse it, so it is always sent. Set it to

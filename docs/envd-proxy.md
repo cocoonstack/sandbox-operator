@@ -55,7 +55,8 @@ sandbox-envd-proxy \
 | `--tls-private-key-file` | — | Key for the above; the two must be set together. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. `envd` 0.8.0 does not serve it. |
 | `--e2b-envd-secret-file` | — | **Required.** The file the e2b surface reads: access tokens are verified against it. |
-| `--sandboxd-token-file` | — | Fleet sandboxd `api_token`, which reads a sandbox's claim token by id. Needed whenever the nodes require one. |
+| `--sandboxd-token-file` | — | **Required.** Fleet sandboxd `api_token`: it reads a sandbox's claim token by id and relays signed file URLs. |
+| `--inventory-stale-after` | `90s` | Drop a node from inventory reads once its `publishedAt` trails the fleet's newest publish by more than this; an inventory without `publishedAt` is stale. |
 
 The deployment needs wildcard DNS for `*.{domain}` pointing at the proxy, and a
 certificate covering it. `GET /healthz` is unauthenticated, for probes.
@@ -68,8 +69,8 @@ A sandbox created after its node last published inventory is not in the
 informer yet. For such an id the proxy asks every node's
 `GET /v1/sandboxes/{id}`: only the owning node answers, and the caller is
 admitted only when its token derives from the claim token that answer carries
-(see Authorization). A wrong token here answers `502`, so an unpublished id
-stays unprovable. The owner is kept for a minute, past the node's next
+(see Authorization). A wrong token here answers `401`, as it does for a
+published id. The owner is kept for a minute, past the node's next
 publish. These asks share one budget per
 proxy replica, 200 a second with a burst of 400, which is also what bounds the
 node traffic unknown ids can cause: each ask costs every node one lookup. Past
@@ -92,7 +93,8 @@ Two request shapes, both of which the SDK sends:
 Ids are accepted in either spelling, `sb_0123abcd` or the DNS-safe
 `sb-0123abcd` the compat API publishes.
 
-`49983` is `envd`'s port, but nothing here is specific to it: this is a general
+`49983` is `envd`'s port; apart from signed file URLs, which only it takes,
+nothing here is specific to it: this is a general
 guest-port gateway, so a server a user started on `3000` inside the sandbox is
 reached the same way.
 
@@ -110,8 +112,10 @@ minute and an HMAC compare per request.
 
 A signed file URL — the SDK's `downloadUrl`/`uploadUrl`, a `/files` request
 whose query carries `signature` — comes without the header, since a browser or
-`curl` fetches it. The proxy places the sandbox without checking a token and
-relays it; `envd` verifies the signature against the sandbox's access token.
+`curl` fetches it. Only on 49983 (anywhere else it is `401`), the proxy places
+the sandbox without checking a token and relays it with the fleet token, which
+sandboxd keeps passive: a paused sandbox answers `502` sandbox is paused and is
+never woken. `envd` verifies the signature against the sandbox's access token.
 Any other request without `X-Access-Token` is `401`.
 
 `X-Access-Token` is forwarded to every guest port unchanged: it is the guest's
@@ -159,8 +163,8 @@ go run -tags envdproxysmoke ./test/envdproxysmoke \
 ```
 
 `-guest envd` swaps the assertions for the real daemon (health, a ConnectRPC
-unary) when the sandbox came from the `e2b-rt` flavor; `envdsmoke -hold` in the
-sandbox repo prepares that one. Default `-guest echo` expects `guestserver`,
+unary) when the sandbox came from the `e2b-rt` flavor; `envdsmoke -hold`
+(`test/envdsmoke` here) prepares that one. Default `-guest echo` expects `guestserver`,
 which reports back what the guest received and is what proves which
 credentials cross. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
 `scripts/port-e2e.sh` runs the node half alone.
@@ -172,7 +176,7 @@ credentials cross. Both harnesses live in the sandbox repo under `e2e/cmd/`; its
 | `400` | The host and headers name no sandbox, or the port is outside 1-65535. |
 | `401` | No `X-Access-Token` on anything but a signed file URL, one that does not derive from the claim, or the node rejected the relay. |
 | `404` | An `envd` internal path. |
-| `502` | Sandbox unknown, paused past recovery, nothing listening on the guest port, or its node unreachable. |
+| `502` | Sandbox unknown, paused (the body says `sandbox is paused`), nothing listening on the guest port, or its node unreachable. |
 
 `502` is deliberately the answer for an unknown id as well as an unreachable
 node: a caller must not be able to probe which sandbox ids exist, which node

@@ -1,7 +1,8 @@
 # Configuration
 
-This repository ships two binaries and one Helm chart. Flag text below is the
-binaries' own `--help` output.
+This repository ships three binaries and one Helm chart. Flag text below is the
+binaries' own `--help` output; `sandbox-e2b`, the mesh-mode e2b front, is
+configured in [e2b-compat](e2b-compat.md#mesh-mode-no-kubernetes).
 
 ## Installation
 
@@ -47,7 +48,8 @@ helm upgrade --install sandbox-operator ./helm \
 
 Image tags default to `latest`, so the chart renders with no `--set` at all;
 pin both to a release tag in production. The e2b surface is off by default and
-needs four values together:
+needs five values together; the envd proxy it deploys exits at startup without
+the fleet sandboxd token:
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
@@ -55,7 +57,8 @@ helm upgrade --install sandbox-operator ./helm \
   --set apiserver.e2b.enabled=true \
   --set apiserver.e2b.domain=sandbox.example.com \
   --set apiserver.e2b.apiKeySecret.name=e2b-api-keys \
-  --set apiserver.e2b.envdSecret.secretName=e2b-envd-secret
+  --set apiserver.e2b.envdSecret.secretName=e2b-envd-secret \
+  --set apiserver.sandboxdToken.secretName=sandboxd-token
 ```
 
 Enabling it without the key secret fails at render
@@ -102,8 +105,9 @@ Two rules follow from the design, and breaking either one breaks the cluster:
   disabling its warm-pool one.
 
 Images are published to GHCR on a release tag:
-`ghcr.io/cocoonstack/sandbox-apiserver` and
-`ghcr.io/cocoonstack/sandbox-envd-proxy`, multi-arch (amd64/arm64).
+`ghcr.io/cocoonstack/sandbox-apiserver`,
+`ghcr.io/cocoonstack/sandbox-envd-proxy` and
+`ghcr.io/cocoonstack/sandbox-e2b`, multi-arch (amd64/arm64).
 
 ## sandbox-apiserver
 
@@ -116,7 +120,7 @@ account, or from `KUBECONFIG` when run outside a cluster.
 
 | Flag | Default | Help |
 |---|---|---|
-| `--sandboxd-token` | — | Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer `--sandboxd-token-file` for a Secret mount. |
+| `--sandboxd-token` | — | sandboxd api_token presented to every node; a binary that reads claim tokens needs the root one. Prefer `--sandboxd-token-file` for a Secret mount. |
 | `--sandboxd-token-file` | — | Path to a file (Secret mount) holding the sandboxd api_token; overrides `--sandboxd-token` when set. |
 
 With both empty, node-local calls carry no token. A sandboxd with an
@@ -166,8 +170,10 @@ nodes publish again.
 
 The window works on a node once the `nodeinventories` CRD from `helm/crds` is
 applied and that node runs a vk-sandbox that stamps `publishedAt`. An older CRD
-prunes the field and an older vk-sandbox never sets it, and either way that
-node never goes stale, so an upgrade never empties the fleet.
+prunes the field and an older vk-sandbox never sets it; an inventory without
+`publishedAt` is stale once any node stamps one, and a fleet where none does
+keeps every node. Apply the CRD and upgrade vk-sandbox before relying on the
+window.
 
 ### e2b-compatible surface
 
@@ -176,17 +182,24 @@ node never goes stale, so an upgrade never empties the fleet.
 | `--enable-e2b-api` | `false` | Serve the e2b-compatible REST surface, so an unmodified e2b SDK can claim from the same warm pools (point E2B_API_URL at it). |
 | `--e2b-bind-address` | `:8080` | Address the e2b-compatible surface listens on. |
 | `--e2b-namespace` | `default` | Namespace a key that names none claims in, and where anonymous claims land; e2b has no namespace concept. |
-| `--e2b-domain` | — | Base domain the SDK derives the in-sandbox envd host from, as `{port}-{sandboxID}.{domain}`. Required with `--enable-e2b-api`: without it a created sandbox has no reachable data plane. |
+| `--e2b-domain` | — | Base domain the SDK derives the in-sandbox envd host from, as `{port}-{sandboxID}.{domain}`. Required whenever the surface is served: without it a created sandbox has no reachable data plane. |
 | `--e2b-envd-version` | `0.8.0` when empty | envd version reported to the SDK. It must name the envd actually installed in the pool's image; the SDK version-compares it and kills the sandbox when it cannot parse one. |
 | `--e2b-default-timeout` | `300` when `0` | Lease in seconds granted to a create that names no timeout, and the lease an SDK refresh renews for. |
 | `--e2b-api-key-file` | — | Path to a file (Secret mount) of accepted e2b API keys, one per line as `key` or `key namespace`, presented by the SDK as X-API-KEY; a key sees only the sandboxes and snapshots of its namespace, `--e2b-namespace` when none is given. |
 | `--e2b-allow-anonymous` | `false` | Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port. |
-| `--e2b-template-alias-file` | — | Path to a file of template aliases, one per line as `alias pool-image [size]`, so a create naming the alias (the SDK's default is `base`) claims from that image's pool at that size, `small` when none is given. The chart writes `apiserver.e2b.templateAliases` to it. |
+| `--e2b-template-alias-file` | — | Path to a file of e2b template aliases, one per line as `alias pool-image [size]`, so a create naming the alias (the SDK's default is `base`) claims from that image's pool at size, `small` when none is given. The chart writes `apiserver.e2b.templateAliases` to it. |
 | `--e2b-envd-secret-file` | — | Path to a file (Secret mount) holding the key every sandbox's envd access token derives from; the e2b surface and the envd-proxy must read the same one. Required with `--enable-e2b-api`. |
-| `--e2b-builds` | `false` | Serve the e2b template build API; builds run in this process. |
-| `--e2b-build-parallel` | `2` | Builds that run at once. |
-| `--e2b-build-timeout` | `30m` | Bound on one build and the lease of its sandbox. |
-| `--e2b-build-log-lines` | `10000` | Log lines kept per build. |
+| `--e2b-builds` | `false` | Serve the e2b template build API (`Template.build`). Builds run in the process that took the request and live in its memory, so every status poll must reach the same replica. |
+| `--e2b-build-parallel` | `2` | Builds that run at once; a start beyond them answers 429 and the build stays waiting. |
+| `--e2b-build-timeout` | `30m` | Bound on one build, claim through publish; it is also the lease of the build's sandbox. |
+| `--e2b-build-log-lines` | `10000` | Log lines kept per build; later lines are dropped. |
+| `--e2b-build-dir` | — | Directory that keeps the archives COPY steps upload, taken through this surface's own signed PUT. Every replica must see the same directory, or use `--e2b-build-store-s3-bucket`. |
+| `--e2b-build-upload-max` | `1073741824` | Largest archive in bytes a signed PUT to `--e2b-build-dir` takes. |
+| `--e2b-build-store-s3-bucket` | — | S3 bucket that keeps the archives COPY steps upload, through presigned PUTs; credentials come from the default AWS chain. |
+| `--e2b-build-store-s3-prefix` | — | Key prefix for the archives in `--e2b-build-store-s3-bucket`; they live under `<prefix>/e2b-files/`. |
+| `--e2b-build-store-s3-endpoint` | — | Endpoint of an S3-compatible store instead of AWS. |
+| `--e2b-build-store-s3-region` | — | Region of `--e2b-build-store-s3-bucket`. |
+| `--e2b-build-store-s3-force-path-style` | `false` | Address the bucket in the path, as most S3-compatible stores need. |
 
 Startup fails when `--enable-e2b-api` is set with neither a key file nor
 `--e2b-allow-anonymous`, and when `--e2b-domain` is empty. Details of the
@@ -217,7 +230,7 @@ informer and relays the request into the owning node's guest-port endpoint.
 | `--tls-private-key-file` | — | Private key for `--tls-cert-file`. |
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2. |
 | `--e2b-envd-secret-file` | — | The e2b surface's envd secret file; access tokens are verified against it. Required. |
-| `--sandboxd-token` / `--sandboxd-token-file` | — | Fleet sandboxd `api_token`, which reads a sandbox's claim token by id; the file overrides the literal. |
+| `--sandboxd-token` / `--sandboxd-token-file` | — | sandboxd api_token presented to every node; the proxy needs the root one, since it reads claim tokens by id and relays signed file URLs with it. The file overrides the literal. Required. |
 | `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on every binary that reads inventory. An inventory without `publishedAt` is stale. |
 
 The two TLS flags must be set together. Routing, authorization and failure
@@ -289,8 +302,8 @@ metrics and health servers are disabled: the aggregated apiserver owns the
 serving port. `sandbox-envd-proxy` serves an unauthenticated `GET /healthz` for
 probes and no metrics endpoint.
 
-Both binaries log to stderr through `projecteru2/core/log`; their
-controller-runtime and klog output (client-go, and in `sandbox-apiserver` the
+`sandbox-apiserver` and `sandbox-envd-proxy` log to stderr through
+`projecteru2/core/log`; their controller-runtime and klog output (client-go, and in `sandbox-apiserver` the
 generic apiserver library) is routed into the same stream.
 
 | Variable | Default | Effect |
