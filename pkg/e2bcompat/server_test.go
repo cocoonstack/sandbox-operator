@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -663,11 +664,22 @@ func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Promote(_ context.Context, node, id, template string) (scale.PoolKey, string, error) {
+func (f *fakeStore) Promote(ctx context.Context, node, id, template string) (scale.PoolKey, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.promoted = append(f.promoted, node+" "+id+" "+template)
-	return scale.PoolKey{Template: template, Net: scale.NetDefault, Size: f.claimPool.Size}, "sha256:" + id, f.promoteErr
+	key := scale.PoolKey{Template: template, Net: scale.NetDefault, Size: f.claimPool.Size}
+	fresh := scale.PromotedTemplate{Template: key.Template, Net: key.Net, Size: key.Size, ContentDigest: "sha256:" + id, CreatedAt: new(metav1.Now())}
+	same := func(t scale.PromotedTemplate) bool {
+		return t.Template == key.Template && t.Net == key.Net && t.Size == key.Size
+	}
+	if f.live != nil {
+		f.live[node] = append(slices.DeleteFunc(f.live[node], same), fresh)
+	} else if inv, err := f.fleet.NodeInventory(ctx, node); err == nil {
+		inv.Templates = append(slices.DeleteFunc(inv.Templates, same), fresh)
+		f.fleet.Put(inv)
+	}
+	return key, "sha256:" + id, f.promoteErr
 }
 
 // SetTemplateLabels writes straight into the fleet the test serves, so a live read sees it at once.

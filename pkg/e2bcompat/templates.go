@@ -28,10 +28,11 @@ const (
 var buildNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://github.com/cocoonstack/sandbox-operator/e2b"))
 
 type templateHolder struct {
-	node   string
-	key    scale.PoolKey
-	digest string
-	labels map[string]string
+	node    string
+	key     scale.PoolKey
+	digest  string
+	labels  map[string]string
+	created time.Time
 }
 
 type builtTemplate struct {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -177,4 +178,20 @@ func withBuildFleet(store *fakeStore) func(*Options) {
 	inv.Put(&scale.NodeInventory{Node: "m", Templates: []scale.PromotedTemplate{{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:old"}}})
 	store.fleet = inv
 	return func(o *Options) { o.Inventory = inv }
+}
+
+func TestAPublishLeavesANewerConcurrentBuildAlone(t *testing.T) {
+	newer := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:newer", CreatedAt: new(metav1.NewTime(time.Now().Add(time.Minute)))}
+	older := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:older", CreatedAt: new(metav1.NewTime(time.Now().Add(-time.Minute)))}
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil, "m": {newer}, "k": {older}}}
+	inv := scale.NewStaticInventorySource()
+	for _, n := range []string{"n", "m", "k"} {
+		inv.Put(&scale.NodeInventory{Node: n})
+	}
+	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
+
+	id := requestBuild(t, h, "app")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
+	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
+	assert.Equal(t, []string{"k e2b/sandboxes/app small"}, store.deletedTemplates, "only the holder older than this promote goes; a newer concurrent build keeps its node")
 }
