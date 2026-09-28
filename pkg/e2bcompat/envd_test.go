@@ -182,7 +182,7 @@ type runningEnvd struct {
 	scale.SandboxStore
 }
 
-func (runningEnvd) DialGuestPort(context.Context, string, string, uint16) (net.Conn, error) {
+func (runningEnvd) DialGuestPort(context.Context, string, string, string, uint16) (net.Conn, error) {
 	conn, envd := net.Pipe()
 	go func() {
 		r, err := http.ReadRequest(bufio.NewReader(envd))

@@ -29,12 +29,12 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	return nil
 }
 
-func (s *scatterGatherStore) DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error) {
+func (s *scatterGatherStore) DialGuestPort(ctx context.Context, node, id, token string, port uint16) (net.Conn, error) {
 	cl, err := s.nodeClient(ctx, node, "port", id)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := cl.DialPort(ctx, id, port)
+	conn, err := cl.DialPort(ctx, id, token, port)
 	if err != nil {
 		return nil, nodeVerbError(err, "port", id, node)
 	}

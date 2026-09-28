@@ -363,7 +363,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		init.EnvVars, init.DefaultUser, init.DefaultWorkdir = withRelay(assignment.NetRoute, req.EnvVars), envdDefaultUser, envdDefaultWorkdir
 	}
 	if err == nil {
-		err = s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, init)
+		err = s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, "", init)
 	}
 	if err != nil {
 		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: envd init failed sandboxID=%s node=%s", assignment.SandboxName, assignment.Node)

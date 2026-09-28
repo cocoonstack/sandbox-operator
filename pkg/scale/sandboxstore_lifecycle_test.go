@@ -25,7 +25,7 @@ func TestLifecycleVerbsMapANodeUnknownSandboxToNotFound(t *testing.T) {
 	ctx := t.Context()
 
 	f.dialErr = &sandboxd.HTTPError{StatusCode: http.StatusNotFound}
-	_, portErr := store.DialGuestPort(ctx, "n1", "sb_gone", 8080)
+	_, portErr := store.DialGuestPort(ctx, "n1", "sb_gone", "", 8080)
 	_, forkErr := store.Fork(ctx, "ns", "n1", "sb_gone", 1, 0)
 	_, snapErr := store.Snapshot(ctx, "n1", "sb_gone", "")
 	_, _, promoteErr := store.Promote(ctx, "n1", "sb_gone", "tpl:x")
@@ -83,15 +83,15 @@ func TestDialGuestPortMapsTheNodesPassiveRelayAnswers(t *testing.T) {
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 	ctx := t.Context()
 
-	conn, err := store.DialGuestPort(ctx, "n1", "sb_run", 49983)
+	conn, err := store.DialGuestPort(ctx, "n1", "sb_run", "", 49983)
 	require.NoError(t, err)
 	_ = conn.Close()
 	assert.Equal(t, []uint16{49983}, f.dialPorts)
-	_, err = store.DialGuestPort(ctx, "n1", "sb_paused", 49983)
+	_, err = store.DialGuestPort(ctx, "n1", "sb_paused", "", 49983)
 	assert.True(t, k8serrors.IsConflict(err), "a paused sandbox's 409 is Conflict, got %v", err)
-	_, err = store.DialGuestPort(ctx, "n1", "sb_gone", 49983)
+	_, err = store.DialGuestPort(ctx, "n1", "sb_gone", "", 49983)
 	assert.True(t, k8serrors.IsNotFound(err), "an unknown claim is NotFound, got %v", err)
-	_, err = store.DialGuestPort(ctx, "n1", "sb_reset", 49983)
+	_, err = store.DialGuestPort(ctx, "n1", "sb_reset", "", 49983)
 	require.Error(t, err)
 	assert.False(t, k8serrors.IsNotFound(err) || k8serrors.IsConflict(err), "a transport failure is neither: %v", err)
 	assert.Empty(t, f.rowReads, "the dial goes straight to the passive relay, with no by-id read first")

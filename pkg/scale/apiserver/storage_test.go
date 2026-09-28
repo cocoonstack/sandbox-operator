@@ -330,7 +330,7 @@ func (f *fakeStore) SetInstanceMetadata(context.Context, string, string, []byte)
 	return f.verbErr
 }
 
-func (f *fakeStore) DialGuestPort(context.Context, string, string, uint16) (net.Conn, error) {
+func (f *fakeStore) DialGuestPort(context.Context, string, string, string, uint16) (net.Conn, error) {
 	return nil, f.verbErr
 }
 

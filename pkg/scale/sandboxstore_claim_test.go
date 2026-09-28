@@ -599,7 +599,7 @@ func (c *recordingClient) SetInstanceMetadata(_ context.Context, id string, doc 
 	return c.f.verbErr
 }
 
-func (c *recordingClient) DialPort(_ context.Context, id string, port uint16) (net.Conn, error) {
+func (c *recordingClient) DialPort(_ context.Context, id, _ string, port uint16) (net.Conn, error) {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	c.f.dialPorts = append(c.f.dialPorts, port)

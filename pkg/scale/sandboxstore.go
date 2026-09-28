@@ -96,7 +96,7 @@ type SandboxLifecycle interface {
 	// NodeTemplates reads the promoted templates node holds now, ahead of its next inventory publish.
 	NodeTemplates(ctx context.Context, node string) ([]PromotedTemplate, error)
 	// DialGuestPort opens a guest port of a running sandbox through its node's passive relay; a paused one answers Conflict and is never woken.
-	DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error)
+	DialGuestPort(ctx context.Context, node, id, token string, port uint16) (net.Conn, error)
 	// SetInstanceMetadata replaces the JSON object a running sandbox's guest reads from 169.254.169.254; a paused one answers Conflict.
 	SetInstanceMetadata(ctx context.Context, node, id string, doc []byte) error
 	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.

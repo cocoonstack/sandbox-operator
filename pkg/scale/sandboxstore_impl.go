@@ -130,7 +130,7 @@ type SandboxdClient interface {
 	Promote(ctx context.Context, id, template string) (sandboxd.PoolKey, string, error)
 	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string) error
 	Info(ctx context.Context) (*sandboxd.NodeInfo, error)
-	DialPort(ctx context.Context, id string, port uint16) (net.Conn, error)
+	DialPort(ctx context.Context, id, token string, port uint16) (net.Conn, error)
 	SetInstanceMetadata(ctx context.Context, id string, doc []byte) error
 
 	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.

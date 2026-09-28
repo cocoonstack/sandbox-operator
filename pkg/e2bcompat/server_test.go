@@ -577,6 +577,7 @@ type fakeStore struct {
 	live                map[string][]scale.PromotedTemplate
 
 	envdCalls    []string
+	envdRelays   []string
 	initStatus   int
 	metadataDocs []string
 	guestEnvs    map[string]string
@@ -719,7 +720,10 @@ func (f *fakeStore) DeleteTemplate(_ context.Context, node string, key scale.Poo
 	return f.deleteTemplateErr[node]
 }
 
-func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (net.Conn, error) {
+func (f *fakeStore) DialGuestPort(_ context.Context, _, id, token string, _ uint16) (net.Conn, error) {
+	f.mu.Lock()
+	f.envdRelays = append(f.envdRelays, token)
+	f.mu.Unlock()
 	return fakeEnvd(func(r *http.Request, body string) (int, string) {
 		f.mu.Lock()
 		defer f.mu.Unlock()

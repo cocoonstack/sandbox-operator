@@ -80,7 +80,7 @@ func TestABuildThatCannotClaimFailsAtTheBaseStep(t *testing.T) {
 }
 
 func TestABuildRunsItsStepsThroughEnvdAndLeavesItsDefaultsInTheSandbox(t *testing.T) {
-	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, processExits: map[string]int{"false": 1}}
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n", Token: "claim-tok"}, processExits: map[string]int{"false": 1}}
 	h := newTestServer(t, store, withBuilds(), withBuildFleet(store))
 
 	id := requestBuild(t, h, "app")
@@ -99,6 +99,7 @@ func TestABuildRunsItsStepsThroughEnvdAndLeavesItsDefaultsInTheSandbox(t *testin
 	assert.Equal(t, [2]any{"user", map[string]string{"A": "1"}}, [2]any{defaults.DefaultUser, defaults.EnvVars})
 	assert.Contains(t, info.LogEntries, BuildLogEntry{Timestamp: info.LogEntries[2].Timestamp, Message: "ok", Level: "info", Step: "2"})
 	assert.Equal(t, []string{"n sb_1 e2b/sandboxes/app"}, store.promoted)
+	assert.Equal(t, []string{"claim-tok", "claim-tok", "claim-tok", "claim-tok", "claim-tok"}, store.envdRelays, "every build call rides the claim's own relay, which wakes and keeps the sandbox awake")
 
 	id = requestBuild(t, h, "app")
 	body = `{"fromImage":"img","steps":[{"type":"ENV","args":["A","1"]},{"type":"WORKDIR","args":["/w"]},{"type":"RUN","args":["false"]}]}`
