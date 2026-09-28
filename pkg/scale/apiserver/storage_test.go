@@ -320,7 +320,7 @@ func (f *fakeStore) Promote(context.Context, string, string, string) (scale.Pool
 	return scale.PoolKey{}, "", f.verbErr
 }
 
-func (f *fakeStore) SetTemplateLabels(context.Context, string, scale.PoolKey, map[string]string) error {
+func (f *fakeStore) SetTemplateLabels(context.Context, string, scale.PoolKey, map[string]string, string) error {
 	return f.verbErr
 }
 

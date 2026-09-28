@@ -167,12 +167,12 @@ func (s *scatterGatherStore) Promote(ctx context.Context, node, id, template str
 	return PoolKey(key), digest, nil
 }
 
-func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error {
+func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string, digest string) error {
 	cl, err := s.nodeClient(ctx, node, "template labels", key.Template)
 	if err != nil {
 		return err
 	}
-	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey(key), labels); err != nil {
+	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey(key), labels, digest); err != nil {
 		return nodeVerbError(err, "template labels", key.Template, node)
 	}
 	return nil

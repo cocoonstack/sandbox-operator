@@ -152,7 +152,7 @@ func (s *Server) publishBuild(scope, name string, tags []string) e2bbuild.Publis
 		stale := slices.DeleteFunc(holders, func(h templateHolder) bool { return !h.created.Before(own.created) })
 		if err := forEachHolder(stale, func(h templateHolder) error {
 			err := s.store.DeleteTemplate(ctx, h.node, h.key, h.digest)
-			if se, ok := errors.AsType[*k8serrors.StatusError](err); ok && se.ErrStatus.Code == http.StatusPreconditionFailed {
+			if replaced(err) {
 				return nil
 			}
 			return err
@@ -166,7 +166,12 @@ func (s *Server) publishBuild(scope, name string, tags []string) e2bbuild.Publis
 		for _, t := range tags {
 			labels[t] = digest
 		}
-		return s.store.SetTemplateLabels(ctx, node, key, labels)
+		if err := s.store.SetTemplateLabels(ctx, node, key, labels, digest); replaced(err) {
+			return fmt.Errorf("a newer build of %s replaced this one on %s", name, node)
+		} else if err != nil {
+			return err
+		}
+		return nil
 	}
 }
 
@@ -267,4 +272,10 @@ func queryInt(v string) (int, error) {
 		return 0, errors.New("negative or malformed")
 	}
 	return n, nil
+}
+
+// replaced is sandboxd's 412: the template generation the caller observed is gone.
+func replaced(err error) bool {
+	se, ok := errors.AsType[*k8serrors.StatusError](err)
+	return ok && se.ErrStatus.Code == http.StatusPreconditionFailed
 }

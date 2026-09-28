@@ -91,8 +91,8 @@ type SandboxLifecycle interface {
 	DeleteTemplate(ctx context.Context, node string, key PoolKey, digest string) error
 	// Promote publishes a claimed sandbox on node as the template name, keeping its net and size; it returns the full key and the content digest.
 	Promote(ctx context.Context, node, id, template string) (PoolKey, string, error)
-	// SetTemplateLabels replaces a promoted template's labels on node alone.
-	SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error
+	// SetTemplateLabels replaces a promoted template's labels on node alone; a digest writes only the generation it names (PreconditionFailed otherwise).
+	SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string, digest string) error
 	// NodeTemplates reads the promoted templates node holds now, ahead of its next inventory publish.
 	NodeTemplates(ctx context.Context, node string) ([]PromotedTemplate, error)
 	// DialGuestPort opens a guest port of a running sandbox through its node's passive relay; a paused one answers Conflict and is never woken.

@@ -180,15 +180,19 @@ func (c *Client) DeleteTemplate(ctx context.Context, key PoolKey, digest string)
 	return c.send(ctx, http.MethodDelete, "/v1/templates?"+q.Encode(), c.token, "delete template", nil, http.StatusNoContent, http.StatusNotFound)
 }
 
-// SetTemplateLabels performs PUT /v1/templates/labels for key on this node, replacing the whole label map.
-func (c *Client) SetTemplateLabels(ctx context.Context, key PoolKey, labels map[string]string) error {
+// SetTemplateLabels performs PUT /v1/templates/labels for key on this node, replacing the whole label map; a digest writes only that generation (412 otherwise).
+func (c *Client) SetTemplateLabels(ctx context.Context, key PoolKey, labels map[string]string, digest string) error {
 	body, err := json.Marshal(struct {
 		Labels map[string]string `json:"labels"`
 	}{labels})
 	if err != nil {
 		return err
 	}
-	return c.send(ctx, http.MethodPut, "/v1/templates/labels?"+templateQuery(key).Encode(), c.token, "template labels", body, http.StatusNoContent)
+	q := templateQuery(key)
+	if digest != "" {
+		q.Set("digest", digest)
+	}
+	return c.send(ctx, http.MethodPut, "/v1/templates/labels?"+q.Encode(), c.token, "template labels", body, http.StatusNoContent)
 }
 
 // DeleteCheckpoint performs DELETE /v1/checkpoints/{id}. A 404 is success.

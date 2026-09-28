@@ -320,10 +320,10 @@ func TestSetTemplateLabelsPutsTheWholeMap(t *testing.T) {
 	defer srv.Close()
 	c := New(srv.URL, "root-token")
 
-	require.NoError(t, c.SetTemplateLabels(t.Context(), PoolKey{Template: "ns/app", Size: "medium"}, map[string]string{"v1": "sha256:aa"}))
-	require.NoError(t, c.SetTemplateLabels(t.Context(), PoolKey{Template: "ns/app"}, nil))
+	require.NoError(t, c.SetTemplateLabels(t.Context(), PoolKey{Template: "ns/app", Size: "medium"}, map[string]string{"v1": "sha256:aa"}, "sha256:aa"))
+	require.NoError(t, c.SetTemplateLabels(t.Context(), PoolKey{Template: "ns/app"}, nil, ""))
 	assert.Equal(t, []string{
-		`PUT /v1/templates/labels?size=medium&template=ns%2Fapp {"labels":{"v1":"sha256:aa"}}`,
+		`PUT /v1/templates/labels?digest=sha256%3Aaa&size=medium&template=ns%2Fapp {"labels":{"v1":"sha256:aa"}}`,
 		`PUT /v1/templates/labels?template=ns%2Fapp {"labels":null}`,
 	}, got)
 }

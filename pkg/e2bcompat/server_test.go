@@ -570,6 +570,7 @@ type fakeStore struct {
 	deletedSnapshotID   string
 	deletedTemplates    []string
 	labeled             []string
+	labelErr            error
 	replacedDigest      string
 	deleteTemplateErr   map[string]error
 	fleet               *scale.StaticInventorySource
@@ -686,10 +687,13 @@ func (f *fakeStore) Promote(ctx context.Context, node, id, template string) (sca
 }
 
 // SetTemplateLabels writes straight into the fleet the test serves, so a live read sees it at once.
-func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string) error {
+func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string, digest string) error {
 	f.mu.Lock()
-	f.labeled = append(f.labeled, node+" "+key.Template)
+	f.labeled = append(f.labeled, strings.TrimSpace(node+" "+key.Template+" "+digest))
 	f.mu.Unlock()
+	if f.labelErr != nil {
+		return f.labelErr
+	}
 	inv, err := f.fleet.NodeInventory(ctx, node)
 	if err != nil {
 		return err

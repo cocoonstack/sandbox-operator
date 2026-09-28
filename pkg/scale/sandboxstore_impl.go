@@ -128,7 +128,7 @@ type SandboxdClient interface {
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
 	DeleteTemplate(ctx context.Context, key sandboxd.PoolKey, digest string) error
 	Promote(ctx context.Context, id, template string) (sandboxd.PoolKey, string, error)
-	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string) error
+	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string, digest string) error
 	Info(ctx context.Context) (*sandboxd.NodeInfo, error)
 	DialPort(ctx context.Context, id, token string, port uint16) (net.Conn, error)
 	SetInstanceMetadata(ctx context.Context, id string, doc []byte) error

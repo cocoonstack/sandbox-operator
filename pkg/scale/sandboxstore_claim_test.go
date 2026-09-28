@@ -585,7 +585,7 @@ func (c *recordingClient) Promote(_ context.Context, id, template string) (sandb
 	return sandboxd.PoolKey{Template: template}, "sha256:" + id, c.f.verbErr
 }
 
-func (c *recordingClient) SetTemplateLabels(context.Context, sandboxd.PoolKey, map[string]string) error {
+func (c *recordingClient) SetTemplateLabels(context.Context, sandboxd.PoolKey, map[string]string, string) error {
 	return c.f.verbErr
 }
 

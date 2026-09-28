@@ -332,7 +332,9 @@ func (s *Server) liveTags(r *http.Request, b *builtTemplate) (map[string]string,
 }
 
 func (s *Server) writeTags(r *http.Request, b *builtTemplate, tags map[string]string) error {
-	return forEachHolder(b.holders, func(h templateHolder) error { return s.store.SetTemplateLabels(r.Context(), h.node, h.key, tags) })
+	return forEachHolder(b.holders, func(h templateHolder) error {
+		return s.store.SetTemplateLabels(r.Context(), h.node, h.key, tags, h.digest)
+	})
 }
 
 func (s *Server) writeTagError(w http.ResponseWriter, r *http.Request, err error, name string) {
