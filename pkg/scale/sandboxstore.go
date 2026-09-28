@@ -72,7 +72,7 @@ type SandboxStore interface {
 	SandboxLifecycle
 }
 
-// SandboxLifecycle is the verb set of a claimed sandbox, each verb routed to its owning node.
+// SandboxLifecycle is the verb set routed to one node: a claimed sandbox's lifecycle, its checkpoints and the node's promoted templates.
 // Pause and Snapshot write guest memory out, so their cost grows with its size.
 type SandboxLifecycle interface {
 	// Pause snapshots and stops the sandbox, and is idempotent on a paused one.

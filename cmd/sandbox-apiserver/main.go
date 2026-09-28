@@ -142,7 +142,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := kubeinventory.NewCache(ctx, restCfg)
+	informers, err := kubeinventory.NewCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	invSource, err := kubeinventory.New(ctx, reader, o.Inventory)
+	invSource, err := kubeinventory.New(ctx, informers, o.Inventory)
 	if err != nil {
 		return err
 	}

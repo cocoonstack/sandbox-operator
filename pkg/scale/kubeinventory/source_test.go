@@ -18,7 +18,6 @@ import (
 	restclient "k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cocoonv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -208,9 +207,8 @@ func fleet(t *testing.T, opts Options, objs ...*cocoonv1beta1.NodeInventory) (*S
 	mapper.Add(scale.NodeInventoryGVK, meta.RESTScopeRoot)
 	var watched bool
 	c, err := cache.New(&restclient.Config{Host: "http://127.0.0.1:1"}, cache.Options{
-		Scheme:   scheme,
-		Mapper:   mapper,
-		ByObject: map[client.Object]cache.ByObject{&cocoonv1beta1.NodeInventory{}: {UnsafeDisableDeepCopy: new(true)}},
+		Scheme: scheme,
+		Mapper: mapper,
 		NewInformer: func(_ toolscache.ListerWatcher, obj runtime.Object, resync time.Duration, indexers toolscache.Indexers) toolscache.SharedIndexInformer {
 			return toolscache.NewSharedIndexInformer(&toolscache.ListWatch{
 				ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) { return list, nil },

@@ -78,11 +78,11 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := kubeinventory.NewCache(ctx, restCfg)
+	informers, err := kubeinventory.NewCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
-	inv, err := kubeinventory.New(ctx, reader, o.Inventory)
+	inv, err := kubeinventory.New(ctx, informers, o.Inventory)
 	if err != nil {
 		return err
 	}

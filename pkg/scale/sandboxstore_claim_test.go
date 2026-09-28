@@ -201,7 +201,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 
 	picked := map[string]int{}
 	for range 200 {
-		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
+		candidates, err := WarmCandidates(t.Context(), store, PoolKey{Template: "img"})
 		require.NoError(t, err)
 		best := pickPowerOfTwo(candidates)
 		picked[best.node]++
@@ -218,7 +218,7 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 
 	warmPicks := 0
 	for range 200 {
-		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
+		candidates, err := WarmCandidates(t.Context(), store, PoolKey{Template: "img"})
 		require.NoError(t, err)
 		best := pickPowerOfTwo(candidates)
 		if best.node == "warm" {
@@ -429,12 +429,13 @@ func TestWarmCandidatesMatchThePerNodeFanOut(t *testing.T) {
 			}
 		}
 	}
-	got, err := store.warmCandidates(ctx, pool)
+	caps, err := store.src.NodeCapacities(ctx)
 	require.NoError(t, err)
+	got := warmCandidates(caps, pool)
 	assert.Equal(t, want, got)
 	assert.Len(t, got, 3, "a's rt pool and both of d's; b is cold, c has no address, e is partitioned")
-	assert.Equal(t, "d", store.nodeForAddress(ctx, "10.0.0.4:7777"), "a node address resolves to its node")
-	assert.Empty(t, store.nodeForAddress(ctx, "10.0.0.5:7777"), "a partitioned node's address does not resolve")
+	assert.Equal(t, "d", nodeForAddress(caps, "10.0.0.4:7777"), "a node address resolves to its node")
+	assert.Empty(t, nodeForAddress(caps, "10.0.0.5:7777"), "a partitioned node's address does not resolve")
 }
 
 type claimCall struct {

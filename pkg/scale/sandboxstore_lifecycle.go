@@ -146,7 +146,7 @@ func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, ke
 	if err != nil {
 		return err
 	}
-	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}); err != nil {
+	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey(key)); err != nil {
 		return nodeVerbError(err, "delete template", key.Template, node)
 	}
 	return nil
@@ -161,7 +161,7 @@ func (s *scatterGatherStore) Promote(ctx context.Context, node, id, template str
 	if err != nil {
 		return PoolKey{}, "", nodeVerbError(err, "promote", id, node)
 	}
-	return PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, digest, nil
+	return PoolKey(key), digest, nil
 }
 
 func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error {
@@ -169,7 +169,7 @@ func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string,
 	if err != nil {
 		return err
 	}
-	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, labels); err != nil {
+	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey(key), labels); err != nil {
 		return nodeVerbError(err, "template labels", key.Template, node)
 	}
 	return nil
