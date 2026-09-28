@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -123,7 +124,7 @@ func TestARelayedBuildLeavesTheProxyInTheTemplateDefaults(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(body), &init))
 		}
 	}
-	assert.Equal(t, relayEnvs, init.EnvVars)
+	assert.Equal(t, sandboxd.RelayEnv, init.EnvVars)
 }
 
 func TestABuildRefusesWhatItCannotHonor(t *testing.T) {

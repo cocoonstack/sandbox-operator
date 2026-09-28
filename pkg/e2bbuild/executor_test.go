@@ -106,14 +106,13 @@ func TestStepsCarryTheirUserWorkdirAndEnvIntoLaterCommandsAndTheDefaults(t *test
 }
 
 func TestARelayedBuildSeedsItsStepsWithTheProxyEnvironment(t *testing.T) {
-	for route, want := range map[string]string{"relay": "map[A:1 http_proxy:p]", "none": "map[A:1]"} {
+	for route, want := range map[string]string{"relay": "map[A:1 http_proxy:http://127.0.0.1:3128 https_proxy:http://127.0.0.1:3128 no_proxy:localhost,127.0.0.1,::1,169.254.169.254]", "none": "map[A:1]"} {
 		store := &fakeStore{route: route}
 		e := New(store, store, 1, time.Minute, 100)
 		e.Register("b", Request{})
 		require.NoError(t, e.Start(t.Context(), "b", Spec{
 			Pool: scale.PoolKey{Template: "img"}, Template: "t",
-			Steps:     []Step{{Type: stepEnv, Args: []string{"A", "1"}}, {Type: stepRun, Args: []string{"make"}}},
-			RelayEnvs: map[string]string{"http_proxy": "p"},
+			Steps: []Step{{Type: stepEnv, Args: []string{"A", "1"}}, {Type: stepRun, Args: []string{"make"}}},
 		}))
 		require.Equal(t, StatusReady, waitDone(t, e, "b").Status)
 		calls := store.calls()

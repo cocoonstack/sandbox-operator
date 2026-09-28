@@ -14,6 +14,7 @@ import (
 	"maps"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,19 +110,17 @@ func (s Step) problem(canCopy bool) string {
 	return ""
 }
 
-// Spec is how a registered build runs; RelayEnvs seed the steps when the claim relays through the node's proxy, StartCmd runs in the background and ReadyCmd until it exits 0, both before the promote; Publish runs after the promote and before the build reads ready.
+// Spec is how a registered build runs; StartCmd runs in the background and ReadyCmd until it exits 0, both before the promote; Publish runs after the promote and before the build reads ready.
 type Spec struct {
-	Namespace  string
-	ClaimName  string
-	Pool       scale.PoolKey
-	Template   string
-	TTLSeconds int
-	Steps      []Step
-	StartCmd   string
-	ReadyCmd   string
-	RelayEnvs  map[string]string
-	Archive    ArchiveFunc
-	Publish    PublishFunc
+	Namespace string
+	ClaimName string
+	Pool      scale.PoolKey
+	Template  string
+	Steps     []Step
+	StartCmd  string
+	ReadyCmd  string
+	Archive   ArchiveFunc
+	Publish   PublishFunc
 }
 
 // Command is one shell line run as User, in Workdir, with Envs; an empty Workdir is the user's home.
@@ -237,7 +236,7 @@ func (e *Executor) Status(id string) (Info, bool) {
 		return Info{}, false
 	}
 	info := r.info
-	info.Logs = append([]LogEntry(nil), r.info.Logs...)
+	info.Logs = slices.Clip(r.info.Logs)
 	return info, true
 }
 
@@ -246,7 +245,7 @@ func (e *Executor) run(ctx context.Context, id string, spec Spec) {
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	e.logf(id, PhaseClaim, "claiming a sandbox from %s (%s, %s)", spec.Pool.Template, spec.Pool.Net, spec.Pool.Size)
-	a, err := e.store.Claim(ctx, spec.Namespace, spec.ClaimName, spec.Pool, scale.ClaimOptions{TTLSeconds: spec.TTLSeconds})
+	a, err := e.store.Claim(ctx, spec.Namespace, spec.ClaimName, spec.Pool, scale.ClaimOptions{TTLSeconds: int(e.timeout / time.Second)})
 	if err != nil {
 		msg := fmt.Sprintf("could not claim a sandbox of %s (%s, %s)", spec.Pool.Template, spec.Pool.Net, spec.Pool.Size)
 		if scale.IsNoWarmCapacity(err) {
@@ -271,7 +270,7 @@ func (e *Executor) run(ctx context.Context, id string, spec Spec) {
 func (e *Executor) prepare(ctx context.Context, id string, a scale.Assignment, spec Spec) (string, string, error) {
 	state := Command{User: defaultUser, Envs: map[string]string{}}
 	if a.NetRoute == sandboxd.NetRouteRelay {
-		maps.Copy(state.Envs, spec.RelayEnvs)
+		maps.Copy(state.Envs, sandboxd.RelayEnv)
 	}
 	for i, step := range spec.Steps {
 		phase := strconv.Itoa(i + 1)
@@ -355,7 +354,7 @@ func (e *Executor) copyIn(ctx context.Context, a scale.Assignment, spec Spec, ha
 		return "could not read the uploaded files", err
 	}
 	defer func() { _ = archive.Close() }()
-	if err := e.guest.Write(ctx, a, "/tmp/"+hash+".tar", archive); err != nil {
+	if err := e.guest.Write(ctx, a, archivePath(hash), archive); err != nil {
 		return "could not copy the uploaded files into the build sandbox", err
 	}
 	return "", nil

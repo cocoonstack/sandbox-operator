@@ -45,13 +45,6 @@ const (
 	logLineMax       = 64 << 10
 )
 
-// relayEnvs point a guest process at the node's egress proxy, as silkd's unit points its own.
-var relayEnvs = map[string]string{
-	"http_proxy":  "http://127.0.0.1:3128",
-	"https_proxy": "http://127.0.0.1:3128",
-	"no_proxy":    "localhost,127.0.0.1,::1,169.254.169.254",
-}
-
 // envdMetrics is envd's GET /metrics reply: the guest's own view of its CPU, memory and root disk.
 type envdMetrics struct {
 	Timestamp  int64   `json:"ts"`
@@ -401,7 +394,7 @@ func withRelay(route string, envs map[string]string) map[string]string {
 	if route != sandboxd.NetRouteRelay {
 		return envs
 	}
-	out := maps.Clone(relayEnvs)
+	out := maps.Clone(sandboxd.RelayEnv)
 	maps.Copy(out, envs)
 	return out
 }

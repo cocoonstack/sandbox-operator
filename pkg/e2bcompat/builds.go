@@ -72,17 +72,15 @@ func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 	pool.Net = scale.NetDefault
 	pool.Size = cmp.Or(pending.Size, pool.Size)
 	err := s.builds.Start(r.Context(), id, e2bbuild.Spec{
-		Namespace:  s.namespace(r),
-		ClaimName:  names.SimpleNameGenerator.GenerateName(namePrefix + "build-"),
-		Pool:       pool,
-		Template:   scope + name,
-		TTLSeconds: int(s.opts.Builds.Timeout / time.Second),
-		Steps:      req.Steps,
-		StartCmd:   req.StartCmd,
-		ReadyCmd:   req.ReadyCmd,
-		RelayEnvs:  relayEnvs,
-		Archive:    s.archive(s.namespace(r), name),
-		Publish:    s.publishBuild(scope, name, pending.Tags),
+		Namespace: s.namespace(r),
+		ClaimName: names.SimpleNameGenerator.GenerateName(namePrefix + "build-"),
+		Pool:      pool,
+		Template:  scope + name,
+		Steps:     req.Steps,
+		StartCmd:  req.StartCmd,
+		ReadyCmd:  req.ReadyCmd,
+		Archive:   s.archive(s.namespace(r), name),
+		Publish:   s.publishBuild(scope, name, pending.Tags),
 	})
 	switch {
 	case errors.Is(err, e2bbuild.ErrBusy):
@@ -113,17 +111,18 @@ func (s *Server) buildStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	floor := max(slices.Index(logLevels, q.Get("level")), 0)
-	var entries []BuildLogEntry
+	entries := []BuildLogEntry{}
 	for _, l := range info.Logs {
-		if slices.Index(logLevels, l.Level) >= floor {
+		if slices.Index(logLevels, l.Level) < floor {
+			continue
+		}
+		if offset > 0 {
+			offset--
+		} else if limit <= 0 || len(entries) < limit {
 			entries = append(entries, logEntryOf(l))
 		}
 	}
-	entries = entries[min(offset, len(entries)):]
-	if limit > 0 {
-		entries = entries[:min(limit, len(entries))]
-	}
-	out := TemplateBuildInfo{TemplateID: name, BuildID: buildID, Status: info.Status, Logs: []string{}, LogEntries: append([]BuildLogEntry{}, entries...)}
+	out := TemplateBuildInfo{TemplateID: name, BuildID: buildID, Status: info.Status, Logs: []string{}, LogEntries: entries}
 	if info.Status == e2bbuild.StatusError {
 		out.Reason = &BuildStatusReason{Message: info.Failure, Step: sdkStep(info.FailedPhase), LogEntries: []BuildLogEntry{}}
 		if n := len(info.Logs); n > 0 {

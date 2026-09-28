@@ -48,7 +48,7 @@ func copyScript(state Command, s Step) string {
 	scratch := "/tmp/" + s.FilesHash
 	unpack := scratch + "/unpack"
 	vars := [][2]string{
-		{"archive", scratch + ".tar"},
+		{"archive", archivePath(s.FilesHash)},
 		{"scratch", scratch},
 		{"unpack", unpack},
 		{"src", s.Args[0]},
@@ -64,6 +64,10 @@ func copyScript(state Command, s Step) string {
 		b.WriteString(v[0] + "=" + shellQuote(v[1]) + "\n")
 	}
 	return b.String() + copyMove
+}
+
+func archivePath(hash string) string {
+	return "/tmp/" + hash + ".tar"
 }
 
 // globBase is src up to its first segment with a glob; the SDK expands globs into the archive itself.

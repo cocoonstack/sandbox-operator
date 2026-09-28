@@ -5,8 +5,9 @@
 // It is a translation layer, not a second control plane: every request lands on
 // the same scale.SandboxStore the aggregated apiserver uses, so an e2b Create is
 // the identical node-local claim a `kubectl create sandbox` performs, and the
-// sandbox it returns is visible to `kubectl get sandboxes`. Nothing is stored
-// here; public identity is a DNS-safe rendering of the node's sandboxd claim id.
+// sandbox it returns is visible to `kubectl get sandboxes`. Only build records
+// (in memory) and COPY uploads (a directory or bucket) live here; public identity
+// is a DNS-safe rendering of the node's sandboxd claim id.
 //
 // Mapping to the e2b contract (e2b-dev/E2B spec/openapi.yml):
 //
@@ -15,7 +16,7 @@
 //	POST /sandboxes/{id}/snapshots                -> create checkpoint
 //	GET /snapshots, DELETE /templates/{id}        -> list or delete checkpoints and built templates
 //	GET/PATCH /templates[/{id}], aliases/{a}, tags -> warm-pool keys, built templates, alias lookup, tags
-//	GET /sandboxes/{id}/metrics|logs              -> node statistics, an empty log page
+//	GET /sandboxes/{id}/metrics|logs, /sandboxes/metrics -> envd's guest metrics, an empty log page
 //	POST timeout|refreshes, GET /health           -> lease renewal, liveness
 package e2bcompat
 
@@ -422,7 +423,10 @@ func (s *Server) listed(w http.ResponseWriter, r *http.Request) ([]SandboxDetail
 	}
 	out := make([]SandboxDetail, 0, len(list.Items))
 	for i := range list.Items {
-		if d := s.detailFor(&list.Items[i]); filter.keeps(d) && filter.matchesMetadata(&list.Items[i]) {
+		if !filter.matchesMetadata(&list.Items[i]) {
+			continue
+		}
+		if d := s.detailFor(&list.Items[i]); filter.keeps(d) {
 			out = append(out, d)
 		}
 	}

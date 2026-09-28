@@ -363,26 +363,12 @@ func (s *Server) sandboxLogs(reply any) http.HandlerFunc {
 	}
 }
 
-// inventories returns every node's published inventory, the fleet view the
-// pool-derived surfaces (templates, snapshot listing) are assembled from.
-func (s *Server) inventories(ctx context.Context) ([]*scale.NodeInventory, error) {
+// inventories is the fleet's claimable pools and templates, the view the template surfaces are assembled from.
+func (s *Server) inventories(ctx context.Context) ([]scale.NodePools, error) {
 	if s.opts.Inventory == nil {
 		return nil, errors.New("e2bcompat: no inventory source configured")
 	}
-	nodes, err := s.opts.Inventory.ListNodes(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*scale.NodeInventory, 0, len(nodes))
-	for _, node := range nodes {
-		inv, err := s.opts.Inventory.NodeInventory(ctx, node)
-		if err != nil {
-			log.WithFunc("e2bcompat.inventories").Warnf(ctx, "e2b: node inventory unavailable node=%s err=%v", node, err)
-			continue
-		}
-		out = append(out, inv)
-	}
-	return out, nil
+	return s.opts.Inventory.NodeCapacities(ctx)
 }
 
 // nodesWithSandboxes lists the nodes a checkpoint could live on.

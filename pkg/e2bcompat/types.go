@@ -113,8 +113,8 @@ type SandboxForkRequest struct {
 	Count   *int32 `json:"count,omitempty"`
 }
 
-// SandboxForkResult is one entry of the fork reply: exactly one of Sandbox or
-// Error is set, so a partial failure still returns 201 with per-child detail.
+// SandboxForkResult is one entry of the fork reply in e2b's shape; a fork here is
+// all-or-nothing, so Error is never set and a failed child fails the whole with 500.
 type SandboxForkResult struct {
 	Sandbox *Sandbox  `json:"sandbox,omitempty"`
 	Error   *APIError `json:"error,omitempty"`

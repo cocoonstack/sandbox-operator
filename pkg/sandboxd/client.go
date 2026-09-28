@@ -33,11 +33,20 @@ const (
 	captureTimeout = 10 * time.Minute
 )
 
-// ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
-// at max_claims, the calling tenant is at its own max_claims, or the node is
-// draining) or a 200 that delivers no sandbox. In every case this node handed
-// over no VM, so the store tries another node or reports no warm capacity.
-var ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
+var (
+	// ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
+	// at max_claims, the calling tenant is at its own max_claims, or the node is
+	// draining) or a 200 that delivers no sandbox. In every case this node handed
+	// over no VM, so the store tries another node or reports no warm capacity.
+	ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
+
+	// RelayEnv points a guest process at the node's egress proxy on a NetRouteRelay claim, as silkd's unit points its own.
+	RelayEnv = map[string]string{
+		"http_proxy":  "http://127.0.0.1:3128",
+		"https_proxy": "http://127.0.0.1:3128",
+		"no_proxy":    "localhost,127.0.0.1,::1,169.254.169.254",
+	}
+)
 
 // ExpireAction is what the node does with a claim whose lease ends; empty keeps the claim's current action, destroy on a new claim.
 type ExpireAction string
