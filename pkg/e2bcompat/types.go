@@ -57,21 +57,20 @@ type Sandbox struct {
 // SandboxDetail is the GET /sandboxes/{sandboxID} response (spec:
 // SandboxDetail), and its field set also satisfies ListedSandbox.
 type SandboxDetail struct {
-	TemplateID          string          `json:"templateID"`
-	SandboxID           string          `json:"sandboxID"`
-	ClientID            string          `json:"clientID"`
-	StartedAt           string          `json:"startedAt"`
-	EndAt               string          `json:"endAt"`
-	State               string          `json:"state"`
-	EnvdVersion         string          `json:"envdVersion"`
-	CPUCount            int32           `json:"cpuCount"`
-	MemoryMB            int32           `json:"memoryMB"`
-	DiskSizeMB          int32           `json:"diskSizeMB"`
-	Alias               string          `json:"alias,omitempty"`
-	Metadata            json.RawMessage `json:"metadata,omitempty"`
-	EnvdAccessToken     string          `json:"envdAccessToken,omitempty"`
-	Domain              string          `json:"domain,omitempty"`
-	AllowInternetAccess *bool           `json:"allowInternetAccess,omitempty"`
+	TemplateID      string          `json:"templateID"`
+	SandboxID       string          `json:"sandboxID"`
+	ClientID        string          `json:"clientID"`
+	StartedAt       string          `json:"startedAt"`
+	EndAt           string          `json:"endAt"`
+	State           string          `json:"state"`
+	EnvdVersion     string          `json:"envdVersion"`
+	CPUCount        int32           `json:"cpuCount"`
+	MemoryMB        int32           `json:"memoryMB"`
+	DiskSizeMB      int32           `json:"diskSizeMB"`
+	Alias           string          `json:"alias,omitempty"`
+	Metadata        json.RawMessage `json:"metadata,omitempty"`
+	EnvdAccessToken string          `json:"envdAccessToken,omitempty"`
+	Domain          string          `json:"domain,omitempty"`
 
 	startedAtKey string
 }

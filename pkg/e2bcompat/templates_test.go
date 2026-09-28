@@ -34,7 +34,7 @@ func TestTheTemplateListCarriesTheNamespacesBuiltTemplates(t *testing.T) {
 	assert.Equal(t, [4]any{buildUUID("sha256:aa"), int32(2), int32(1024), "2026-09-28T01:02:03Z"}, [4]any{app.BuildID, app.CPUCount, app.MemoryMB, app.CreatedAt})
 	assert.Equal(t, []string{"app"}, app.Names)
 	assert.Equal(t, buildReady, app.BuildStatus)
-	assert.Equal(t, buildUUID("sha256:cc"), byID["app2"].BuildID, "the digest most holders report")
+	assert.Equal(t, buildUUID("sha256:cc"), byID["app2"].BuildID, "the newest holder's digest")
 	assert.Contains(t, w.Body.String(), `"createdBy":null,"lastSpawnedAt":null`)
 	assert.Equal(t, "a2b927ee-9198-5f91-852e-671c845fc253", buildUUID("sha256:aa"), "the UUIDv5 namespace is part of the contract")
 }
@@ -56,9 +56,7 @@ func TestGetTemplateAnswersOneBuildPerDigest(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "is a pool image, not a built template")
 	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodGet, "/templates/nope", "", testKey).Code)
-	w = do(t, h, http.MethodGet, "/templates/"+strings.Repeat("x", 60), "", testKey)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "at most 49 characters")
+	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodGet, "/templates/"+strings.Repeat("x", 60), "", testKey).Code, "a name over the budget is no built template")
 	assert.Equal(t, http.StatusOK, do(t, h, http.MethodPatch, "/templates/app", `{"public":false}`, testKey).Code)
 	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodPatch, "/templates/nope", `{}`, testKey).Code)
 }
@@ -215,15 +213,20 @@ func withTemplateFleet(store *fakeStore) serverOption {
 		{Template: "e2b/sandboxes/tenants", ContentDigest: "sha256:ff", Tenant: "acme", CreatedAt: created},
 	}})
 	inv.Put(&scale.NodeInventory{Node: "node-b", Templates: []scale.PromotedTemplate{
-		withLabels(built("e2b/sandboxes/app", "sha256:aa"), map[string]string{"old": "sha256:gone"}), built("e2b/sandboxes/app2", "sha256:cc"),
+		withLabels(built("e2b/sandboxes/app", "sha256:aa"), map[string]string{"old": "sha256:gone"}), later(built("e2b/sandboxes/app2", "sha256:cc")),
 	}})
-	inv.Put(&scale.NodeInventory{Node: "node-c", Templates: []scale.PromotedTemplate{built("e2b/sandboxes/app2", "sha256:cc")}})
+	inv.Put(&scale.NodeInventory{Node: "node-c", Templates: []scale.PromotedTemplate{later(built("e2b/sandboxes/app2", "sha256:cc"))}})
 	store.fleet = inv
 	return func(o *Options) { o.Inventory = inv }
 }
 
 func withLabels(t scale.PromotedTemplate, labels map[string]string) scale.PromotedTemplate {
 	t.Labels = labels
+	return t
+}
+
+func later(t scale.PromotedTemplate) scale.PromotedTemplate {
+	t.CreatedAt = &metav1.Time{Time: t.CreatedAt.Add(time.Minute)}
 	return t
 }
 

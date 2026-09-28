@@ -1,7 +1,6 @@
 package sandboxd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -68,14 +67,13 @@ type PoolKey struct {
 
 // SandboxSummary is one live claim as the owning node reports it.
 type SandboxSummary struct {
-	ID             string    `json:"id"`
-	Key            PoolKey   `json:"key"`
-	Deadline       time.Time `json:"deadline"`
-	ClaimedAt      time.Time `json:"claimed_at"`
-	Hibernated     bool      `json:"hibernated"`
-	Archived       bool      `json:"archived,omitempty"`
-	FromCheckpoint string    `json:"from_checkpoint,omitempty"`
-	ClaimRef       string    `json:"claim_ref,omitempty"`
+	ID         string    `json:"id"`
+	Key        PoolKey   `json:"key"`
+	Deadline   time.Time `json:"deadline"`
+	ClaimedAt  time.Time `json:"claimed_at"`
+	Hibernated bool      `json:"hibernated"`
+	Archived   bool      `json:"archived,omitempty"`
+	ClaimRef   string    `json:"claim_ref,omitempty"`
 	// Token is the claim's own bearer token; only the by-id read reports it.
 	Token    string            `json:"token,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -248,14 +246,7 @@ func (c *Client) sendJSONWith(ctx context.Context, hc *http.Client, method, path
 	if err != nil {
 		return fmt.Errorf("sandboxd: encode %s: %w", path, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.authenticate(req, c.token)
-
-	resp, err := hc.Do(req)
+	resp, err := c.do(ctx, hc, method, path, c.token, payload)
 	if err != nil {
 		return fmt.Errorf("sandboxd: %s: %w", path, err)
 	}
@@ -268,13 +259,7 @@ func (c *Client) sendJSONWith(ctx context.Context, hc *http.Client, method, path
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return err
-	}
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
+	resp, err := c.do(ctx, c.hc, http.MethodGet, path, c.token, nil)
 	if err != nil {
 		return fmt.Errorf("sandboxd: %s: %w", path, err)
 	}

@@ -44,21 +44,12 @@ type builtTemplate struct {
 	memoryMB int32
 }
 
-// digest is the one most holders report; a re-promote mid-publish can leave nodes briefly apart.
-func (b *builtTemplate) digest() string {
-	best := ""
-	for _, d := range slices.Sorted(maps.Keys(b.digests)) {
-		if best == "" || b.digests[d] > b.digests[best] {
-			best = d
-		}
-	}
-	return best
-}
+// digest is the current build's content digest.
+func (b *builtTemplate) digest() string { return b.current().digest }
 
-// current is a holder of the current build, whose labels are the template's tags.
+// current is the newest holder, whose labels are the template's tags; a re-promote mid-publish leaves older holders briefly behind.
 func (b *builtTemplate) current() templateHolder {
-	d := b.digest()
-	return b.holders[slices.IndexFunc(b.holders, func(h templateHolder) bool { return h.digest == d })]
+	return b.holders[slices.IndexFunc(b.holders, func(h templateHolder) bool { return h.created.Equal(b.created) })]
 }
 
 func (b *builtTemplate) names() []string {
@@ -282,10 +273,6 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 
 // builtTemplate writes the refusal and reports false unless name is a built template of the caller's namespace.
 func (s *Server) builtTemplate(w http.ResponseWriter, r *http.Request, name string) (*builtTemplate, bool) {
-	if _, err := scale.StampedName("template", templatePrefix, s.namespace(r), name); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return nil, false
-	}
 	b, pool, err := s.resolveTemplate(r, name)
 	switch {
 	case err != nil:
@@ -360,12 +347,14 @@ func builtTemplates(nodes []scale.NodePools, scope, only string) map[string]*bui
 				b = &builtTemplate{name: name, digests: map[string]int{}, cpuCount: t.CPUCount, memoryMB: int32(t.MemoryBytes >> 20)}
 				out[name] = b
 			}
-			b.holders = append(b.holders, templateHolder{
-				node: inv.Node, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}, digest: t.ContentDigest, labels: t.Labels,
-			})
+			h := templateHolder{node: inv.Node, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}, digest: t.ContentDigest, labels: t.Labels}
+			if t.CreatedAt != nil {
+				h.created = t.CreatedAt.Time
+			}
+			b.holders = append(b.holders, h)
 			b.digests[t.ContentDigest]++
-			if t.CreatedAt != nil && t.CreatedAt.After(b.created) {
-				b.created = t.CreatedAt.Time
+			if h.created.After(b.created) {
+				b.created = h.created
 			}
 		}
 	}

@@ -117,8 +117,6 @@ type ClaimResult struct {
 	Token     string    `json:"token"`
 	Deadline  time.Time `json:"deadline"`
 	OwnerAddr string    `json:"owner_addr"`
-	// FromCheckpoint is the lineage edge when the claim branched from a checkpoint.
-	FromCheckpoint string `json:"from_checkpoint,omitempty"`
 	// NetRoute is how the guest reaches the network: relay, direct or none.
 	NetRoute string `json:"net_route,omitempty"`
 	// Redirect, when non-empty on a 200, names warm peers to retry at instead of a
@@ -274,20 +272,7 @@ func (c *Client) send(ctx context.Context, method, path, token, op string, body 
 }
 
 func (c *Client) sendWith(ctx context.Context, hc *http.Client, method, path, token, op string, body []byte, ok ...int) error {
-	var r io.Reader
-	if body != nil {
-		r = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, r)
-	if err != nil {
-		return err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	c.authenticate(req, token)
-
-	resp, err := hc.Do(req)
+	resp, err := c.do(ctx, hc, method, path, token, body)
 	if err != nil {
 		return fmt.Errorf("sandboxd: %s: %w", op, err)
 	}
@@ -297,6 +282,22 @@ func (c *Client) sendWith(ctx context.Context, hc *http.Client, method, path, to
 		return statusError(resp)
 	}
 	return nil
+}
+
+func (c *Client) do(ctx context.Context, hc *http.Client, method, path, token string, body []byte) (*http.Response, error) {
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, r)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	c.authenticate(req, token)
+	return hc.Do(req)
 }
 
 func (c *Client) authenticate(req *http.Request, token string) {

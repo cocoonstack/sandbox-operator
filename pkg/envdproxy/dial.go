@@ -2,14 +2,11 @@ package envdproxy
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
-
-var errNoTarget = errors.New("envdproxy: request carries no target")
 
 // target carries one request's destination through the transport, which only
 // ever sees the outbound request and its context.
@@ -35,10 +32,7 @@ type guestTransport struct {
 // across sandboxes would cross a tenancy boundary.
 func newGuestTransport(dialer *net.Dialer) *guestTransport {
 	dialContext := func(ctx context.Context, _, _ string) (net.Conn, error) {
-		t, ok := targetFrom(ctx)
-		if !ok {
-			return nil, errNoTarget
-		}
+		t, _ := targetFrom(ctx)
 		return sandboxd.DialPort(ctx, dialer, t.owner.Address, t.owner.ClaimID, t.owner.Token, t.port)
 	}
 	// With HTTP/1 also set, a plaintext transport cannot negotiate HTTP/2 and picks HTTP/1.

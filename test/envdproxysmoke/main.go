@@ -232,13 +232,7 @@ func stepCredentials(ctx context.Context, c *client) error {
 // stepHeaderRouting proves the shared-host form works: one name for the whole
 // fleet, with the sandbox named by headers.
 func stepHeaderRouting(ctx context.Context, c *client) error {
-	label, _, _ := strings.Cut(c.host, ".")
-	port, sandboxID, _ := strings.Cut(label, "-")
-	extra := http.Header{
-		"E2b-Sandbox-Id":   []string{sandboxID},
-		"E2b-Sandbox-Port": []string{port},
-	}
-	body, err := c.post(ctx, false, "/echo", "sandbox."+domain, c.token, extra, "{}")
+	body, err := c.post(ctx, false, "/echo", "sandbox."+domain, c.token, routingHeaders(c.host), "{}")
 	if err != nil {
 		return err
 	}
@@ -280,13 +274,7 @@ func stepEnvdConnect(ctx context.Context, c *client) error {
 }
 
 func stepEnvdHeaderRouting(ctx context.Context, c *client) error {
-	label, _, _ := strings.Cut(c.host, ".")
-	port, sandboxID, _ := strings.Cut(label, "-")
-	extra := http.Header{
-		"E2b-Sandbox-Id":   []string{sandboxID},
-		"E2b-Sandbox-Port": []string{port},
-	}
-	resp, err := c.send(ctx, false, http.MethodGet, "/health", "sandbox."+domain, c.token, extra, "")
+	resp, err := c.send(ctx, false, http.MethodGet, "/health", "sandbox."+domain, c.token, routingHeaders(c.host), "")
 	if err != nil {
 		return err
 	}
@@ -326,4 +314,10 @@ func wantReport(body string, want ...string) error {
 		}
 	}
 	return nil
+}
+
+func routingHeaders(host string) http.Header {
+	label, _, _ := strings.Cut(host, ".")
+	port, sandboxID, _ := strings.Cut(label, "-")
+	return http.Header{"E2b-Sandbox-Id": []string{sandboxID}, "E2b-Sandbox-Port": []string{port}}
 }

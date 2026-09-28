@@ -639,8 +639,7 @@ func (f listFilter) keeps(d SandboxDetail) bool {
 		return false
 	}
 	if !f.startedAfter.IsZero() {
-		started, err := time.Parse(time.RFC3339, d.StartedAt)
-		if err != nil || started.Before(f.startedAfter.Truncate(time.Second)) {
+		if started, _ := time.Parse(time.RFC3339, d.StartedAt); started.Before(f.startedAfter.Truncate(time.Second)) {
 			return false
 		}
 	}

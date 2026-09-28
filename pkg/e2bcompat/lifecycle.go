@@ -119,15 +119,7 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request, req ConnectSand
 			return
 		}
 	}
-	writeJSON(w, status, Sandbox{
-		TemplateID:      templateOf(sb),
-		Alias:           s.aliasOf(templateOf(sb)),
-		SandboxID:       PublicID(claimID),
-		ClientID:        node,
-		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: AccessToken(s.opts.EnvdSecret, rec.Token),
-		Domain:          s.opts.Domain,
-	})
+	writeJSON(w, status, s.sandboxOf(templateOf(sb), claimID, node, AccessToken(s.opts.EnvdSecret, rec.Token)))
 }
 
 // forkSandbox sets no per-child error because the node fork is all-or-nothing.
@@ -170,21 +162,13 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	template := templateOf(sb)
-	alias := s.aliasOf(template)
 	out := make([]SandboxForkResult, len(children))
 	var g errgroup.Group
 	g.SetLimit(maxNodeConcurrency)
 	for i, child := range children {
 		token := AccessToken(s.opts.EnvdSecret, child.Token)
-		out[i] = SandboxForkResult{Sandbox: &Sandbox{
-			TemplateID:      template,
-			Alias:           alias,
-			SandboxID:       PublicID(child.SandboxName),
-			ClientID:        child.Node,
-			EnvdVersion:     s.opts.EnvdVersion,
-			EnvdAccessToken: token,
-			Domain:          s.opts.Domain,
-		}}
+		sandbox := s.sandboxOf(template, child.SandboxName, child.Node, token)
+		out[i] = SandboxForkResult{Sandbox: &sandbox}
 		g.Go(func() error { return s.handOver(r.Context(), child, token) })
 	}
 	if err := g.Wait(); err != nil {
@@ -193,6 +177,10 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+func (s *Server) sandboxOf(template, sandboxName, node, token string) Sandbox {
+	return Sandbox{TemplateID: template, Alias: s.aliasOf(template), SandboxID: PublicID(sandboxName), ClientID: node, EnvdVersion: s.opts.EnvdVersion, EnvdAccessToken: token, Domain: s.opts.Domain}
 }
 
 // createSnapshot captures the sandbox's state as a checkpoint later sandboxes

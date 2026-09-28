@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -49,11 +48,8 @@ var _ scale.InventorySource = (*Source)(nil)
 // It never mutates what it holds, since the informer hands out its cached objects themselves.
 type Source struct {
 	staleAfter time.Duration
-	reference  atomic.Int64
 	snap       atomic.Pointer[snapshot]
-
-	mu     sync.Mutex
-	byNode map[string]*scale.NodeInventory
+	byNode     map[string]*scale.NodeInventory
 }
 
 // New builds a Source over the NodeInventory informer in informers and waits until its snapshot holds the synced fleet.
@@ -118,11 +114,12 @@ func (s *Source) NodeCapacity(_ context.Context, node string) (string, []scale.P
 }
 
 func (s *Source) get(node string) (*scale.NodeInventory, error) {
-	inv := s.snap.Load().byNode[node]
+	snap := s.snap.Load()
+	inv := snap.byNode[node]
 	if inv == nil {
 		return nil, fmt.Errorf("kubeinventory: get node %q inventory: %w", node, k8serrors.NewNotFound(nodeInventories, node))
 	}
-	if s.stale(publishedAt(inv), s.reference.Load()) {
+	if s.stale(publishedAt(inv), min(snap.newest, time.Now().UnixNano())) {
 		return nil, fmt.Errorf("kubeinventory: node %q inventory is stale: %w", node, k8serrors.NewNotFound(nodeInventories, node))
 	}
 	return inv, nil
@@ -130,13 +127,11 @@ func (s *Source) get(node string) (*scale.NodeInventory, error) {
 
 func (s *Source) current() (*snapshot, int64) {
 	snap := s.snap.Load()
-	ref := min(snap.newest, time.Now().UnixNano())
-	s.reference.Store(ref)
-	return snap, ref
+	return snap, min(snap.newest, time.Now().UnixNano())
 }
 
 func (s *Source) stale(stamp, ref int64) bool {
-	return stamp != 0 && ref-stamp > int64(s.staleAfter)
+	return ref-stamp > int64(s.staleAfter)
 }
 
 func (s *Source) put(obj any) {
@@ -144,8 +139,6 @@ func (s *Source) put(obj any) {
 	if !ok {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.byNode[inv.Name] = inv
 	s.publish()
 }
@@ -158,8 +151,6 @@ func (s *Source) drop(obj any) {
 	if !ok {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.byNode, inv.Name)
 	s.publish()
 }

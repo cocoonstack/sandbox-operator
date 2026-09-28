@@ -138,12 +138,8 @@ func (s *storeResolver) probe(ctx context.Context, sandboxID, claimID string, ad
 		return Owner{}, ErrSandboxNotFound
 	}
 	e := s.entry(found)
-	o, err := admit(e)
-	if err != nil {
-		return Owner{}, ErrSandboxNotFound
-	}
 	s.recent.put(sandboxID, e, time.Now())
-	return o, nil
+	return admit(e)
 }
 
 // readOwner reads the claim token on its node and caches the owner before admit judges the caller.
