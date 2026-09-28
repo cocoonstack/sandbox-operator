@@ -332,6 +332,24 @@ own start, and a publish that deletes an older holder removes a record its
 siblings still advertise; a create of one fails over to the next advertiser, and
 the template list lags until those nodes restart.
 
+## Proving envd on hardware
+
+`scripts/envd-e2e.sh` runs the guest half on a node: it starts a sandboxd with
+an e2b flavor pool whose warmup gates on envd's `/health`, then drives
+`test/envdsmoke` (`go build -tags envdsmoke ./test/envdsmoke`), which claims a
+sandbox through `pkg/sandboxd` and reaches the real envd through the node's
+guest-port relay: health, the version the compat API reports, `POST`/`GET
+/files`, a ConnectRPC unary, a `process.Process/Start` whose output comes back
+over the Connect server stream, the `user` account with passwordless sudo, and
+that envd serves HTTP/1.1 only. `CODE_INTERPRETER=1` also gates warmup on 49999
+and runs `1+1` the way the SDK's `runCode` does; `-hold` keeps the sandbox for
+an out-of-tree harness that puts an edge proxy in front of it.
+
+```bash
+K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-rt:24.04 bash scripts/envd-e2e.sh
+K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-ci:24.04 SIZE=medium CODE_INTERPRETER=1 bash scripts/envd-e2e.sh
+```
+
 ## Limits worth knowing
 
 - **Reaching `envd` (the in-sandbox data plane).** The SDK derives the sandbox
