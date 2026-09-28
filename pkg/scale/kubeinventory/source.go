@@ -32,7 +32,7 @@ type Options struct {
 // AddFlags registers the source flags on fs.
 func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&o.StaleAfter, "inventory-stale-after", cmp.Or(o.StaleAfter, defaultStaleAfter),
-		"Drop a node from this process's inventory reads once its NodeInventory publishedAt trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without publishedAt, from a vk-sandbox that predates the field, always stays.")
+		"Drop a node from this process's inventory reads once its NodeInventory publishedAt trails the newest publish in the fleet by more than this; set the same value on every binary that reads inventory. An inventory without publishedAt is stale.")
 }
 
 type snapshot struct {
