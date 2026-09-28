@@ -7,16 +7,22 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/projecteru2/core/log"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -30,6 +36,11 @@ const (
 
 	envdDefaultUser    = "user"
 	envdDefaultWorkdir = "/home/user"
+
+	envdProcessStart = "/process.Process/Start"
+	connectEndStream = 0x02
+	connectFrameMax  = 1 << 20
+	logLineMax       = 64 << 10
 )
 
 // envdMetrics is envd's GET /metrics reply: the guest's own view of its CPU, memory and root disk.
@@ -46,11 +57,111 @@ type envdMetrics struct {
 
 // envdInit is envd's POST /init body.
 type envdInit struct {
-	AccessToken    string            `json:"accessToken"`
+	AccessToken    string            `json:"accessToken,omitempty"`
 	EnvVars        map[string]string `json:"envVars,omitempty"`
 	DefaultUser    string            `json:"defaultUser,omitempty"`
 	DefaultWorkdir string            `json:"defaultWorkdir,omitempty"`
 	Timestamp      time.Time         `json:"timestamp"`
+}
+
+// envdStart is envd's process.Process/Start request.
+type envdStart struct {
+	Process envdProcess `json:"process"`
+	Stdin   bool        `json:"stdin"`
+}
+
+type envdProcess struct {
+	Cmd  string            `json:"cmd"`
+	Args []string          `json:"args"`
+	Envs map[string]string `json:"envs,omitempty"`
+	Cwd  string            `json:"cwd,omitempty"`
+}
+
+// envdEvent is one process.Process/Start stream message, or the stream's end frame.
+type envdEvent struct {
+	Event struct {
+		Start *struct{} `json:"start"`
+		Data  *struct {
+			Stdout []byte `json:"stdout"`
+			Stderr []byte `json:"stderr"`
+		} `json:"data"`
+		End *struct {
+			ExitCode int `json:"exitCode"`
+		} `json:"end"`
+	} `json:"event"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// envdGuest runs build commands through envd's process API inside a claimed sandbox.
+type envdGuest struct {
+	s *Server
+}
+
+func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, out func(string)) (int, error) {
+	stdout, stderr := &lineSplitter{out: out}, &lineSplitter{out: out}
+	code, _, err := g.s.envdProcess(ctx, a, cmd, func(o, e []byte) {
+		stdout.write(o)
+		stderr.write(e)
+	})
+	stdout.flush()
+	stderr.flush()
+	return code, err
+}
+
+// Start returns once envd reports cmd running; envd keeps a process after its stream closes.
+func (g envdGuest) Start(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command) error {
+	_, running, err := g.s.envdProcess(ctx, a, cmd, nil)
+	if err == nil && !running {
+		return errors.New("the start command exited at once")
+	}
+	return err
+}
+
+// Init sets the defaults with no access token, which envd takes as first-time setup.
+func (g envdGuest) Init(ctx context.Context, a scale.Assignment, defaults e2bbuild.Command) error {
+	return g.s.initEnvd(ctx, a.Node, a.SandboxName, envdInit{EnvVars: defaults.Envs, DefaultUser: defaults.User, DefaultWorkdir: defaults.Workdir})
+}
+
+// lineSplitter hands out complete lines, and a partial one once it outgrows logLineMax.
+type lineSplitter struct {
+	buf []byte
+	out func(string)
+}
+
+func (l *lineSplitter) write(p []byte) {
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		l.out(string(l.buf[:i]))
+		l.buf = l.buf[i+1:]
+	}
+	if len(l.buf) > logLineMax {
+		l.flush()
+	}
+}
+
+func (l *lineSplitter) flush() {
+	if len(l.buf) > 0 {
+		l.out(string(l.buf))
+		l.buf = nil
+	}
+}
+
+// connBody is a reply body that owns its connection; Close closes the connection and never drains a stream that has not ended.
+type connBody struct {
+	io.Reader
+	conn net.Conn
+	stop func() bool
+}
+
+func (b *connBody) Close() error {
+	b.stop()
+	return b.conn.Close()
 }
 
 // AccessToken derives a sandbox's envd access token from its claim token, so the edge verifies one without storing it.
@@ -107,6 +218,31 @@ func (s *Server) initEnvd(ctx context.Context, node, id string, req envdInit) er
 	return nil
 }
 
+// templateEnvs is what a built template's create sends as envVars: nil keeps the template's, and envd replaces them with any map, so a request's own come on top of the template's.
+func (s *Server) templateEnvs(ctx context.Context, a scale.Assignment, envs map[string]string) (map[string]string, error) {
+	if len(envs) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, initTimeout)
+	defer cancel()
+	status, body, err := s.envdCall(ctx, a.Node, a.SandboxName, http.MethodGet, "/envs", "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("envd envs of %s: %w", a.SandboxName, err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("envd envs of %s: envd answered %d", a.SandboxName, status)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("decode envd envs of %s: %w", a.SandboxName, err)
+	}
+	if out == nil {
+		out = make(map[string]string, len(envs))
+	}
+	maps.Copy(out, envs)
+	return out, nil
+}
+
 // handOver moves a forked child's envd onto token: the child starts with its parent's, which only the metadata hash overrides.
 func (s *Server) handOver(ctx context.Context, child scale.Assignment, token string) error {
 	sum := sha512.Sum512([]byte(token))
@@ -127,15 +263,62 @@ func (s *Server) releaseAll(ctx context.Context, claims []scale.Assignment) {
 	}
 }
 
+// envdProcess starts cmd through envd's process API in a's sandbox and passes its output to data until it ends with its exit code; with no data it returns running once envd starts it.
+func (s *Server) envdProcess(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, data func(stdout, stderr []byte)) (int, bool, error) {
+	msg, err := json.Marshal(envdStart{Process: envdProcess{Cmd: "/bin/bash", Args: []string{"-l", "-c", cmd.Line}, Envs: cmd.Envs, Cwd: cmd.Workdir}})
+	if err != nil {
+		return 0, false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+envdHostAlias+envdProcessStart, bytes.NewReader(connectFrame(0, msg)))
+	if err != nil {
+		return 0, false, err
+	}
+	req.Header.Set("Content-Type", "application/connect+json")
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cmd.User+":")))
+	resp, err := s.envdRoundTrip(ctx, a.Node, a.SandboxName, req)
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("envd process start in %s: envd answered %d", a.SandboxName, resp.StatusCode)
+	}
+	for {
+		var head [5]byte
+		if _, err := io.ReadFull(resp.Body, head[:]); err != nil {
+			return 0, false, fmt.Errorf("envd process stream in %s: %w", a.SandboxName, err)
+		}
+		n := binary.BigEndian.Uint32(head[1:])
+		if n > connectFrameMax {
+			return 0, false, fmt.Errorf("envd process stream in %s: a %d-byte frame", a.SandboxName, n)
+		}
+		payload := make([]byte, n)
+		if _, err := io.ReadFull(resp.Body, payload); err != nil {
+			return 0, false, fmt.Errorf("envd process stream in %s: %w", a.SandboxName, err)
+		}
+		var ev envdEvent
+		if err := json.Unmarshal(payload, &ev); err != nil {
+			return 0, false, fmt.Errorf("decode envd process stream in %s: %w", a.SandboxName, err)
+		}
+		if head[0]&connectEndStream != 0 {
+			if ev.Error != nil {
+				return 0, false, fmt.Errorf("envd process in %s: %s", a.SandboxName, ev.Error.Message)
+			}
+			return 0, false, fmt.Errorf("envd process stream in %s ended before the process", a.SandboxName)
+		}
+		switch e := ev.Event; {
+		case e.End != nil:
+			return e.End.ExitCode, false, nil
+		case e.Start != nil && data == nil:
+			return 0, true, nil
+		case e.Data != nil && data != nil:
+			data(e.Data.Stdout, e.Data.Stderr)
+		}
+	}
+}
+
 // envdCall sends one request to envd inside sandbox id over its node's passive relay and reads the bounded reply; token authenticates it to envd.
 func (s *Server) envdCall(ctx context.Context, node, id, method, path, token string, body []byte) (int, []byte, error) {
-	conn, err := s.store.DialGuestPort(ctx, node, id, envdPort)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = conn.Close() }()
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+envdHostAlias+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -146,10 +329,7 @@ func (s *Server) envdCall(ctx context.Context, node, id, method, path, token str
 	if token != "" {
 		req.Header.Set("X-Access-Token", token)
 	}
-	if err = req.Write(conn); err != nil {
-		return 0, nil, err
-	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	resp, err := s.envdRoundTrip(ctx, node, id, req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -159,4 +339,29 @@ func (s *Server) envdCall(ctx context.Context, node, id, method, path, token str
 		return 0, nil, err
 	}
 	return resp.StatusCode, reply, nil
+}
+
+// envdRoundTrip writes req to envd inside sandbox id over its node's passive relay; closing the reply's body closes the connection.
+func (s *Server) envdRoundTrip(ctx context.Context, node, id string, req *http.Request) (*http.Response, error) {
+	conn, err := s.store.DialGuestPort(ctx, node, id, envdPort)
+	if err != nil {
+		return nil, err
+	}
+	body := &connBody{conn: conn, stop: context.AfterFunc(ctx, func() { _ = conn.Close() })}
+	if err = req.Write(conn); err != nil {
+		_ = body.Close()
+		return nil, err
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		_ = body.Close()
+		return nil, err
+	}
+	body.Reader = resp.Body
+	resp.Body = body
+	return resp, nil
+}
+
+func connectFrame(flags byte, msg []byte) []byte {
+	return append(binary.BigEndian.AppendUint32([]byte{flags}, uint32(len(msg))), msg...)
 }

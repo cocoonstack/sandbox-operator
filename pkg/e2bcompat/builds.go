@@ -50,7 +50,7 @@ func (s *Server) requestBuild(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// startBuild runs a registered build from its image; a retry of a started build answers 202 again.
+// startBuild runs a registered build from its image and steps; a retry of a started build answers 202 again.
 func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 	var req TemplateBuildStartV2
 	if !decodeBody(w, r, &req) {
@@ -77,6 +77,9 @@ func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 		Pool:       pool,
 		Template:   scope + name,
 		TTLSeconds: int(s.opts.Builds.Timeout / time.Second),
+		Steps:      req.Steps,
+		StartCmd:   req.StartCmd,
+		ReadyCmd:   req.ReadyCmd,
 		Publish:    s.publishBuild(scope, name, pending.Tags),
 	})
 	switch {
@@ -186,21 +189,18 @@ func (s *Server) buildKey(r *http.Request, name, buildID string) string {
 	return s.namespace(r) + "/" + name + "/" + buildID
 }
 
-// unsupportedBuildOption refuses what a build from an image alone cannot honor.
+// unsupportedBuildOption refuses what a build cannot honor, a malformed step included.
 func unsupportedBuildOption(req TemplateBuildStartV2) (string, bool) {
 	switch {
 	case req.FromTemplate != "":
 		return "fromTemplate is not supported yet; build from an image", true
 	case len(req.FromImageRegistry) > 0 && string(req.FromImageRegistry) != "null":
 		return "fromImageRegistry is not supported; a pool pulls its own image", true
-	case len(req.Steps) > 0:
-		return "build steps are not supported yet; build from an image alone", true
-	case req.StartCmd != "" || req.ReadyCmd != "":
-		return "startCmd and readyCmd are not supported yet", true
 	case req.FromImage == "":
 		return "fromImage is required", true
 	}
-	return "", false
+	msg := e2bbuild.Invalid(req.Steps)
+	return msg, msg != ""
 }
 
 // sizeFor maps a build's cpuCount and memoryMB onto the size class a pod's requests would get, empty when neither is set.
@@ -222,12 +222,15 @@ func logEntryOf(l e2bbuild.LogEntry) BuildLogEntry {
 	return BuildLogEntry{Timestamp: l.Time.UTC().Format(time.RFC3339Nano), Message: l.Message, Level: l.Level, Step: sdkStep(l.Phase)}
 }
 
-// sdkStep names a build phase as the SDK maps steps onto its stack traces: base for the image, finalize for the rest.
+// sdkStep names a build phase as the SDK maps steps onto its stack traces: base for the image, a step by its number, finalize for the rest.
 func sdkStep(phase string) string {
-	if phase == e2bbuild.PhaseClaim {
+	switch phase {
+	case e2bbuild.PhaseClaim:
 		return "base"
+	case e2bbuild.PhaseFinalize, e2bbuild.PhasePromote, e2bbuild.PhasePublish:
+		return "finalize"
 	}
-	return "finalize"
+	return phase
 }
 
 func queryInt(v string) (int, error) {

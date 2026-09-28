@@ -2,9 +2,12 @@ package e2bcompat
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +22,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -109,6 +113,26 @@ func TestForkHandsEachChildItsOwnToken(t *testing.T) {
 	}
 }
 
+func TestAStartedCommandReturnsWhileItRuns(t *testing.T) {
+	g := envdGuest{s: &Server{store: runningEnvd{}}}
+	done := make(chan error, 1)
+	go func() {
+		done <- g.Start(t.Context(), scale.Assignment{SandboxName: "sb_1"}, e2bbuild.Command{Line: "serve", User: "user"})
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start waited for the process to end")
+	}
+}
+
+func processReply(stdout string, exit int) string {
+	out := base64.StdEncoding.EncodeToString([]byte(stdout))
+	return string(slices.Concat(connectFrame(0, []byte(`{"event":{"start":{"pid":7}}}`)), connectFrame(0, []byte(`{"event":{"data":{"stdout":"`+out+`"}}}`)),
+		connectFrame(0, []byte(`{"event":{"end":{"exitCode":`+strconv.Itoa(exit)+`,"exited":true}}}`)), connectFrame(connectEndStream, []byte(`{}`))))
+}
+
 func envdPipe(status int, body string) net.Conn {
 	return fakeEnvd(func(*http.Request, string) (int, string) { return status, body })
 }
@@ -127,4 +151,24 @@ func fakeEnvd(serve func(r *http.Request, body string) (int, string)) net.Conn {
 		_, _ = envd.Write([]byte("HTTP/1.1 " + strconv.Itoa(status) + " " + http.StatusText(status) + "\r\nContent-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body))
 	}()
 	return conn
+}
+
+// runningEnvd answers a process start with its start event and holds the stream open, as envd does while the process runs.
+type runningEnvd struct {
+	scale.SandboxStore
+}
+
+func (runningEnvd) DialGuestPort(context.Context, string, string, uint16) (net.Conn, error) {
+	conn, envd := net.Pipe()
+	go func() {
+		r, err := http.ReadRequest(bufio.NewReader(envd))
+		if err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		start := connectFrame(0, []byte(`{"event":{"start":{"pid":7}}}`))
+		_, _ = fmt.Fprintf(envd, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n", len(start), start)
+		_, _ = io.Copy(io.Discard, envd)
+	}()
+	return conn, nil
 }

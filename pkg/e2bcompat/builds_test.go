@@ -78,14 +78,47 @@ func TestABuildThatCannotClaimFailsAtTheBaseStep(t *testing.T) {
 	assert.Equal(t, scale.SizeClassSmall, store.claimPool.Size, "no cpuCount or memoryMB keeps the image's small")
 }
 
-func TestABuildRefusesWhatAnImageAloneCannotHonor(t *testing.T) {
+func TestABuildRunsItsStepsThroughEnvdAndLeavesItsDefaultsInTheSandbox(t *testing.T) {
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, processExits: map[string]int{"false": 1}}
+	h := newTestServer(t, store, withBuilds(), withBuildFleet(store))
+
+	id := requestBuild(t, h, "app")
+	body := `{"fromImage":"img","steps":[{"type":"ENV","args":["A","1"]},{"type":"RUN","args":["make"]}],"startCmd":"serve","readyCmd":"check"}`
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, body, testKey).Code)
+	info := waitBuild(t, h, id)
+	require.Equal(t, e2bbuild.StatusReady, info.Status, info)
+	require.Len(t, store.envdCalls, 5)
+	init, ok := strings.CutPrefix(store.envdCalls[2], "sb_1 POST /init ")
+	require.True(t, ok, store.envdCalls[2])
+	assert.Equal(t, []string{`sb_1 RUN root  printf "%s" "1"`, "sb_1 RUN user  make"}, store.envdCalls[:2])
+	assert.Equal(t, []string{"sb_1 RUN user  serve", "sb_1 RUN user  check"}, store.envdCalls[3:])
+	assert.NotContains(t, init, "accessToken", "the build leaves envd without a token, as a warm sandbox is")
+	var defaults envdInit
+	require.NoError(t, json.Unmarshal([]byte(init), &defaults))
+	assert.Equal(t, [2]any{"user", map[string]string{"A": "1"}}, [2]any{defaults.DefaultUser, defaults.EnvVars})
+	assert.Contains(t, info.LogEntries, BuildLogEntry{Timestamp: info.LogEntries[2].Timestamp, Message: "ok", Level: "info", Step: "2"})
+	assert.Equal(t, []string{"n sb_1 e2b/sandboxes/app"}, store.promoted)
+
+	id = requestBuild(t, h, "app")
+	body = `{"fromImage":"img","steps":[{"type":"ENV","args":["A","1"]},{"type":"WORKDIR","args":["/w"]},{"type":"RUN","args":["false"]}]}`
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, body, testKey).Code)
+	info = waitBuild(t, h, id)
+	require.Equal(t, e2bbuild.StatusError, info.Status)
+	assert.Equal(t, [2]string{"3", `step 3 (RUN) failed: "false" exited with code 1`}, [2]string{info.Reason.Step, info.Reason.Message})
+	assert.Equal(t, "3", info.Reason.LogEntries[0].Step)
+	assert.Len(t, store.promoted, 1, "a failed step never promotes")
+}
+
+func TestABuildRefusesWhatItCannotHonor(t *testing.T) {
 	h := newTestServer(t, &fakeStore{}, withBuilds())
 	id := requestBuild(t, h, "app")
 	for _, body := range []string{
-		`{"fromImage":"img","steps":[{"type":"RUN","args":["true"]}]}`,
+		`{"fromImage":"img","steps":[{"type":"COPY","args":["a","/a"],"filesHash":"h"}]}`,
+		`{"fromImage":"img","steps":[{"type":"ENV","args":["A"]}]}`,
+		`{"fromImage":"img","steps":[{"type":"RUN","args":[]}]}`,
+		`{"fromImage":"img","steps":[{"type":"ARG","args":["A","1"]}]}`,
 		`{"fromTemplate":"other"}`,
 		`{"fromImage":"img","fromImageRegistry":{"type":"registry","username":"u","password":"p"}}`,
-		`{"fromImage":"img","startCmd":"serve"}`,
 		`{}`,
 	} {
 		assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, body, testKey).Code, body)

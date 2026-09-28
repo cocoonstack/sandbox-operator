@@ -3,6 +3,7 @@ package e2bbuild
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +17,7 @@ import (
 
 func TestABuildClaimsPromotesPublishesAndReleases(t *testing.T) {
 	store := &fakeStore{}
-	e := New(store, 2, time.Minute, 100)
+	e := New(store, store, 2, time.Minute, 100)
 	var published string
 	e.Register("ns/app/b1", Request{Size: "medium", Tags: []string{"v1"}})
 	req, ok := e.Request("ns/app/b1")
@@ -33,7 +34,7 @@ func TestABuildClaimsPromotesPublishesAndReleases(t *testing.T) {
 	info := waitDone(t, e, "ns/app/b1")
 	assert.Equal(t, StatusReady, info.Status)
 	assert.Equal(t, "node-a e2b/ns/app sha256:sb_1", published)
-	assert.Equal(t, []string{"claim ns/build-1 img medium", "promote node-a sb_1 e2b/ns/app", "release node-a sb_1"}, store.calls())
+	assert.Equal(t, []string{"claim ns/build-1 img medium", "init user  map[]", "promote node-a sb_1 e2b/ns/app", "release node-a sb_1"}, store.calls())
 	assert.Len(t, info.Logs, 3)
 	assert.Contains(t, info.Logs[2].Message, "content digest sha256:sb_1")
 	assert.Equal(t, PhasePromote, info.Logs[2].Phase)
@@ -47,11 +48,11 @@ func TestAFailedBuildNamesItsPhase(t *testing.T) {
 		calls   []string
 	}{
 		"claim":   {&fakeStore{claimErr: errors.New("node n7 unreachable")}, nil, PhaseClaim, []string{"claim ns/build-1 img small"}},
-		"promote": {&fakeStore{promoteErr: errors.New("409 egress lane")}, nil, PhasePromote, []string{"claim ns/build-1 img small", "promote node-a sb_1 e2b/ns/app", "release node-a sb_1"}},
-		"publish": {&fakeStore{}, errors.New("node-b: connection refused"), PhasePublish, []string{"claim ns/build-1 img small", "promote node-a sb_1 e2b/ns/app", "release node-a sb_1"}},
+		"promote": {&fakeStore{promoteErr: errors.New("409 egress lane")}, nil, PhasePromote, []string{"claim ns/build-1 img small", "init user  map[]", "promote node-a sb_1 e2b/ns/app", "release node-a sb_1"}},
+		"publish": {&fakeStore{}, errors.New("node-b: connection refused"), PhasePublish, []string{"claim ns/build-1 img small", "init user  map[]", "promote node-a sb_1 e2b/ns/app", "release node-a sb_1"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e := New(tc.store, 1, time.Minute, 100)
+			e := New(tc.store, tc.store, 1, time.Minute, 100)
 			e.Register("b", Request{})
 			require.NoError(t, e.Start(t.Context(), "b", Spec{
 				Namespace: "ns", ClaimName: "build-1", Pool: scale.PoolKey{Template: "img", Net: "none", Size: "small"}, Template: "e2b/ns/app",
@@ -67,9 +68,71 @@ func TestAFailedBuildNamesItsPhase(t *testing.T) {
 	}
 }
 
+func TestStepsCarryTheirUserWorkdirAndEnvIntoLaterCommandsAndTheDefaults(t *testing.T) {
+	store := &fakeStore{exits: map[string][]int{"check": {1, 0}}}
+	e := New(store, store, 1, time.Minute, 100)
+	e.Register("b", Request{})
+	require.NoError(t, e.Start(t.Context(), "b", Spec{
+		Namespace: "ns", ClaimName: "c", Pool: scale.PoolKey{Template: "img", Size: "small"}, Template: "e2b/ns/app",
+		Steps: []Step{
+			{Type: stepEnv, Args: []string{"A", "$HOME/bin"}},
+			{Type: stepUser, Args: []string{"bob"}},
+			{Type: stepWorkdir, Args: []string{"app"}},
+			{Type: stepRun, Args: []string{"make"}},
+			{Type: stepRun, Args: []string{"apt-get install -y vim", "root"}},
+		},
+		StartCmd: "serve", ReadyCmd: "check",
+	}))
+	info := waitDone(t, e, "b")
+	require.Equal(t, StatusReady, info.Status, info.Failure)
+	assert.Equal(t, []string{
+		"claim ns/c img small",
+		`run root  map[] printf "%s" "$HOME/bin"`,
+		"run root  map[A:$HOME/bin] id -u 'bob' >/dev/null 2>&1 || useradd --create-home --shell /bin/bash 'bob'",
+		`run root  map[A:$HOME/bin] t='/app'; [ -d "$t" ] && exit 0; n=$t; while [ ! -d "$(dirname "$n")" ]; do n=$(dirname "$n"); done; mkdir -p "$t" && chown -R 'bob': "$n"`,
+		"run bob /app map[A:$HOME/bin] make",
+		"run root /app map[A:$HOME/bin] apt-get install -y vim",
+		"init bob /app map[A:$HOME/bin]",
+		"start bob /app serve",
+		"run bob /app map[A:$HOME/bin] check",
+		"run bob /app map[A:$HOME/bin] check",
+		"promote node-a sb_1 e2b/ns/app",
+		"release node-a sb_1",
+	}, store.calls())
+	assert.Equal(t, [2]string{"4", "out of make"}, [2]string{info.Logs[4].Phase, info.Logs[4].Message})
+}
+
+func TestAStepThatExitsNonZeroFailsTheBuildAtItsIndex(t *testing.T) {
+	store := &fakeStore{exits: map[string][]int{"false": {2}}}
+	e := New(store, store, 1, time.Minute, 100)
+	e.Register("b", Request{})
+	require.NoError(t, e.Start(t.Context(), "b", Spec{
+		Namespace: "ns", ClaimName: "c", Pool: scale.PoolKey{Template: "img"}, Template: "e2b/ns/app",
+		Steps: []Step{{Type: stepEnv, Args: []string{"A", "1"}}, {Type: stepRun, Args: []string{"true"}}, {Type: stepRun, Args: []string{"false"}}, {Type: stepRun, Args: []string{"never"}}},
+	}))
+	info := waitDone(t, e, "b")
+	assert.Equal(t, [3]string{StatusError, "3", `step 3 (RUN) failed: "false" exited with code 2`}, [3]string{info.Status, info.FailedPhase, info.Failure})
+	tail := info.Logs[len(info.Logs)-2:]
+	assert.Equal(t, [4]string{"3", "out of false", "3", "error"}, [4]string{tail[0].Phase, tail[0].Message, tail[1].Phase, tail[1].Level})
+	calls := store.calls()
+	assert.Equal(t, "release node-a sb_1", calls[len(calls)-1])
+	assert.NotContains(t, strings.Join(calls, "\n"), "never")
+	assert.NotContains(t, strings.Join(calls, "\n"), "promote")
+}
+
+func TestAReadyCommandThatNeverPassesFailsAtFinalize(t *testing.T) {
+	store := &fakeStore{exits: map[string][]int{"check": {1}}}
+	e := New(store, store, 1, 50*time.Millisecond, 100)
+	e.Register("b", Request{})
+	require.NoError(t, e.Start(t.Context(), "b", Spec{Pool: scale.PoolKey{Template: "img"}, Template: "t", StartCmd: "serve", ReadyCmd: "check"}))
+	info := waitDone(t, e, "b")
+	assert.Equal(t, [3]string{StatusError, PhaseFinalize, `the ready command "check" did not exit 0 before the build timed out`}, [3]string{info.Status, info.FailedPhase, info.Failure})
+	assert.NotContains(t, strings.Join(store.calls(), "\n"), "promote")
+}
+
 func TestStartIsBoundedIdempotentAndKnowsItsBuilds(t *testing.T) {
 	store := &fakeStore{hold: make(chan struct{})}
-	e := New(store, 1, time.Minute, 100)
+	e := New(store, store, 1, time.Minute, 100)
 	spec := Spec{Namespace: "ns", ClaimName: "c", Pool: scale.PoolKey{Template: "img"}, Template: "e2b/ns/app"}
 	e.Register("first", Request{})
 	e.Register("second", Request{})
@@ -88,7 +151,8 @@ func TestStartIsBoundedIdempotentAndKnowsItsBuilds(t *testing.T) {
 }
 
 func TestTheLogIsCappedAndFinishedBuildsAgeOut(t *testing.T) {
-	e := New(&fakeStore{}, 1, time.Minute, 1)
+	store := &fakeStore{}
+	e := New(store, store, 1, time.Minute, 1)
 	e.Register("b", Request{})
 	require.NoError(t, e.Start(t.Context(), "b", Spec{Pool: scale.PoolKey{Template: "img"}, Template: "t"}))
 	assert.Len(t, waitDone(t, e, "b").Logs, 1)
@@ -123,6 +187,7 @@ type fakeStore struct {
 	claimErr   error
 	promoteErr error
 	hold       chan struct{}
+	exits      map[string][]int
 
 	mu  sync.Mutex
 	log []string
@@ -146,6 +211,35 @@ func (f *fakeStore) Promote(_ context.Context, node, id, template string) (scale
 
 func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	f.record("release " + node + " " + id)
+	return nil
+}
+
+func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, out func(string)) (int, error) {
+	f.record(fmt.Sprintf("run %s %s %v %s", cmd.User, cmd.Workdir, cmd.Envs, cmd.Line))
+	if v, ok := strings.CutPrefix(cmd.Line, `printf "%s" "`); ok {
+		out(strings.TrimSuffix(v, `"`))
+		return 0, nil
+	}
+	out("out of " + cmd.Line)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	codes := f.exits[cmd.Line]
+	if len(codes) == 0 {
+		return 0, nil
+	}
+	if len(codes) > 1 {
+		f.exits[cmd.Line] = codes[1:]
+	}
+	return codes[0], nil
+}
+
+func (f *fakeStore) Start(_ context.Context, _ scale.Assignment, cmd Command) error {
+	f.record("start " + cmd.User + " " + cmd.Workdir + " " + cmd.Line)
+	return nil
+}
+
+func (f *fakeStore) Init(_ context.Context, _ scale.Assignment, defaults Command) error {
+	f.record(fmt.Sprintf("init %s %s %v", defaults.User, defaults.Workdir, defaults.Envs))
 	return nil
 }
 

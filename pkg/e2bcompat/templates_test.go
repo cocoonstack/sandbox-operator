@@ -151,6 +151,31 @@ func TestACreateNamingABuiltTemplateClaimsItsKey(t *testing.T) {
 	assert.Equal(t, 1, store.claimCalls, "a drained alias pool never falls through to a built template of the same name")
 }
 
+func TestABuiltTemplateCreateKeepsTheTemplateDefaultsAndLayersTheRequestEnvs(t *testing.T) {
+	store := &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity, assign: scale.Assignment{SandboxName: "sb_1", Node: "node-a", Token: "tok"}}
+	h := newTestServer(t, store, withTemplateFleet(store))
+	w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app"}`, testKey)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	require.Len(t, store.envdCalls, 1, "no envVars asked for means no envd read")
+	init, ok := strings.CutPrefix(store.envdCalls[0], "sb_1 POST /init ")
+	require.True(t, ok, store.envdCalls[0])
+	assert.Contains(t, init, `"accessToken":"`+AccessToken([]byte(testEnvdSecret), "tok")+`"`)
+	assert.NotContains(t, init, "envVars", "a nil map keeps the template's environment")
+	assert.NotContains(t, init, "default", "envd keeps the template's user and workdir")
+
+	store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity, assign: scale.Assignment{SandboxName: "sb_1", Node: "node-a"}, guestEnvs: map[string]string{"A": "1", "B": "old"}}
+	h = newTestServer(t, store, withTemplateFleet(store))
+	w = do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app","envVars":{"B":"2"}}`, testKey)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	require.Len(t, store.envdCalls, 2)
+	assert.Equal(t, "sb_1 GET /envs ", store.envdCalls[0])
+	init, _ = strings.CutPrefix(store.envdCalls[1], "sb_1 POST /init ")
+	var got envdInit
+	require.NoError(t, json.Unmarshal([]byte(init), &got))
+	assert.Equal(t, map[string]string{"A": "1", "B": "2"}, got.EnvVars, "envd replaces its environment, so the request's go on top of the template's")
+	assert.Empty(t, got.DefaultUser+got.DefaultWorkdir)
+}
+
 func TestTheAliasLookupFindsABuiltTemplateAfterTheTable(t *testing.T) {
 	store := &fakeStore{}
 	h := newTestServer(t, store, withTemplateFleet(store), withAliases("app reg/rt:24.04"))
