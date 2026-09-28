@@ -221,7 +221,7 @@ func stepConnectH1(ctx context.Context, rt relay) error {
 	headers := http.Header{
 		contentType:                []string{"application/json"},
 		"Connect-Protocol-Version": []string{"1"},
-		"X-User":                   []string{"root"},
+		"Authorization":            basicUser("root"),
 	}
 	resp, err := rt.Do(ctx, envdPort, http.MethodPost, "/filesystem.Filesystem/Stat", headers, strings.NewReader(`{"path":"/etc/envd-version"}`))
 	if err != nil {
@@ -315,7 +315,7 @@ func startProcess(ctx context.Context, rt relay, user, cmd string, args ...strin
 	headers := http.Header{
 		contentType:                []string{"application/connect+json"},
 		"Connect-Protocol-Version": []string{"1"},
-		"X-User":                   []string{user},
+		"Authorization":            basicUser(user),
 	}
 	req, _ := json.Marshal(map[string]any{"process": map[string]any{"cmd": cmd, "args": args}})
 	resp, err := rt.Do(ctx, envdPort, http.MethodPost, "/process.Process/Start", headers, strings.NewReader(envelope(string(req))))
@@ -328,6 +328,10 @@ func startProcess(ctx context.Context, rt relay, user, cmd string, args ...strin
 		return nil, fmt.Errorf("status %s: %s", resp.Status, body)
 	}
 	return readEnvelopes(resp.Body)
+}
+
+func basicUser(user string) []string {
+	return []string{"Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"))}
 }
 
 func stdoutOf(events []string) string {
