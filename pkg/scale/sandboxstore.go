@@ -39,6 +39,7 @@ type ClaimOptions struct {
 	TTLSeconds int
 	Metadata   map[string]string
 	OnExpire   sandboxd.ExpireAction
+	NoEgress   bool
 }
 
 // Assignment is a successful claim: the sandbox, the node serving it and its address.
@@ -50,6 +51,8 @@ type Assignment struct {
 	Token string
 	// Deadline is the node-granted lease expiry, which overrides the requested TTL, or zero when unreported.
 	Deadline time.Time
+	// NetRoute is the node's report of how the guest reaches the network.
+	NetRoute string
 }
 
 // SandboxStore is the L3 storage contract behind sandboxes.agents.x-k8s.io, with no per-sandbox etcd object.

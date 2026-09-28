@@ -103,6 +103,23 @@ func TestStepsCarryTheirUserWorkdirAndEnvIntoLaterCommandsAndTheDefaults(t *test
 	assert.Equal(t, [2]string{"4", "out of make"}, [2]string{info.Logs[4].Phase, info.Logs[4].Message})
 }
 
+func TestARelayedBuildSeedsItsStepsWithTheProxyEnvironment(t *testing.T) {
+	for route, want := range map[string]string{"relay": "map[A:1 http_proxy:p]", "none": "map[A:1]"} {
+		store := &fakeStore{route: route}
+		e := New(store, store, 1, time.Minute, 100)
+		e.Register("b", Request{})
+		require.NoError(t, e.Start(t.Context(), "b", Spec{
+			Pool: scale.PoolKey{Template: "img"}, Template: "t",
+			Steps:     []Step{{Type: stepEnv, Args: []string{"A", "1"}}, {Type: stepRun, Args: []string{"make"}}},
+			RelayEnvs: map[string]string{"http_proxy": "p"},
+		}))
+		require.Equal(t, StatusReady, waitDone(t, e, "b").Status)
+		calls := store.calls()
+		assert.Contains(t, calls, "run user  "+want+" make", route)
+		assert.Contains(t, calls, "init user  "+want, route)
+	}
+}
+
 func TestAStepThatExitsNonZeroFailsTheBuildAtItsIndex(t *testing.T) {
 	store := &fakeStore{exits: map[string][]int{"false": {2}}}
 	e := New(store, store, 1, time.Minute, 100)
@@ -238,6 +255,7 @@ type fakeStore struct {
 	promoteErr error
 	hold       chan struct{}
 	exits      map[string][]int
+	route      string
 
 	mu  sync.Mutex
 	log []string
@@ -251,7 +269,7 @@ func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey
 	if f.claimErr != nil {
 		return scale.Assignment{}, f.claimErr
 	}
-	return scale.Assignment{SandboxName: "sb_1", Node: "node-a"}, nil
+	return scale.Assignment{SandboxName: "sb_1", Node: "node-a", NetRoute: f.route}, nil
 }
 
 func (f *fakeStore) Promote(_ context.Context, node, id, template string) (scale.PoolKey, string, error) {

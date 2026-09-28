@@ -78,6 +78,30 @@ func TestCreateInitsEnvdWithTheDerivedToken(t *testing.T) {
 	assert.Empty(t, store.metadataDocs, "create relies on envd's first-time setup, not a metadata hash")
 }
 
+func TestARelayedCreateHandsEnvdTheProxyUnderTheRequestEnvs(t *testing.T) {
+	for route, want := range map[string]map[string]string{
+		"relay":  {"http_proxy": "http://127.0.0.1:3128", "https_proxy": "http://127.0.0.1:3128", "no_proxy": "mine", "A": "1"},
+		"none":   {"no_proxy": "mine", "A": "1"},
+		"direct": {"no_proxy": "mine", "A": "1"},
+	} {
+		store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_new", Node: "node-a", Token: "claim-tok", NetRoute: route}}
+		h := newTestServer(t, store)
+		w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"img","envVars":{"A":"1","no_proxy":"mine"}}`, testKey)
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		require.Len(t, store.envdCalls, 1)
+		_, body, _ := strings.Cut(store.envdCalls[0], " POST /init ")
+		var init envdInit
+		require.NoError(t, json.Unmarshal([]byte(body), &init))
+		assert.Equal(t, want, init.EnvVars, route)
+		assert.False(t, store.claimOpts.NoEgress, "an unset allow_internet_access keeps the pool's policy")
+	}
+
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_new", Node: "node-a"}}
+	w := do(t, newTestServer(t, store), http.MethodPost, "/sandboxes", `{"templateID":"img","allow_internet_access":false}`, testKey)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	assert.Equal(t, [2]any{"none", true}, [2]any{store.claimPool.Net, store.claimOpts.NoEgress}, "false asks for no egress on a pool image too")
+}
+
 func TestCreateReleasesTheClaimWhenEnvdInitFails(t *testing.T) {
 	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_new", Node: "node-a", Token: "claim-tok"}, initStatus: http.StatusUnauthorized}
 	h := newTestServer(t, store)

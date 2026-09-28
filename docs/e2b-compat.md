@@ -192,7 +192,10 @@ there. Every advertiser exhausted answers `503` as a drained pool does. A clone
 from a template is a cold clone — the export is fetched and the VM restored —
 where a pool claim takes a warm VM. The lookup runs only after the pool claim
 finds nothing, so a create naming a pool image pays nothing for it. A built
-template runs on the `none` lane; asking it for internet access is `400`. The
+template runs on the `none` lane and reaches the network as its source pool
+does (see [Network for builds](#network-for-builds)). `allow_internet_access:
+false` claims any create, a built template's or a pool image's, with no egress
+at all. The
 inventory lags a template by one publish tick (vk-sandbox's
 `--publish-interval`, the mesh source's `--inventory-poll`), so a create right
 after a build can answer `404` until the next publish. Needs sandboxd built
@@ -231,8 +234,50 @@ envd holding those defaults: a create from a built template sends envd only its
 access token, and the request's `envVars` on top of the template's environment,
 which it reads from envd first because envd replaces the map it is given. A
 create without `envVars` makes no extra call, and a create from a pool image is
-unchanged. The build sandbox has no network, since a promote captures only the
-`none` lane: a step that downloads (`pip install`, `apt-get install`) fails.
+unchanged.
+
+### Network for builds
+
+A build sandbox and every sandbox made from its template are on the `none`
+lane, so they reach the network only through sandboxd's guarded egress proxy,
+under the egress policy of the pool the build claimed from (sandboxd
+cocoonstack/sandbox@dcffdec or later: a promoted template's clone takes its
+source pool's policy, and the claim reports `net_route`). When a claim reports
+`relay`, this surface points envd's processes at the proxy — envd builds a
+child's environment only from its own defaults and the request, never from its
+unit — by setting `http_proxy`, `https_proxy` (`http://127.0.0.1:3128`) and
+`no_proxy` (`localhost,127.0.0.1,::1,169.254.169.254`), as silkd's unit does:
+a build starts its steps with them, so `RUN pip install` goes through the proxy
+and the template keeps them as defaults (an `ENV` step can override them), and a
+create from a pool image hands them to envd under the request's own
+`envVars`. A `direct` or `none` route sets nothing. So the pools of the build
+images need an egress policy that allow-lists what builds download, for
+example the package indexes:
+
+```jsonc
+{
+  "pools": [
+    { "template": "ghcr.io/cocoonstack/sandbox/e2b-rt:24.04", "net": "none", "size": "small", "warm": 2,
+      "egress": { "allow": [
+        { "host": "pypi.org" }, { "host": "files.pythonhosted.org" },
+        { "host": "registry.npmjs.org" },
+        { "host": "archive.ubuntu.com" }, { "host": "security.ubuntu.com" },
+        { "host": "deb.nodesource.com" },
+        { "host": "github.com" }, { "host": "objects.githubusercontent.com" }
+      ] } },
+    { "template": "ghcr.io/cocoonstack/sandbox/e2b-ci:24.04", "net": "none", "size": "medium", "warm": 1,
+      "egress": { "allow": [ { "host": "pypi.org" }, { "host": "files.pythonhosted.org" } ] } }
+  ]
+}
+```
+
+A template keeps the variables its build had, so one built before its pool
+gained a policy is rebuilt to reach the network. A step that uses `sudo` drops
+them (sudo resets the environment), so package installs run as `root`, as the
+SDK's `aptInstall` does. The policy is the whole grant: a template built from a
+pool without one has no egress, and neither have its clones, even a tenant's
+with its own policy
+(sandboxd's [egress rules](https://github.com/cocoonstack/sandbox/blob/main/docs/egress.md)).
 
 ### Uploads
 

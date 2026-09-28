@@ -21,6 +21,7 @@ import (
 
 	"github.com/projecteru2/core/log"
 
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -98,7 +99,7 @@ func (s Step) problem(canCopy bool) string {
 	return ""
 }
 
-// Spec is how a registered build runs; StartCmd runs in the background and ReadyCmd until it exits 0, both before the promote; Publish runs after the promote and before the build reads ready.
+// Spec is how a registered build runs; RelayEnvs seed the steps when the claim relays through the node's proxy, StartCmd runs in the background and ReadyCmd until it exits 0, both before the promote; Publish runs after the promote and before the build reads ready.
 type Spec struct {
 	Namespace  string
 	ClaimName  string
@@ -108,6 +109,7 @@ type Spec struct {
 	Steps      []Step
 	StartCmd   string
 	ReadyCmd   string
+	RelayEnvs  map[string]string
 	Archive    func(ctx context.Context, hash string) (io.ReadCloser, error)
 	Publish    func(ctx context.Context, node string, key scale.PoolKey, digest string) error
 }
@@ -258,6 +260,9 @@ func (e *Executor) run(ctx context.Context, id string, spec Spec) {
 
 func (e *Executor) prepare(ctx context.Context, id string, a scale.Assignment, spec Spec) (string, string, error) {
 	state := Command{User: defaultUser, Envs: map[string]string{}}
+	if a.NetRoute == sandboxd.NetRouteRelay {
+		maps.Copy(state.Envs, spec.RelayEnvs)
+	}
 	for i, step := range spec.Steps {
 		phase := strconv.Itoa(i + 1)
 		next, msg, err := e.step(ctx, id, phase, a, spec, state, step)
