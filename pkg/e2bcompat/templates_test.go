@@ -191,7 +191,19 @@ func TestTheAliasLookupFindsABuiltTemplateAfterTheTable(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodGet, "/templates/aliases/other", "", testKey).Code)
 }
 
-func withTemplateFleet(store *fakeStore) func(*Options) {
+func TestAFullE2bKeyNeverReachesAnotherNamespacesTemplate(t *testing.T) {
+	store := &fakeStore{}
+	h := newTestServer(t, store, withBuilds(), withTemplateFleet(store))
+	w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"e2b/others/app"}`, testKey)
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	assert.Equal(t, 0, store.claimCalls, "a full key is refused before any claim")
+
+	id := requestBuild(t, h, "app")
+	w = do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"e2b/others/app"}`, testKey)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func withTemplateFleet(store *fakeStore) serverOption {
 	created := &metav1.Time{Time: time.Date(2026, 9, 28, 1, 2, 3, 0, time.UTC)}
 	built := func(name, digest string) scale.PromotedTemplate {
 		return scale.PromotedTemplate{Template: name, Net: "none", Size: "medium", ContentDigest: digest, CreatedAt: created, CPUCount: 2, MemoryBytes: 1 << 30}
@@ -230,16 +242,4 @@ func tagNames(tags []TemplateTag) []string {
 		out = append(out, t.Tag)
 	}
 	return out
-}
-
-func TestAFullE2bKeyNeverReachesAnotherNamespacesTemplate(t *testing.T) {
-	store := &fakeStore{}
-	h := newTestServer(t, store, withBuilds(), withTemplateFleet(store))
-	w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"e2b/others/app"}`, testKey)
-	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
-	assert.Equal(t, 0, store.claimCalls, "a full key is refused before any claim")
-
-	id := requestBuild(t, h, "app")
-	w = do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"e2b/others/app"}`, testKey)
-	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }

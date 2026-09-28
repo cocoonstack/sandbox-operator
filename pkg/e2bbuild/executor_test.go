@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -283,7 +284,7 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, stdout, stderr func(string)) (int, error) {
+func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, stdout, stderr LineFunc) (int, error) {
 	f.record(fmt.Sprintf("run %s %s %v %s", cmd.User, cmd.Workdir, cmd.Envs, cmd.Line))
 	if v, ok := strings.CutPrefix(cmd.Line, `printf "%s" "`); ok {
 		stderr("bash: warning: setlocale: LC_ALL: cannot change locale")
@@ -328,5 +329,5 @@ func (f *fakeStore) record(line string) {
 func (f *fakeStore) calls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.log...)
+	return slices.Clone(f.log)
 }

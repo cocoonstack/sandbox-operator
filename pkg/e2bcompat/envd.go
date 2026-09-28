@@ -108,7 +108,7 @@ type envdGuest struct {
 	s *Server
 }
 
-func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, stdout, stderr func(string)) (int, error) {
+func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, stdout, stderr e2bbuild.LineFunc) (int, error) {
 	outLines, errLines := &lineSplitter{out: stdout}, &lineSplitter{out: stderr}
 	code, _, err := g.s.envdProcess(ctx, a, cmd, func(o, e []byte) {
 		outLines.write(o)
@@ -153,7 +153,7 @@ func (g envdGuest) Write(ctx context.Context, a scale.Assignment, path string, r
 // lineSplitter hands out complete lines, and a partial one once it outgrows logLineMax.
 type lineSplitter struct {
 	buf []byte
-	out func(string)
+	out e2bbuild.LineFunc
 }
 
 func (l *lineSplitter) write(p []byte) {

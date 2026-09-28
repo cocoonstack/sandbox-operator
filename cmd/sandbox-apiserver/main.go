@@ -44,6 +44,8 @@ const (
 	watchDrainGrace    = 2 * time.Second
 )
 
+type managerBuilder func() (manager.Runnable, error)
+
 // options has no etcd option because this server stores nothing.
 type options struct {
 	SecureServing  *genericoptions.SecureServingOptionsWithLoopback
@@ -221,7 +223,7 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	return nil
 }
 
-func runRestarting(ctx context.Context, r manager.Runnable, build func() (manager.Runnable, error), delay time.Duration) {
+func runRestarting(ctx context.Context, r manager.Runnable, build managerBuilder, delay time.Duration) {
 	logger := log.WithFunc("main.runRestarting")
 	for {
 		if r != nil {

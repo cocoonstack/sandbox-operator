@@ -55,10 +55,20 @@ var (
 	// ErrUnknownBuild is a build this process never registered, or dropped an hour after it finished or was left unstarted.
 	ErrUnknownBuild = errors.New("e2bbuild: build not found")
 
-	envEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$(", `\$(`)
 	// FilesHash is the shape of the digest the SDK names a COPY upload by.
 	FilesHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+	envEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$(", `\$(`)
 )
+
+// LineFunc receives one line of a command's output.
+type LineFunc func(line string)
+
+// ArchiveFunc opens the upload a COPY step's files hash names.
+type ArchiveFunc func(ctx context.Context, hash string) (io.ReadCloser, error)
+
+// PublishFunc runs after the promote with the template's node, key and content digest.
+type PublishFunc func(ctx context.Context, node string, key scale.PoolKey, digest string) error
 
 // Request is what a build asked for before it starts.
 type Request struct {
@@ -110,8 +120,8 @@ type Spec struct {
 	StartCmd   string
 	ReadyCmd   string
 	RelayEnvs  map[string]string
-	Archive    func(ctx context.Context, hash string) (io.ReadCloser, error)
-	Publish    func(ctx context.Context, node string, key scale.PoolKey, digest string) error
+	Archive    ArchiveFunc
+	Publish    PublishFunc
 }
 
 // Command is one shell line run as User, in Workdir, with Envs; an empty Workdir is the user's home.
@@ -125,7 +135,7 @@ type Command struct {
 // Guest runs a build's commands inside its claimed sandbox.
 type Guest interface {
 	// Run runs cmd to its end, passes each line of its output to stdout or stderr, and returns its exit code.
-	Run(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr func(line string)) (int, error)
+	Run(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr LineFunc) (int, error)
 	// Start starts cmd and returns while it runs.
 	Start(ctx context.Context, a scale.Assignment, cmd Command) error
 	// Init makes the user, workdir and envs of defaults what every later process in the sandbox gets.
@@ -352,7 +362,7 @@ func (e *Executor) copyIn(ctx context.Context, a scale.Assignment, spec Spec, ha
 }
 
 // sh returns the failure the caller sees next to the error; a non-zero exit is a failure.
-func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr func(string)) (string, error) {
+func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr LineFunc) (string, error) {
 	code, err := e.guest.Run(ctx, a, cmd, stdout, stderr)
 	if err != nil {
 		return "could not run a command in the build sandbox", err
@@ -365,7 +375,7 @@ func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, stdo
 }
 
 // expand evaluates an ENV value in the guest's shell, so $VAR references resolve and command substitution does not run; the shell's own stderr goes to the log, never into the value.
-func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command, value string, stderr func(string)) (string, string, error) {
+func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command, value string, stderr LineFunc) (string, string, error) {
 	var lines []string
 	if _, err := e.sh(ctx, a, withLine(root, `printf "%s" "`+envEscaper.Replace(value)+`"`), func(line string) { lines = append(lines, line) }, stderr); err != nil {
 		return "", fmt.Sprintf("could not evaluate the value %q", value), err
@@ -440,13 +450,11 @@ func (e *Executor) log(id, step, level, message string) {
 }
 
 func (e *Executor) sweep(now time.Time) {
-	for id, r := range e.builds {
+	maps.DeleteFunc(e.builds, func(_ string, r *record) bool {
 		done := !r.finished.IsZero() && now.Sub(r.finished) > recordTTL
 		abandoned := r.info.Status == StatusWaiting && now.Sub(r.registered) > recordTTL
-		if done || abandoned {
-			delete(e.builds, id)
-		}
-	}
+		return done || abandoned
+	})
 }
 
 // Invalid names the first step a build cannot run, empty when every step can; a COPY needs canCopy.

@@ -814,7 +814,9 @@ func (f *renewStore) Renew(_ context.Context, node, id string, ttlSeconds int, _
 	return time.Now().Add(time.Duration(ttlSeconds) * time.Second), nil
 }
 
-func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
+type serverOption func(*Options)
+
+func newTestServer(t *testing.T, store scale.SandboxStore, opts ...serverOption) http.Handler {
 	t.Helper()
 	o := Options{Namespace: "sandboxes", Domain: testDomain, APIKeys: []string{testKey}, EnvdSecret: []byte(testEnvdSecret)}
 	for _, fn := range opts {

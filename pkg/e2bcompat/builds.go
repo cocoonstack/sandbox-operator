@@ -135,7 +135,7 @@ func (s *Server) buildStatus(w http.ResponseWriter, r *http.Request) {
 
 // publishBuild deletes the holders of name older than this build's promote, so concurrent builds converge on the newest, then tags it.
 // It asks each node itself: an inventory a tick behind would miss a build that finished moments ago.
-func (s *Server) publishBuild(scope, name string, tags []string) func(context.Context, string, scale.PoolKey, string) error {
+func (s *Server) publishBuild(scope, name string, tags []string) e2bbuild.PublishFunc {
 	return func(ctx context.Context, node string, key scale.PoolKey, digest string) error {
 		holders, err := s.liveHolders(ctx, scope+name)
 		if err != nil {

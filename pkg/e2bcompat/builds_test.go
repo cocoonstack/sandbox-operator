@@ -146,6 +146,22 @@ func TestABuildRefusesWhatItCannotHonor(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, do(t, newTestServer(t, &fakeStore{}), http.MethodPost, "/v3/templates", `{"name":"app"}`, testKey).Code, "builds are off unless enabled")
 }
 
+func TestAPublishLeavesANewerConcurrentBuildAlone(t *testing.T) {
+	newer := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:newer", CreatedAt: new(metav1.NewTime(time.Now().Add(time.Minute)))}
+	older := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:older", CreatedAt: new(metav1.NewTime(time.Now().Add(-time.Minute)))}
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil, "m": {newer}, "k": {older}}}
+	inv := scale.NewStaticInventorySource()
+	for _, n := range []string{"n", "m", "k"} {
+		inv.Put(&scale.NodeInventory{Node: n})
+	}
+	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
+
+	id := requestBuild(t, h, "app")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
+	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
+	assert.Equal(t, []string{"k e2b/sandboxes/app small"}, store.deletedTemplates, "only the holder older than this promote goes; a newer concurrent build keeps its node")
+}
+
 func requestBuild(t *testing.T, h http.Handler, name string) string {
 	t.Helper()
 	w := do(t, h, http.MethodPost, "/v3/templates", `{"name":"`+name+`"}`, testKey)
@@ -168,31 +184,15 @@ func waitBuild(t *testing.T, h http.Handler, buildID string) TemplateBuildInfo {
 	return info
 }
 
-func withBuilds() func(*Options) {
+func withBuilds() serverOption {
 	return func(o *Options) { o.Builds = BuildOptions{Parallel: 2, Timeout: time.Minute, LogLines: 100} }
 }
 
 // withBuildFleet serves node n with app's earlier build and node m with a stale copy under a smaller key.
-func withBuildFleet(store *fakeStore) func(*Options) {
+func withBuildFleet(store *fakeStore) serverOption {
 	inv := scale.NewStaticInventorySource()
 	inv.Put(&scale.NodeInventory{Node: "n", Templates: []scale.PromotedTemplate{{Template: "e2b/sandboxes/app", Net: "none", Size: "medium", ContentDigest: "sha256:old"}}})
 	inv.Put(&scale.NodeInventory{Node: "m", Templates: []scale.PromotedTemplate{{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:old"}}})
 	store.fleet = inv
 	return func(o *Options) { o.Inventory = inv }
-}
-
-func TestAPublishLeavesANewerConcurrentBuildAlone(t *testing.T) {
-	newer := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:newer", CreatedAt: new(metav1.NewTime(time.Now().Add(time.Minute)))}
-	older := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:older", CreatedAt: new(metav1.NewTime(time.Now().Add(-time.Minute)))}
-	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil, "m": {newer}, "k": {older}}}
-	inv := scale.NewStaticInventorySource()
-	for _, n := range []string{"n", "m", "k"} {
-		inv.Put(&scale.NodeInventory{Node: n})
-	}
-	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
-
-	id := requestBuild(t, h, "app")
-	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
-	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
-	assert.Equal(t, []string{"k e2b/sandboxes/app small"}, store.deletedTemplates, "only the holder older than this promote goes; a newer concurrent build keeps its node")
 }

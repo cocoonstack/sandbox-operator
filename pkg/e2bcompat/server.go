@@ -319,6 +319,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger := log.WithFunc("e2bcompat.createSandbox")
 	name := names.SimpleNameGenerator.GenerateName(namePrefix)
 	pool := s.poolKey(req.TemplateID)
 	pool.Net = netFor(req.AllowInternetAccess)
@@ -350,7 +351,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 			writeError(w, he.StatusCode, he.Message)
 			return
 		}
-		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: claim failed template=%s name=%s", req.TemplateID, name)
+		logger.Errorf(r.Context(), err, "e2b create: claim failed template=%s name=%s", req.TemplateID, name)
 		writeError(w, http.StatusInternalServerError, "failed to claim a sandbox")
 		return
 	}
@@ -366,7 +367,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		err = s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, "", init)
 	}
 	if err != nil {
-		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: envd init failed sandboxID=%s node=%s", assignment.SandboxName, assignment.Node)
+		logger.Errorf(r.Context(), err, "e2b create: envd init failed sandboxID=%s node=%s", assignment.SandboxName, assignment.Node)
 		s.releaseAll(r.Context(), []scale.Assignment{assignment})
 		writeError(w, http.StatusInternalServerError, "failed to start the sandbox")
 		return

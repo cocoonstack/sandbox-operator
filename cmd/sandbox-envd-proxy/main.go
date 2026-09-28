@@ -68,7 +68,7 @@ func main() {
 	o.addFlags(fs)
 	_ = fs.Parse(os.Args[1:])
 	if err := run(ctx, o); err != nil {
-		log.WithFunc("main").Fatalf(ctx, err, "sandbox-envd-proxy exited")
+		log.WithFunc("main.main").Fatalf(ctx, err, "sandbox-envd-proxy exited")
 	}
 }
 
