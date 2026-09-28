@@ -1,5 +1,6 @@
 {{- if .Values.apiserver.e2b.enabled }}
 {{- $tlsSecret := .Values.envdProxy.tlsSecretName -}}
+{{- $tokenSecret := required "apiserver.sandboxdToken.secretName is required when apiserver.e2b.enabled is true: the envd proxy reads claim tokens with it" .Values.apiserver.sandboxdToken.secretName -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,9 +40,7 @@ spec:
         - --domain={{ . }}
         {{- end }}
         - --e2b-envd-secret-file=/etc/sandbox-envd-proxy/e2b-envd-secret/{{ .Values.apiserver.e2b.envdSecret.key }}
-        {{- if .Values.apiserver.sandboxdToken.secretName }}
         - --sandboxd-token-file=/etc/sandbox-envd-proxy/sandboxd-token/{{ .Values.apiserver.sandboxdToken.key }}
-        {{- end }}
         {{- if $tlsSecret }}
         - --tls-cert-file=/etc/sandbox-envd-proxy/serving-certs/tls.crt
         - --tls-private-key-file=/etc/sandbox-envd-proxy/serving-certs/tls.key
@@ -70,11 +69,9 @@ spec:
         - name: e2b-envd-secret
           mountPath: /etc/sandbox-envd-proxy/e2b-envd-secret
           readOnly: true
-        {{- if .Values.apiserver.sandboxdToken.secretName }}
         - name: sandboxd-token
           mountPath: /etc/sandbox-envd-proxy/sandboxd-token
           readOnly: true
-        {{- end }}
         {{- if $tlsSecret }}
         - name: serving-certs
           mountPath: /etc/sandbox-envd-proxy/serving-certs
@@ -84,11 +81,9 @@ spec:
       - name: e2b-envd-secret
         secret:
           secretName: {{ include "sandbox-operator.e2b.envdSecretName" . }}
-      {{- with .Values.apiserver.sandboxdToken.secretName }}
       - name: sandboxd-token
         secret:
-          secretName: {{ . }}
-      {{- end }}
+          secretName: {{ $tokenSecret }}
       {{- if $tlsSecret }}
       # A wildcard certificate for *.{domain}: the SDK addresses every sandbox
       # by its own derived host.
