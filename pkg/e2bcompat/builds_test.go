@@ -190,8 +190,7 @@ func TestABuildReplacedOnItsOwnNodeWritesNoTags(t *testing.T) {
 	id := requestBuild(t, h, "app:v1")
 	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
 	info := waitBuild(t, h, id)
-	require.Equal(t, e2bbuild.StatusError, info.Status)
-	assert.Contains(t, info.Reason.Message, "replaced")
+	require.Equal(t, [2]string{e2bbuild.StatusError, "finalize"}, [2]string{info.Status, info.Reason.Step})
 	assert.Empty(t, store.labeled, "a build a newer promote replaced must not tag the newer content with its own digest")
 }
 
@@ -204,8 +203,7 @@ func TestABuildWhoseTagWriteFindsANewerGenerationReportsReplaced(t *testing.T) {
 	id := requestBuild(t, h, "app:v1")
 	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
 	info := waitBuild(t, h, id)
-	require.Equal(t, e2bbuild.StatusError, info.Status)
-	assert.Contains(t, info.Reason.Message, "replaced")
+	require.Equal(t, [2]string{e2bbuild.StatusError, "finalize"}, [2]string{info.Status, info.Reason.Step})
 	assert.Equal(t, []string{"n e2b/sandboxes/app sha256:sb_1"}, store.labeled, "the tag write carries the promote's digest, so a newer generation refuses it")
 }
 

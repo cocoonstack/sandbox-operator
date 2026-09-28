@@ -407,7 +407,7 @@ func (e *Executor) promote(ctx context.Context, id string, a scale.Assignment, s
 		return "", "", nil
 	}
 	if err := spec.Publish(ctx, a.Node, key, digest); err != nil {
-		return PhasePublish, "could not publish the build over the previous one: " + err.Error(), err
+		return PhasePublish, "could not publish the build over the previous one", err
 	}
 	return "", "", nil
 }
