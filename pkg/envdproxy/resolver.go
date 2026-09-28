@@ -119,8 +119,8 @@ func (s *storeResolver) find(ctx context.Context, sandboxID string, admit admiss
 	return s.readOwner(ctx, sandboxID, sb.Status.NodeName, sb.Annotations[scale.ClaimIDAnnotation], admit)
 }
 
-// probe asks every node for claimID, which its inventory does not list yet, and keeps a hit past its
-// next publish; a refused admit reads as not found, so an unpublished id stays unprovable.
+// probe asks every node for claimID, which its inventory does not list yet, keeps a hit past its
+// next publish and admits the caller like a published one.
 func (s *storeResolver) probe(ctx context.Context, sandboxID, claimID string, admit admission) (Owner, error) {
 	if !s.probeLimit.Allow() {
 		return Owner{}, ErrSandboxNotFound
