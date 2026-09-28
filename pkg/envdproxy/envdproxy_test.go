@@ -303,6 +303,7 @@ func TestProxyMapsNodeRefusals(t *testing.T) {
 	}{
 		{"stale owner", http.StatusNotFound, http.StatusUnauthorized},
 		{"bad port", http.StatusBadRequest, http.StatusBadRequest},
+		{"paused", http.StatusConflict, http.StatusBadGateway},
 		{"no guest listener", http.StatusBadGateway, http.StatusBadGateway},
 	}
 	for _, tt := range tests {

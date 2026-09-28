@@ -170,6 +170,9 @@ func (s *Server) writeUpstreamError(w http.ResponseWriter, r *http.Request, err 
 		case http.StatusBadRequest:
 			writeError(w, http.StatusBadRequest, "unsupported sandbox port")
 			return
+		case http.StatusConflict:
+			writeError(w, http.StatusBadGateway, "sandbox is paused")
+			return
 		}
 	}
 	log.WithFunc("envdproxy.writeUpstreamError").Errorf(r.Context(), err, "envd-proxy: relay failed host=%s path=%s", r.Host, r.URL.Path)
