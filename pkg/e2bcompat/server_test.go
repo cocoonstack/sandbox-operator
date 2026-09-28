@@ -725,6 +725,8 @@ func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (ne
 		}
 		f.envdCalls = append(f.envdCalls, id+" "+r.Method+" "+r.URL.Path+" "+body)
 		switch r.URL.Path {
+		case "/files":
+			return http.StatusOK, `[{"path":"` + r.URL.Query().Get("path") + `"}]`
 		case "/init":
 			return cmp.Or(f.initStatus, http.StatusNoContent), ""
 		case "/envs":

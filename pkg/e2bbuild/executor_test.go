@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -130,6 +131,55 @@ func TestAReadyCommandThatNeverPassesFailsAtFinalize(t *testing.T) {
 	assert.NotContains(t, strings.Join(store.calls(), "\n"), "promote")
 }
 
+func TestACopyStepWritesItsUploadAndMovesItAsRoot(t *testing.T) {
+	hash := strings.Repeat("ab", 32)
+	store := &fakeStore{}
+	e := New(store, store, 1, time.Minute, 100)
+	e.Register("b", Request{})
+	require.NoError(t, e.Start(t.Context(), "b", Spec{
+		Pool: scale.PoolKey{Template: "img"}, Template: "t",
+		Steps: []Step{{Type: stepUser, Args: []string{"bob"}}, {Type: stepCopy, Args: []string{"app/*.py", "/srv/", "", "0640"}, FilesHash: hash}},
+		Archive: func(_ context.Context, h string) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("tar of " + h)), nil
+		},
+	}))
+	info := waitDone(t, e, "b")
+	require.Equal(t, StatusReady, info.Status, info.Failure)
+	calls := store.calls()
+	assert.Equal(t, "write /tmp/"+hash+".tar tar of "+hash, calls[2])
+	script := calls[3]
+	assert.True(t, strings.HasPrefix(script, "run root  map[] archive='/tmp/"+hash+".tar'"), script)
+	for _, want := range []string{"source='/tmp/" + hash + "/unpack/app'", "target='/srv/'", "owner='bob:bob'", "mode='0640'", "user='bob'", `tar -xf "$archive" -C "$unpack"`} {
+		assert.Contains(t, script, want)
+	}
+}
+
+func TestInvalidNamesTheFirstStepABuildCannotRun(t *testing.T) {
+	hash := strings.Repeat("0", 64)
+	copyStep := Step{Type: stepCopy, Args: []string{"a", "/a"}, FilesHash: hash}
+	for _, tc := range []struct {
+		steps   []Step
+		canCopy bool
+		want    string
+	}{
+		{nil, false, ""},
+		{[]Step{copyStep}, true, ""},
+		{[]Step{copyStep}, false, "step 1 (COPY): no upload store is configured"},
+		{[]Step{{Type: stepRun, Args: []string{"true"}}, {Type: stepCopy, Args: []string{"a"}, FilesHash: hash}}, true, "step 2 (COPY): needs a source and a destination"},
+		{[]Step{{Type: stepCopy, Args: []string{"a", "/a"}, FilesHash: "../x"}}, true, "step 1 (COPY): needs the filesHash of its upload"},
+		{[]Step{{Type: stepEnv, Args: []string{"A"}}}, true, "step 1 (ENV): needs key and value pairs"},
+		{[]Step{{Type: "ARG", Args: []string{"A", "1"}}}, true, "step 1 (ARG): not a supported step type"},
+	} {
+		assert.Equal(t, tc.want, Invalid(tc.steps, tc.canCopy))
+	}
+}
+
+func TestGlobBaseStopsAtTheFirstGlobSegment(t *testing.T) {
+	for src, want := range map[string]string{"app": "app", "app/": "app", "app/*.py": "app", "*.py": "", "a/b/**/c": "a/b", "a/[ab]": "a"} {
+		assert.Equal(t, want, globBase(src), src)
+	}
+}
+
 func TestStartIsBoundedIdempotentAndKnowsItsBuilds(t *testing.T) {
 	store := &fakeStore{hold: make(chan struct{})}
 	e := New(store, store, 1, time.Minute, 100)
@@ -236,6 +286,12 @@ func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, out 
 func (f *fakeStore) Start(_ context.Context, _ scale.Assignment, cmd Command) error {
 	f.record("start " + cmd.User + " " + cmd.Workdir + " " + cmd.Line)
 	return nil
+}
+
+func (f *fakeStore) Write(_ context.Context, _ scale.Assignment, path string, r io.Reader) error {
+	b, err := io.ReadAll(r)
+	f.record(fmt.Sprintf("write %s %s", path, b))
+	return err
 }
 
 func (f *fakeStore) Init(_ context.Context, _ scale.Assignment, defaults Command) error {

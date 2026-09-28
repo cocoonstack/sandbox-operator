@@ -47,6 +47,18 @@ apiserver:
     builds:
       enabled: false
       parallel: 2
+      # uploads keeps the archives COPY steps upload: a claim every replica
+      # mounts, or an S3 bucket. With neither, a build cannot COPY.
+      uploads:
+        persistentVolumeClaim: ""
+        maxBytes: 1073741824
+        s3:
+          bucket: ""
+          prefix: ""
+          endpoint: ""
+          region: ""
+          forcePathStyle: false
+          credentialsSecret: ""
   resources:
     requests:
       cpu: 100m

@@ -62,7 +62,26 @@ spec:
         {{- if $e2b.builds.enabled }}
         - --e2b-builds
         - --e2b-build-parallel={{ $e2b.builds.parallel }}
+        {{- $uploads := $e2b.builds.uploads }}
+        {{- if $uploads.persistentVolumeClaim }}
+        - --e2b-build-dir=/var/lib/sandbox-apiserver/e2b-uploads
+        - --e2b-build-upload-max={{ int64 $uploads.maxBytes }}
         {{- end }}
+        {{- with $uploads.s3 }}
+        {{- if .bucket }}
+        - --e2b-build-store-s3-bucket={{ .bucket }}
+        - --e2b-build-store-s3-prefix={{ .prefix }}
+        - --e2b-build-store-s3-endpoint={{ .endpoint }}
+        - --e2b-build-store-s3-region={{ .region }}
+        - --e2b-build-store-s3-force-path-style={{ .forcePathStyle }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if and $e2b.enabled $e2b.builds.enabled $e2b.builds.uploads.s3.credentialsSecret }}
+        envFrom:
+        - secretRef:
+            name: {{ $e2b.builds.uploads.s3.credentialsSecret }}
         {{- end }}
         ports:
         - name: https
@@ -111,6 +130,10 @@ spec:
           mountPath: /etc/sandbox-apiserver/e2b-template-aliases
           readOnly: true
         {{- end }}
+        {{- if and $e2b.builds.enabled $e2b.builds.uploads.persistentVolumeClaim }}
+        - name: e2b-uploads
+          mountPath: /var/lib/sandbox-apiserver/e2b-uploads
+        {{- end }}
         {{- end }}
       volumes:
       - name: serving-certs
@@ -132,5 +155,10 @@ spec:
       - name: e2b-template-aliases
         configMap:
           name: sandbox-apiserver-e2b-template-aliases
+      {{- end }}
+      {{- if and $e2b.builds.enabled $e2b.builds.uploads.persistentVolumeClaim }}
+      - name: e2b-uploads
+        persistentVolumeClaim:
+          claimName: {{ $e2b.builds.uploads.persistentVolumeClaim }}
       {{- end }}
       {{- end }}

@@ -91,11 +91,12 @@ type Options struct {
 	Builds BuildOptions
 }
 
-// BuildOptions bounds the in-process template builds.
+// BuildOptions bounds the in-process template builds; Uploads, when set, keeps the archives their COPY steps read.
 type BuildOptions struct {
 	Parallel int
 	Timeout  time.Duration
 	LogLines int
+	Uploads  uploadStore
 }
 
 type namespaceKey struct{}
@@ -219,6 +220,12 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /v3/templates", s.auth(http.HandlerFunc(s.requestBuild)))
 		mux.Handle("POST /v2/templates/{templateID}/builds/{buildID}", s.auth(http.HandlerFunc(s.startBuild)))
 		mux.Handle("GET /templates/{templateID}/builds/{buildID}/status", s.auth(http.HandlerFunc(s.buildStatus)))
+		if s.opts.Builds.Uploads != nil {
+			mux.Handle("GET /templates/{templateID}/files/{hash}", s.auth(http.HandlerFunc(s.fileUploadLink)))
+		}
+		if d, ok := s.opts.Builds.Uploads.(*dirUploads); ok {
+			mux.Handle("PUT /templates/{templateID}/files/{hash}", d)
+		}
 	}
 	return mux
 }

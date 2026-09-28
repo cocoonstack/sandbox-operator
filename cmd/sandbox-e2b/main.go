@@ -77,7 +77,7 @@ func run() error {
 	logger.Infof(ctx, "mesh inventory up seeds=%v nodes=%v poll=%s", o.Seeds, nodes, o.PollInterval)
 	store := scale.NewScatterGatherStore(src, scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()))
 
-	opts, err := o.E2B.ServerOptions(src)
+	opts, err := o.E2B.ServerOptions(ctx, src)
 	if err != nil {
 		return err
 	}

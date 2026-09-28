@@ -241,7 +241,7 @@ func runRestarting(ctx context.Context, r manager.Runnable, build func() (manage
 
 // startE2BServer shares the aggregated apiserver's store, so an e2b claim is the node-local claim the Kubernetes path makes.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) (func(), error) {
-	opts, err := o.E2B.ServerOptions(inv)
+	opts, err := o.E2B.ServerOptions(ctx, inv)
 	if err != nil {
 		return nil, err
 	}

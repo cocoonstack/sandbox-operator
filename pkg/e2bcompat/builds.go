@@ -56,7 +56,7 @@ func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	if msg, bad := unsupportedBuildOption(req); bad {
+	if msg, bad := unsupportedBuildOption(req, s.opts.Builds.Uploads != nil); bad {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -80,6 +80,7 @@ func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 		Steps:      req.Steps,
 		StartCmd:   req.StartCmd,
 		ReadyCmd:   req.ReadyCmd,
+		Archive:    s.archive(s.namespace(r), name),
 		Publish:    s.publishBuild(scope, name, pending.Tags),
 	})
 	switch {
@@ -190,7 +191,7 @@ func (s *Server) buildKey(r *http.Request, name, buildID string) string {
 }
 
 // unsupportedBuildOption refuses what a build cannot honor, a malformed step included.
-func unsupportedBuildOption(req TemplateBuildStartV2) (string, bool) {
+func unsupportedBuildOption(req TemplateBuildStartV2, canCopy bool) (string, bool) {
 	switch {
 	case req.FromTemplate != "":
 		return "fromTemplate is not supported yet; build from an image", true
@@ -199,7 +200,7 @@ func unsupportedBuildOption(req TemplateBuildStartV2) (string, bool) {
 	case req.FromImage == "":
 		return "fromImage is required", true
 	}
-	msg := e2bbuild.Invalid(req.Steps)
+	msg := e2bbuild.Invalid(req.Steps, canCopy)
 	return msg, msg != ""
 }
 
