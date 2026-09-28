@@ -29,6 +29,8 @@ const (
 
 	// NetRouteRelay is a claim whose guest reaches the network through the node's egress proxy on 127.0.0.1:3128.
 	NetRouteRelay = "relay"
+
+	captureTimeout = 10 * time.Minute
 )
 
 // ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
@@ -159,8 +161,9 @@ type NodeInfo struct {
 type Client struct {
 	baseURL string
 	// token is the node api_token every verb presents, except Release, which takes one per call.
-	token string
-	hc    *http.Client
+	token   string
+	hc      *http.Client
+	capture *http.Client
 }
 
 // New returns a Client for the sandboxd at baseURL; token is the node api_token, empty when sandboxd runs without auth.
@@ -173,6 +176,9 @@ func New(baseURL, token string, opts ...Option) *Client {
 	for _, o := range opts {
 		o(c)
 	}
+	capture := *c.hc
+	capture.Timeout = captureTimeout
+	c.capture = &capture
 	return c
 }
 
@@ -253,6 +259,10 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 }
 
 func (c *Client) send(ctx context.Context, method, path, token, op string, body []byte, ok ...int) error {
+	return c.sendWith(ctx, c.hc, method, path, token, op, body, ok...)
+}
+
+func (c *Client) sendWith(ctx context.Context, hc *http.Client, method, path, token, op string, body []byte, ok ...int) error {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
@@ -266,7 +276,7 @@ func (c *Client) send(ctx context.Context, method, path, token, op string, body 
 	}
 	c.authenticate(req, token)
 
-	resp, err := c.hc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("sandboxd: %s: %w", op, err)
 	}

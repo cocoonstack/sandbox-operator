@@ -379,3 +379,25 @@ func TestSetPoolsSendsAnEmptyListNotNull(t *testing.T) {
 	assert.Equal(t, "duplicate pool", he.Message)
 	assert.JSONEq(t, `{"pools":[]}`, raw, "a nil set must drain as [] rather than null")
 }
+
+func TestCaptureVerbsOutliveTheRequestTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		switch r.URL.Path {
+		case "/v1/sandboxes/sb_1/promote":
+			_, _ = w.Write([]byte(`{"key":{"template":"ns/app","net":"none","size":"small"},"content_digest":"sha256:aa"}`))
+		case "/v1/sandboxes/sb_1/hibernate":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			_, _ = w.Write([]byte(`{"id":"sb_2","token":"t"}`))
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "root-token", WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
+
+	_, _, err := c.Promote(t.Context(), "sb_1", "ns/app")
+	require.NoError(t, err, "a promote runs as long as the guest's memory takes")
+	require.NoError(t, c.Hibernate(t.Context(), "sb_1"))
+	_, err = c.Claim(t.Context(), ClaimSpec{Template: "img"})
+	require.Error(t, err, "a claim keeps the request timeout")
+}

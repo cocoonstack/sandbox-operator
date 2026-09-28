@@ -118,7 +118,7 @@ func (c *Client) Fork(ctx context.Context, id string, spec ForkSpec) (ForkResult
 	if id == "" {
 		return out, fmt.Errorf("sandboxd: fork requires a sandbox id")
 	}
-	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/fork", spec, &out)
+	err := c.sendJSONWith(ctx, c.capture, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/fork", spec, &out)
 	return out, err
 }
 
@@ -139,7 +139,7 @@ func (c *Client) Checkpoint(ctx context.Context, id string, spec CheckpointSpec)
 	var out struct {
 		Checkpoint Checkpoint `json:"checkpoint"`
 	}
-	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/checkpoint", spec, &out)
+	err := c.sendJSONWith(ctx, c.capture, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/checkpoint", spec, &out)
 	return out.Checkpoint, err
 }
 
@@ -152,7 +152,7 @@ func (c *Client) Promote(ctx context.Context, id, template string) (PoolKey, str
 		Key           PoolKey `json:"key"`
 		ContentDigest string  `json:"content_digest"`
 	}
-	err := c.sendJSON(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/promote", struct {
+	err := c.sendJSONWith(ctx, c.capture, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/promote", struct {
 		Template string `json:"template"`
 	}{template}, &out)
 	return out.Key, out.ContentDigest, err
@@ -229,10 +229,14 @@ func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: %s requires a sandbox id", verb)
 	}
-	return c.send(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, nil, http.StatusNoContent)
+	return c.sendWith(ctx, c.capture, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, nil, http.StatusNoContent)
 }
 
 func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {
+	return c.sendJSONWith(ctx, c.hc, method, path, body, out)
+}
+
+func (c *Client) sendJSONWith(ctx context.Context, hc *http.Client, method, path string, body, out any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("sandboxd: encode %s: %w", path, err)
@@ -244,7 +248,7 @@ func (c *Client) sendJSON(ctx context.Context, method, path string, body, out an
 	req.Header.Set("Content-Type", "application/json")
 	c.authenticate(req, c.token)
 
-	resp, err := c.hc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("sandboxd: %s: %w", path, err)
 	}
