@@ -104,7 +104,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch token := strings.TrimSpace(r.Header.Get(accessTokenHeader)); {
 	case token != "":
 		owner, err = s.resolver.Owner(r.Context(), rt.sandboxID, token)
-	case signedFileURL(r):
+	case rt.port == envdPort && signedFileURL(r):
 		if owner, err = s.resolver.Locate(r.Context(), rt.sandboxID); err == nil {
 			owner.Token = s.opts.NodeToken
 		}

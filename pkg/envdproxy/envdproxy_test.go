@@ -115,6 +115,11 @@ func TestProxyRelaysASignedFileURLWithoutTheToken(t *testing.T) {
 			t.Errorf("%s: status %d, want 401: only a signed file URL goes without the token", path, resp.StatusCode)
 		}
 	}
+	resp = request(t, h, "3000-sb-abc."+testDomain, "/files?path=%2Fetc%2Fhosts&signature=v1_abc&signature_expiration=9", "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a signed file URL on port 3000: status %d, want 401: only envd's port verifies a signature", resp.StatusCode)
+	}
 }
 
 func TestProxyRequiresTheAccessToken(t *testing.T) {
