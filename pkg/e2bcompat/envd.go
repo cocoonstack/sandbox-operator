@@ -24,6 +24,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -43,6 +44,13 @@ const (
 	connectFrameMax  = 1 << 20
 	logLineMax       = 64 << 10
 )
+
+// relayEnvs point a guest process at the node's egress proxy, as silkd's unit points its own.
+var relayEnvs = map[string]string{
+	"http_proxy":  "http://127.0.0.1:3128",
+	"https_proxy": "http://127.0.0.1:3128",
+	"no_proxy":    "localhost,127.0.0.1,::1,169.254.169.254",
+}
 
 // envdMetrics is envd's GET /metrics reply: the guest's own view of its CPU, memory and root disk.
 type envdMetrics struct {
@@ -382,4 +390,14 @@ func (s *Server) envdRoundTrip(ctx context.Context, node, id string, req *http.R
 
 func connectFrame(flags byte, msg []byte) []byte {
 	return append(binary.BigEndian.AppendUint32([]byte{flags}, uint32(len(msg))), msg...)
+}
+
+// withRelay sets the proxy variables under envs when the claim relays, so a request's own value wins.
+func withRelay(route string, envs map[string]string) map[string]string {
+	if route != sandboxd.NetRouteRelay {
+		return envs
+	}
+	out := maps.Clone(relayEnvs)
+	maps.Copy(out, envs)
+	return out
 }

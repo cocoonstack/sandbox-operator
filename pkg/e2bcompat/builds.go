@@ -80,6 +80,7 @@ func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 		Steps:      req.Steps,
 		StartCmd:   req.StartCmd,
 		ReadyCmd:   req.ReadyCmd,
+		RelayEnvs:  relayEnvs,
 		Archive:    s.archive(s.namespace(r), name),
 		Publish:    s.publishBuild(scope, name, pending.Tags),
 	})

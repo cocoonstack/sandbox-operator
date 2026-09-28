@@ -318,7 +318,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	name := names.SimpleNameGenerator.GenerateName(namePrefix)
 	pool := s.poolKey(req.TemplateID)
 	pool.Net = netFor(req.AllowInternetAccess)
-	opts := scale.ClaimOptions{TTLSeconds: s.timeoutSeconds(req.Timeout), Metadata: req.Metadata}
+	opts := scale.ClaimOptions{TTLSeconds: s.timeoutSeconds(req.Timeout), Metadata: req.Metadata, NoEgress: req.AllowInternetAccess != nil && !*req.AllowInternetAccess}
 	if req.AutoPause != nil && *req.AutoPause {
 		opts.OnExpire = sandboxd.ExpireArchive
 	}
@@ -328,10 +328,6 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		b, pooled, lookupErr := s.resolveTemplate(r, req.TemplateID)
 		known = lookupErr != nil || b != nil || pooled
 		if lookupErr == nil && b != nil && !pooled {
-			if pool.Net != scale.NetDefault {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("template %q is a built template, which runs without internet access", req.TemplateID))
-				return
-			}
 			built = true
 			assignment, err = s.store.Claim(r.Context(), s.namespace(r), name, b.current().key, opts)
 		}
@@ -356,10 +352,11 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := AccessToken(s.opts.EnvdSecret, assignment.Token)
-	init := envdInit{AccessToken: token, EnvVars: req.EnvVars, DefaultUser: envdDefaultUser, DefaultWorkdir: envdDefaultWorkdir}
+	init := envdInit{AccessToken: token}
 	if built {
-		init = envdInit{AccessToken: token}
 		init.EnvVars, err = s.templateEnvs(r.Context(), assignment, req.EnvVars)
+	} else {
+		init.EnvVars, init.DefaultUser, init.DefaultWorkdir = withRelay(assignment.NetRoute, req.EnvVars), envdDefaultUser, envdDefaultWorkdir
 	}
 	if err == nil {
 		err = s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, init)

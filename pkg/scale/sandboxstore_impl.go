@@ -258,6 +258,9 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		OnExpire:        opts.OnExpire,
 		RequirePromoted: promoted,
 	}
+	if opts.NoEgress {
+		spec.Egress = new(false)
+	}
 	// Inventory is 5-30s stale, so a capacity miss drops that node and re-samples the rest instead of failing.
 	for len(candidates) > 0 {
 		best := pickPowerOfTwo(candidates)
@@ -270,7 +273,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		if claimErr == nil {
 			s.index.remember(nameKey(namespace, name), node)
 			s.index.remember(claimKey(namespace, res.ID), node)
-			return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
+			return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline, NetRoute: res.NetRoute}, nil
 		}
 		if tryNext := claimUndelivered(claimErr) || promoted && templateGone(claimErr); !tryNext {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, node, claimErr)

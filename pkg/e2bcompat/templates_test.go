@@ -138,11 +138,15 @@ func TestACreateNamingABuiltTemplateClaimsItsKey(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, "app", got.TemplateID)
 
-	store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity}
-	h = newTestServer(t, store, withTemplateFleet(store))
-	w = do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app","allow_internet_access":true}`, testKey)
-	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Equal(t, 1, store.claimCalls)
+	assert.False(t, store.claimOpts.NoEgress)
+
+	for body, closed := range map[string]bool{`{"templateID":"app","allow_internet_access":true}`: false, `{"templateID":"app","allow_internet_access":false}`: true} {
+		store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity}
+		h = newTestServer(t, store, withTemplateFleet(store))
+		w = do(t, h, http.MethodPost, "/sandboxes", body, testKey)
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		assert.Equal(t, [2]any{"none", closed}, [2]any{store.claimPool.Net, store.claimOpts.NoEgress}, "%s: the template's own lane, egress off only when asked", body)
+	}
 
 	store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity}
 	h = newTestServer(t, store, withTemplateFleet(store), withAliases("app reg/rt:24.04"))

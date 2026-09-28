@@ -26,6 +26,9 @@ const (
 	ExpireDestroy ExpireAction = "destroy"
 	// ExpireArchive hibernates and archives the claim at lease end, so a later wake resumes it.
 	ExpireArchive ExpireAction = "archive"
+
+	// NetRouteRelay is a claim whose guest reaches the network through the node's egress proxy on 127.0.0.1:3128.
+	NetRouteRelay = "relay"
 )
 
 // ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
@@ -91,6 +94,8 @@ type ClaimSpec struct {
 	OnExpire   ExpireAction      `json:"on_expire,omitempty"`
 	// RequirePromoted asks the node to provision only from a promoted template, never a cold image boot.
 	RequirePromoted bool `json:"require_promoted,omitzero"`
+	// Egress false claims with no egress policy, whatever the pool's; nil keeps the policy.
+	Egress *bool `json:"egress,omitzero"`
 }
 
 // ClaimResult is the POST /v1/claim success body.
@@ -101,6 +106,8 @@ type ClaimResult struct {
 	OwnerAddr string    `json:"owner_addr"`
 	// FromCheckpoint is the lineage edge when the claim branched from a checkpoint.
 	FromCheckpoint string `json:"from_checkpoint,omitempty"`
+	// NetRoute is how the guest reaches the network: relay, direct or none.
+	NetRoute string `json:"net_route,omitempty"`
 	// Redirect, when non-empty on a 200, names warm peers to retry at instead of a
 	// delivered sandbox. Claim returns it as a *RedirectError.
 	Redirect []string `json:"redirect,omitempty"`

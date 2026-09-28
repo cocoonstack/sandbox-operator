@@ -109,6 +109,21 @@ func TestABuildRunsItsStepsThroughEnvdAndLeavesItsDefaultsInTheSandbox(t *testin
 	assert.Len(t, store.promoted, 1, "a failed step never promotes")
 }
 
+func TestARelayedBuildLeavesTheProxyInTheTemplateDefaults(t *testing.T) {
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n", NetRoute: "relay"}}
+	h := newTestServer(t, store, withBuilds(), withBuildFleet(store))
+	id := requestBuild(t, h, "app")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img","steps":[{"type":"RUN","args":["pip install requests"]}]}`, testKey).Code)
+	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
+	var init envdInit
+	for _, c := range store.envdCalls {
+		if body, ok := strings.CutPrefix(c, "sb_1 POST /init "); ok {
+			require.NoError(t, json.Unmarshal([]byte(body), &init))
+		}
+	}
+	assert.Equal(t, relayEnvs, init.EnvVars)
+}
+
 func TestABuildRefusesWhatItCannotHonor(t *testing.T) {
 	h := newTestServer(t, &fakeStore{}, withBuilds())
 	id := requestBuild(t, h, "app")

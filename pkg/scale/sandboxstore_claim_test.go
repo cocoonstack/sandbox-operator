@@ -22,7 +22,7 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n2", "10.0.0.2:7777", PoolCapacity{Template: "img", Warm: 4, Target: 5}))
 	deadline := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000", Deadline: deadline}}
+	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000", Deadline: deadline, NetRoute: "relay"}}
 	store := NewScatterGatherStore(src, WithClaimRouting("uniform-token", f.factory()))
 
 	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, ClaimOptions{TTLSeconds: 600})
@@ -39,6 +39,13 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 
 	assert.Equal(t, "ns/s1", f.claimSpec.ClaimRef)
 	assert.Equal(t, 1, f.claimCalls)
+	assert.Equal(t, "relay", a.NetRoute)
+	assert.Nil(t, f.claimSpec.Egress, "a claim that did not opt out keeps the pool's policy")
+
+	_, err = store.Claim(t.Context(), "ns", "s2", PoolKey{Template: "img"}, ClaimOptions{NoEgress: true})
+	require.NoError(t, err)
+	require.NotNil(t, f.claimSpec.Egress)
+	assert.False(t, *f.claimSpec.Egress)
 }
 
 func TestStoreClaim_ANodeAdvertisingThePromotedTemplateTakesAnUnpooledClaim(t *testing.T) {
