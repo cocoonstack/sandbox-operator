@@ -100,7 +100,8 @@ func TestStepsCarryTheirUserWorkdirAndEnvIntoLaterCommandsAndTheDefaults(t *test
 		"promote node-a sb_1 e2b/ns/app",
 		"release node-a sb_1",
 	}, store.calls())
-	assert.Equal(t, [2]string{"4", "out of make"}, [2]string{info.Logs[4].Phase, info.Logs[4].Message})
+	assert.Equal(t, [2]string{"1", "bash: warning: setlocale: LC_ALL: cannot change locale"}, [2]string{info.Logs[2].Phase, info.Logs[2].Message}, "the shell's stderr goes to the log, never into the ENV value")
+	assert.Equal(t, [2]string{"4", "out of make"}, [2]string{info.Logs[5].Phase, info.Logs[5].Message})
 }
 
 func TestARelayedBuildSeedsItsStepsWithTheProxyEnvironment(t *testing.T) {
@@ -282,13 +283,14 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, out func(string)) (int, error) {
+func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, stdout, stderr func(string)) (int, error) {
 	f.record(fmt.Sprintf("run %s %s %v %s", cmd.User, cmd.Workdir, cmd.Envs, cmd.Line))
 	if v, ok := strings.CutPrefix(cmd.Line, `printf "%s" "`); ok {
-		out(strings.TrimSuffix(v, `"`))
+		stderr("bash: warning: setlocale: LC_ALL: cannot change locale")
+		stdout(strings.TrimSuffix(v, `"`))
 		return 0, nil
 	}
-	out("out of " + cmd.Line)
+	stdout("out of " + cmd.Line)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	codes := f.exits[cmd.Line]

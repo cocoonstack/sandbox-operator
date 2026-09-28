@@ -108,14 +108,14 @@ type envdGuest struct {
 	s *Server
 }
 
-func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, out func(string)) (int, error) {
-	stdout, stderr := &lineSplitter{out: out}, &lineSplitter{out: out}
+func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, stdout, stderr func(string)) (int, error) {
+	outLines, errLines := &lineSplitter{out: stdout}, &lineSplitter{out: stderr}
 	code, _, err := g.s.envdProcess(ctx, a, cmd, func(o, e []byte) {
-		stdout.write(o)
-		stderr.write(e)
+		outLines.write(o)
+		errLines.write(e)
 	})
-	stdout.flush()
-	stderr.flush()
+	outLines.flush()
+	errLines.flush()
 	return code, err
 }
 

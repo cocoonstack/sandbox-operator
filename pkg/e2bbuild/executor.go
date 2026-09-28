@@ -124,8 +124,8 @@ type Command struct {
 
 // Guest runs a build's commands inside its claimed sandbox.
 type Guest interface {
-	// Run runs cmd to its end, passes each output line to out, and returns its exit code.
-	Run(ctx context.Context, a scale.Assignment, cmd Command, out func(line string)) (int, error)
+	// Run runs cmd to its end, passes each line of its output to stdout or stderr, and returns its exit code.
+	Run(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr func(line string)) (int, error)
 	// Start starts cmd and returns while it runs.
 	Start(ctx context.Context, a scale.Assignment, cmd Command) error
 	// Init makes the user, workdir and envs of defaults what every later process in the sandbox gets.
@@ -298,12 +298,12 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 		if len(s.Args) > 1 {
 			cmd.User = s.Args[1]
 		}
-		msg, err := e.sh(ctx, a, cmd, logged)
+		msg, err := e.sh(ctx, a, cmd, logged, logged)
 		return state, msg, err
 	case stepEnv:
 		envs := maps.Clone(state.Envs)
 		for i := 0; i+1 < len(s.Args); i += 2 {
-			v, msg, err := e.expand(ctx, a, root, s.Args[i+1])
+			v, msg, err := e.expand(ctx, a, root, s.Args[i+1], logged)
 			if err != nil {
 				return state, msg, err
 			}
@@ -316,14 +316,14 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 			dir = path.Join(cmp.Or(state.Workdir, "/"), dir)
 		}
 		script := fmt.Sprintf(`t=%[1]s; [ -d "$t" ] && exit 0; n=$t; while [ ! -d "$(dirname "$n")" ]; do n=$(dirname "$n"); done; mkdir -p "$t" && chown -R %[2]s: "$n"`, shellQuote(dir), shellQuote(state.User))
-		if msg, err := e.sh(ctx, a, withLine(root, script), logged); err != nil {
+		if msg, err := e.sh(ctx, a, withLine(root, script), logged, logged); err != nil {
 			return state, msg, err
 		}
 		state.Workdir = dir
 	case stepUser:
 		name := shellQuote(s.Args[0])
 		script := fmt.Sprintf("id -u %[1]s >/dev/null 2>&1 || useradd --create-home --shell /bin/bash %[1]s", name)
-		if msg, err := e.sh(ctx, a, withLine(root, script), logged); err != nil {
+		if msg, err := e.sh(ctx, a, withLine(root, script), logged, logged); err != nil {
 			return state, msg, err
 		}
 		state.User = s.Args[0]
@@ -331,7 +331,7 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 		if msg, err := e.copyIn(ctx, a, spec, s.FilesHash); err != nil {
 			return state, msg, err
 		}
-		if _, err := e.sh(ctx, a, withLine(root, copyScript(state, s)), logged); err != nil {
+		if _, err := e.sh(ctx, a, withLine(root, copyScript(state, s)), logged, logged); err != nil {
 			return state, fmt.Sprintf("could not copy %s to %s", s.Args[0], s.Args[1]), err
 		}
 	}
@@ -352,8 +352,8 @@ func (e *Executor) copyIn(ctx context.Context, a scale.Assignment, spec Spec, ha
 }
 
 // sh returns the failure the caller sees next to the error; a non-zero exit is a failure.
-func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, out func(string)) (string, error) {
-	code, err := e.guest.Run(ctx, a, cmd, out)
+func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr func(string)) (string, error) {
+	code, err := e.guest.Run(ctx, a, cmd, stdout, stderr)
 	if err != nil {
 		return "could not run a command in the build sandbox", err
 	}
@@ -364,10 +364,10 @@ func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, out 
 	return "", nil
 }
 
-// expand evaluates an ENV value in the guest's shell, so $VAR references resolve and command substitution does not run.
-func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command, value string) (string, string, error) {
+// expand evaluates an ENV value in the guest's shell, so $VAR references resolve and command substitution does not run; the shell's own stderr goes to the log, never into the value.
+func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command, value string, stderr func(string)) (string, string, error) {
 	var lines []string
-	if _, err := e.sh(ctx, a, withLine(root, `printf "%s" "`+envEscaper.Replace(value)+`"`), func(line string) { lines = append(lines, line) }); err != nil {
+	if _, err := e.sh(ctx, a, withLine(root, `printf "%s" "`+envEscaper.Replace(value)+`"`), func(line string) { lines = append(lines, line) }, stderr); err != nil {
 		return "", fmt.Sprintf("could not evaluate the value %q", value), err
 	}
 	return strings.Join(lines, "\n"), "", nil
@@ -375,7 +375,7 @@ func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command,
 
 func (e *Executor) awaitReady(ctx context.Context, a scale.Assignment, cmd Command) error {
 	for {
-		code, err := e.guest.Run(ctx, a, cmd, func(string) {})
+		code, err := e.guest.Run(ctx, a, cmd, func(string) {}, func(string) {})
 		if err == nil && code == 0 {
 			return nil
 		}
