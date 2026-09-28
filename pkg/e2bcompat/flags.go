@@ -2,6 +2,7 @@ package e2bcompat
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -30,11 +31,14 @@ type Flags struct {
 	BuildParallel int
 	BuildTimeout  time.Duration
 	BuildLogLines int
+	BuildDir      string
+	UploadMax     int64
+	BuildS3       s3Config
 }
 
 // NewFlags returns the flag defaults.
 func NewFlags() *Flags {
-	return &Flags{Addr: ":8080", Namespace: "default", BuildParallel: 2, BuildTimeout: 30 * time.Minute, BuildLogLines: 10000}
+	return &Flags{Addr: ":8080", Namespace: "default", BuildParallel: 2, BuildTimeout: 30 * time.Minute, BuildLogLines: 10000, UploadMax: 1 << 30}
 }
 
 // AddFlags registers the --e2b-* flags on fs.
@@ -64,10 +68,24 @@ func (f *Flags) AddFlags(fs *pflag.FlagSet) {
 		"Bound on one build, claim through publish; it is also the lease of the build's sandbox.")
 	fs.IntVar(&f.BuildLogLines, "e2b-build-log-lines", f.BuildLogLines,
 		"Log lines kept per build; later lines are dropped.")
+	fs.StringVar(&f.BuildDir, "e2b-build-dir", f.BuildDir,
+		"Directory that keeps the archives COPY steps upload, taken through this surface's own signed PUT. Every replica must see the same directory, or use --e2b-build-store-s3-bucket.")
+	fs.Int64Var(&f.UploadMax, "e2b-build-upload-max", f.UploadMax,
+		"Largest archive in bytes a signed PUT to --e2b-build-dir takes.")
+	fs.StringVar(&f.BuildS3.Bucket, "e2b-build-store-s3-bucket", f.BuildS3.Bucket,
+		"S3 bucket that keeps the archives COPY steps upload, through presigned PUTs; credentials come from the default AWS chain.")
+	fs.StringVar(&f.BuildS3.Prefix, "e2b-build-store-s3-prefix", f.BuildS3.Prefix,
+		"Key prefix for the archives in --e2b-build-store-s3-bucket; they live under <prefix>/e2b-files/.")
+	fs.StringVar(&f.BuildS3.Endpoint, "e2b-build-store-s3-endpoint", f.BuildS3.Endpoint,
+		"Endpoint of an S3-compatible store instead of AWS.")
+	fs.StringVar(&f.BuildS3.Region, "e2b-build-store-s3-region", f.BuildS3.Region,
+		"Region of --e2b-build-store-s3-bucket.")
+	fs.BoolVar(&f.BuildS3.ForcePathStyle, "e2b-build-store-s3-force-path-style", f.BuildS3.ForcePathStyle,
+		"Address the bucket in the path, as most S3-compatible stores need.")
 }
 
-// ServerOptions reads the key and alias files and returns the server options over inv.
-func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
+// ServerOptions reads the key and alias files, opens the build upload store, and returns the server options over inv.
+func (f *Flags) ServerOptions(ctx context.Context, inv scale.InventorySource) (Options, error) {
 	keys, err := fileLines(f.APIKeyFile, "api key")
 	if err != nil {
 		return Options{}, err
@@ -80,8 +98,9 @@ func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
-	if f.Builds && (f.BuildParallel < 1 || f.BuildTimeout <= 0) {
-		return Options{}, errors.New("--e2b-builds needs --e2b-build-parallel of at least 1 and a positive --e2b-build-timeout")
+	builds, err := f.buildOptions(ctx, secret)
+	if err != nil {
+		return Options{}, err
 	}
 	return Options{
 		Namespace:             f.Namespace,
@@ -93,15 +112,37 @@ func (f *Flags) ServerOptions(inv scale.InventorySource) (Options, error) {
 		Inventory:             inv,
 		TemplateAliases:       aliases,
 		EnvdSecret:            secret,
-		Builds:                f.buildOptions(),
+		Builds:                builds,
 	}, nil
 }
 
-func (f *Flags) buildOptions() BuildOptions {
+func (f *Flags) buildOptions(ctx context.Context, secret []byte) (BuildOptions, error) {
 	if !f.Builds {
-		return BuildOptions{}
+		return BuildOptions{}, nil
 	}
-	return BuildOptions{Parallel: f.BuildParallel, Timeout: f.BuildTimeout, LogLines: f.BuildLogLines}
+	opts := BuildOptions{Parallel: f.BuildParallel, Timeout: f.BuildTimeout, LogLines: f.BuildLogLines}
+	switch {
+	case f.BuildParallel < 1 || f.BuildTimeout <= 0:
+		return BuildOptions{}, errors.New("--e2b-builds needs --e2b-build-parallel of at least 1 and a positive --e2b-build-timeout")
+	case f.BuildDir != "" && f.BuildS3.Bucket != "":
+		return BuildOptions{}, errors.New("--e2b-build-dir and --e2b-build-store-s3-bucket are exclusive")
+	case f.BuildDir != "":
+		if err := os.MkdirAll(f.BuildDir, 0o750); err != nil {
+			return BuildOptions{}, fmt.Errorf("create --e2b-build-dir: %w", err)
+		}
+		root, err := os.OpenRoot(f.BuildDir)
+		if err != nil {
+			return BuildOptions{}, fmt.Errorf("open --e2b-build-dir: %w", err)
+		}
+		opts.Uploads = &dirUploads{root: root, secret: secret, max: f.UploadMax}
+	case f.BuildS3.Bucket != "":
+		store, err := newS3Uploads(ctx, f.BuildS3)
+		if err != nil {
+			return BuildOptions{}, err
+		}
+		opts.Uploads = store
+	}
+	return opts, nil
 }
 
 // AddEnvdSecretFlag registers --e2b-envd-secret-file, which the e2b surface and the envd-proxy must share.

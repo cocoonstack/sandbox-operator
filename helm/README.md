@@ -91,6 +91,11 @@ Do not delete the CRD while NodeInventory objects still exist.
 | `apiserver.e2b.envdSecret.key` | Key within that Secret | `secret` |
 | `apiserver.e2b.builds.enabled` | Serve `Template.build`; the e2b Service `sandbox-apiserver-e2b` then pins each client address to one replica (`sessionAffinity: ClientIP`) | `false` |
 | `apiserver.e2b.builds.parallel` | Builds that run at once per replica | `2` |
+| `apiserver.e2b.builds.uploads.persistentVolumeClaim` | Claim mounted as `--e2b-build-dir` for the archives `COPY` steps upload; every replica must mount the same one | `""` |
+| `apiserver.e2b.builds.uploads.maxBytes` | Largest upload that directory takes | `1073741824` |
+| `apiserver.e2b.builds.uploads.s3.bucket` | S3 bucket for those archives instead of the claim | `""` |
+| `apiserver.e2b.builds.uploads.s3.prefix`, `.endpoint`, `.region`, `.forcePathStyle` | Key prefix, S3-compatible endpoint, region and path-style addressing of that bucket | `""`, `""`, `""`, `false` |
+| `apiserver.e2b.builds.uploads.s3.credentialsSecret` | Secret with `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` loaded into the apiserver's environment; empty uses the pod's own AWS identity | `""` |
 | `apiserver.resources` | Apiserver requests and limits | 100m/128Mi, limit 512Mi |
 | `envdProxy.image.repository` | Proxy image | `ghcr.io/cocoonstack/sandbox-envd-proxy` |
 | `envdProxy.image.tag` | Image tag; pin a release | `latest` |

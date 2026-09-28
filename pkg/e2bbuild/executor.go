@@ -10,8 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +40,7 @@ const (
 	stepEnv     = "ENV"
 	stepWorkdir = "WORKDIR"
 	stepUser    = "USER"
+	stepCopy    = "COPY"
 
 	defaultUser = "user"
 	rootUser    = "root"
@@ -52,6 +55,8 @@ var (
 	ErrUnknownBuild = errors.New("e2bbuild: build not found")
 
 	envEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$(", `\$(`)
+	// FilesHash is the shape of the digest the SDK names a COPY upload by.
+	FilesHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // Request is what a build asked for before it starts.
@@ -60,13 +65,14 @@ type Request struct {
 	Tags []string
 }
 
-// Step is one build instruction: RUN [command, user?], ENV [key, value, ...], WORKDIR [dir] or USER [name].
+// Step is one build instruction: RUN [command, user?], ENV [key, value, ...], WORKDIR [dir], USER [name] or COPY [src, dest, owner?, mode?] of the archive FilesHash names.
 type Step struct {
-	Type string   `json:"type"`
-	Args []string `json:"args"`
+	Type      string   `json:"type"`
+	Args      []string `json:"args"`
+	FilesHash string   `json:"filesHash,omitempty"`
 }
 
-func (s Step) problem() string {
+func (s Step) problem(canCopy bool) string {
 	switch s.Type {
 	case stepRun, stepWorkdir, stepUser:
 		if len(s.Args) == 0 || s.Args[0] == "" {
@@ -76,8 +82,16 @@ func (s Step) problem() string {
 		if len(s.Args) == 0 || len(s.Args)%2 != 0 {
 			return "needs key and value pairs"
 		}
-	case "COPY":
-		return "COPY is not supported yet"
+	case stepCopy:
+		if !canCopy {
+			return "no upload store is configured"
+		}
+		if len(s.Args) < 2 || s.Args[0] == "" || s.Args[1] == "" {
+			return "needs a source and a destination"
+		}
+		if !FilesHash.MatchString(s.FilesHash) {
+			return "needs the filesHash of its upload"
+		}
 	default:
 		return "not a supported step type"
 	}
@@ -94,6 +108,7 @@ type Spec struct {
 	Steps      []Step
 	StartCmd   string
 	ReadyCmd   string
+	Archive    func(ctx context.Context, hash string) (io.ReadCloser, error)
 	Publish    func(ctx context.Context, node string, key scale.PoolKey, digest string) error
 }
 
@@ -113,6 +128,8 @@ type Guest interface {
 	Start(ctx context.Context, a scale.Assignment, cmd Command) error
 	// Init makes the user, workdir and envs of defaults what every later process in the sandbox gets.
 	Init(ctx context.Context, a scale.Assignment, defaults Command) error
+	// Write stores r at path in the sandbox as root.
+	Write(ctx context.Context, a scale.Assignment, path string, r io.Reader) error
 }
 
 // LogEntry is one line of a build's log.
@@ -243,7 +260,7 @@ func (e *Executor) prepare(ctx context.Context, id string, a scale.Assignment, s
 	state := Command{User: defaultUser, Envs: map[string]string{}}
 	for i, step := range spec.Steps {
 		phase := strconv.Itoa(i + 1)
-		next, msg, err := e.step(ctx, id, phase, a, state, step)
+		next, msg, err := e.step(ctx, id, phase, a, spec, state, step)
 		if err != nil {
 			return phase, fmt.Sprintf("step %s (%s) failed: %s", phase, step.Type, msg), err
 		}
@@ -267,7 +284,7 @@ func (e *Executor) prepare(ctx context.Context, id string, a scale.Assignment, s
 	return "", "", nil
 }
 
-func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignment, state Command, s Step) (Command, string, error) {
+func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignment, spec Spec, state Command, s Step) (Command, string, error) {
 	root := Command{User: rootUser, Envs: state.Envs}
 	logged := func(line string) { e.log(id, phase, "info", line) }
 	switch s.Type {
@@ -305,8 +322,28 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 			return state, msg, err
 		}
 		state.User = s.Args[0]
+	case stepCopy:
+		if msg, err := e.copyIn(ctx, a, spec, s.FilesHash); err != nil {
+			return state, msg, err
+		}
+		if _, err := e.sh(ctx, a, withLine(root, copyScript(state, s)), logged); err != nil {
+			return state, fmt.Sprintf("could not copy %s to %s", s.Args[0], s.Args[1]), err
+		}
 	}
 	return state, "", nil
+}
+
+// copyIn writes the upload hash names to /tmp/<hash>.tar in the sandbox.
+func (e *Executor) copyIn(ctx context.Context, a scale.Assignment, spec Spec, hash string) (string, error) {
+	archive, err := spec.Archive(ctx, hash)
+	if err != nil {
+		return "could not read the uploaded files", err
+	}
+	defer func() { _ = archive.Close() }()
+	if err := e.guest.Write(ctx, a, "/tmp/"+hash+".tar", archive); err != nil {
+		return "could not copy the uploaded files into the build sandbox", err
+	}
+	return "", nil
 }
 
 // sh returns the failure the caller sees next to the error; a non-zero exit is a failure.
@@ -407,10 +444,10 @@ func (e *Executor) sweep(now time.Time) {
 	}
 }
 
-// Invalid names the first step a build cannot run, empty when every step can.
-func Invalid(steps []Step) string {
+// Invalid names the first step a build cannot run, empty when every step can; a COPY needs canCopy.
+func Invalid(steps []Step, canCopy bool) string {
 	for i, s := range steps {
-		if p := s.problem(); p != "" {
+		if p := s.problem(canCopy); p != "" {
 			return fmt.Sprintf("step %d (%s): %s", i+1, s.Type, p)
 		}
 	}

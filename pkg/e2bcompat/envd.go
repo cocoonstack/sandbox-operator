@@ -17,6 +17,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/projecteru2/core/log"
@@ -122,6 +123,23 @@ func (g envdGuest) Start(ctx context.Context, a scale.Assignment, cmd e2bbuild.C
 // Init sets the defaults with no access token, which envd takes as first-time setup.
 func (g envdGuest) Init(ctx context.Context, a scale.Assignment, defaults e2bbuild.Command) error {
 	return g.s.initEnvd(ctx, a.Node, a.SandboxName, envdInit{EnvVars: defaults.Envs, DefaultUser: defaults.User, DefaultWorkdir: defaults.Workdir})
+}
+
+func (g envdGuest) Write(ctx context.Context, a scale.Assignment, path string, r io.Reader) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+envdHostAlias+"/files?"+url.Values{"path": {path}, "username": {"root"}}.Encode(), r)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := g.s.envdRoundTrip(ctx, a.Node, a.SandboxName, req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("envd file write in %s: envd answered %d", a.SandboxName, resp.StatusCode)
+	}
+	return nil
 }
 
 // lineSplitter hands out complete lines, and a partial one once it outgrows logLineMax.

@@ -266,6 +266,13 @@ type TemplateBuildStartV2 struct {
 	ReadyCmd          string          `json:"readyCmd"`
 }
 
+// TemplateBuildFileUpload is the GET /templates/{templateID}/files/{hash} reply: the archive is present, or the SDK PUTs it to URL with Headers.
+type TemplateBuildFileUpload struct {
+	Present bool              `json:"present"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 // TemplateBuildInfo is the GET /templates/{templateID}/builds/{buildID}/status reply.
 type TemplateBuildInfo struct {
 	TemplateID string             `json:"templateID"`

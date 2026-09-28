@@ -40,6 +40,13 @@ sandbox-apiserver \
 | `--e2b-build-parallel` | `2` | Builds that run at once; a start beyond them answers `429` and the build stays waiting. |
 | `--e2b-build-timeout` | `30m` | Bound on one build, claim through publish, and the lease of its sandbox. |
 | `--e2b-build-log-lines` | `10000` | Log lines kept per build; later lines are dropped. |
+| `--e2b-build-dir` | — | Directory that keeps the archives `COPY` steps upload, through this surface's own signed `PUT` (see [Uploads](#uploads)). Exclusive with the S3 bucket. |
+| `--e2b-build-upload-max` | `1073741824` | Largest archive in bytes a signed `PUT` to `--e2b-build-dir` takes; a larger one answers `413`. |
+| `--e2b-build-store-s3-bucket` | — | S3 bucket that keeps the archives instead, through presigned `PUT`s; credentials come from the default AWS chain. |
+| `--e2b-build-store-s3-prefix` | — | Key prefix in that bucket; archives live under `<prefix>/e2b-files/<namespace>/<template>/<hash>.tar`. |
+| `--e2b-build-store-s3-endpoint` | — | Endpoint of an S3-compatible store instead of AWS. |
+| `--e2b-build-store-s3-region` | — | Region of the bucket. |
+| `--e2b-build-store-s3-force-path-style` | `false` | Address the bucket in the path, as most S3-compatible stores need. |
 
 Startup **fails** if neither `--e2b-api-key-file` nor `--e2b-allow-anonymous` is
 set, so a misconfiguration cannot silently expose an open claim endpoint. It
@@ -204,8 +211,8 @@ needs an alias line such as `e2bdev/base ghcr.io/cocoonstack/sandbox/e2b-rt:24.0
 The build then claims a sandbox of that pool on the `none` lane, runs its steps
 and start command in it, promotes it as `e2b/<namespace>/<name>`, deletes the
 name on every other node that held an earlier build, sets the requested tags,
-and releases the claim; a rebuild replaces the previous build. `COPY` steps,
-`fromTemplate` and `fromImageRegistry` answer `400`, as does a malformed step;
+and releases the claim; a rebuild replaces the previous build. `fromTemplate`
+and `fromImageRegistry` answer `400`, as does a malformed step;
 `force` is accepted and ignored (there is no layer cache); `waiting` stays
 reported while every build slot runs, and the start answers `429`.
 
@@ -226,6 +233,34 @@ which it reads from envd first because envd replaces the map it is given. A
 create without `envVars` makes no extra call, and a create from a pool image is
 unchanged. The build sandbox has no network, since a promote captures only the
 `none` lane: a step that downloads (`pip install`, `apt-get install`) fails.
+
+### Uploads
+
+A `COPY` step reads an archive the SDK uploads before the build starts. The SDK
+asks `GET /templates/{templateID}/files/{hash}` whether the archive of that
+step's sources is stored; `hash` is the SDK's own digest of the step and its
+files, so a rebuild with the same sources uploads nothing. When the archive is
+missing the answer carries a URL the SDK `PUT`s the archive to. With
+`--e2b-build-dir` that URL is this surface's own `PUT` on the same path, signed
+with an HMAC of the namespace, template, hash and an expiry one hour out, keyed
+by the envd secret: the `PUT` carries no API key, so the signature is its only
+credential, and a wrong or expired one answers `401`. The body is bounded by
+`--e2b-build-upload-max` and lands under a temporary name that is renamed into
+place once complete. With `--e2b-build-store-s3-bucket` the URL is an S3
+presigned `PUT`, which `--e2b-build-upload-max` does not bound, and presence is a
+`HEAD` of the object. The build writes the
+archive into the sandbox through envd as `/tmp/<hash>.tar`, unpacks it as root
+and moves the step's source to its destination with Docker `COPY` semantics, as
+upstream e2b's copy script does: a destination ending in `/` is a directory, a
+relative one is under the current workdir, and the entries are owned by the
+step's user (else the current one) with the step's mode when it names one.
+Neither backend can check the archive against `hash`, which covers the files'
+modes and contents rather than the archive's bytes; an archive that does not
+unpack or lacks the step's source fails the step. An archive stays after its
+template is deleted: the operator removes no upload. Without either flag the files
+endpoint is not served and a build with a `COPY` step answers `400`. A deployment with more than one
+replica needs S3 or one volume every replica mounts: the chart mounts
+`apiserver.e2b.builds.uploads.persistentVolumeClaim` there when it is set.
 
 `GET /templates/{templateID}/builds/{buildID}/status` pages `logEntries` by
 `logsOffset` and `limit` and filters them by `level`; a failed build reports
