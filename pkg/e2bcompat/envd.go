@@ -45,13 +45,6 @@ const (
 	logLineMax       = 64 << 10
 )
 
-// relayEnvs point a guest process at the node's egress proxy, as silkd's unit points its own.
-var relayEnvs = map[string]string{
-	"http_proxy":  "http://127.0.0.1:3128",
-	"https_proxy": "http://127.0.0.1:3128",
-	"no_proxy":    "localhost,127.0.0.1,::1,169.254.169.254",
-}
-
 // envdMetrics is envd's GET /metrics reply: the guest's own view of its CPU, memory and root disk.
 type envdMetrics struct {
 	Timestamp  int64   `json:"ts"`
@@ -108,14 +101,14 @@ type envdGuest struct {
 	s *Server
 }
 
-func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, out func(string)) (int, error) {
-	stdout, stderr := &lineSplitter{out: out}, &lineSplitter{out: out}
+func (g envdGuest) Run(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, stdout, stderr e2bbuild.LineFunc) (int, error) {
+	outLines, errLines := &lineSplitter{out: stdout}, &lineSplitter{out: stderr}
 	code, _, err := g.s.envdProcess(ctx, a, cmd, func(o, e []byte) {
-		stdout.write(o)
-		stderr.write(e)
+		outLines.write(o)
+		errLines.write(e)
 	})
-	stdout.flush()
-	stderr.flush()
+	outLines.flush()
+	errLines.flush()
 	return code, err
 }
 
@@ -128,9 +121,9 @@ func (g envdGuest) Start(ctx context.Context, a scale.Assignment, cmd e2bbuild.C
 	return err
 }
 
-// Init sets the defaults with no access token, which envd takes as first-time setup.
+// Init sets the defaults with no access token, which envd takes as first-time setup; like every build call it rides the claim's own relay, which keeps the sandbox awake.
 func (g envdGuest) Init(ctx context.Context, a scale.Assignment, defaults e2bbuild.Command) error {
-	return g.s.initEnvd(ctx, a.Node, a.SandboxName, envdInit{EnvVars: defaults.Envs, DefaultUser: defaults.User, DefaultWorkdir: defaults.Workdir})
+	return g.s.initEnvd(ctx, a.Node, a.SandboxName, a.Token, envdInit{EnvVars: defaults.Envs, DefaultUser: defaults.User, DefaultWorkdir: defaults.Workdir})
 }
 
 func (g envdGuest) Write(ctx context.Context, a scale.Assignment, path string, r io.Reader) error {
@@ -139,7 +132,7 @@ func (g envdGuest) Write(ctx context.Context, a scale.Assignment, path string, r
 		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := g.s.envdRoundTrip(ctx, a.Node, a.SandboxName, req)
+	resp, err := g.s.envdRoundTrip(ctx, a.Node, a.SandboxName, a.Token, req)
 	if err != nil {
 		return err
 	}
@@ -153,7 +146,7 @@ func (g envdGuest) Write(ctx context.Context, a scale.Assignment, path string, r
 // lineSplitter hands out complete lines, and a partial one once it outgrows logLineMax.
 type lineSplitter struct {
 	buf []byte
-	out func(string)
+	out e2bbuild.LineFunc
 }
 
 func (l *lineSplitter) write(p []byte) {
@@ -226,7 +219,7 @@ func (s *Server) readEnvdMetrics(ctx context.Context, node, id string) (envdMetr
 }
 
 // initEnvd sets envd's access token, defaults and env inside sandbox id, and stamps the guest clock.
-func (s *Server) initEnvd(ctx context.Context, node, id string, req envdInit) error {
+func (s *Server) initEnvd(ctx context.Context, node, id, relay string, req envdInit) error {
 	ctx, cancel := context.WithTimeout(ctx, initTimeout)
 	defer cancel()
 	req.Timestamp = time.Now()
@@ -234,7 +227,7 @@ func (s *Server) initEnvd(ctx context.Context, node, id string, req envdInit) er
 	if err != nil {
 		return err
 	}
-	status, _, err := s.envdCall(ctx, node, id, http.MethodPost, "/init", "", payload)
+	status, _, err := s.envdCallOver(ctx, node, id, relay, http.MethodPost, "/init", "", payload)
 	if err != nil {
 		return fmt.Errorf("envd init of %s: %w", id, err)
 	}
@@ -276,7 +269,7 @@ func (s *Server) handOver(ctx context.Context, child scale.Assignment, token str
 	if err := s.store.SetInstanceMetadata(ctx, child.Node, child.SandboxName, doc); err != nil {
 		return err
 	}
-	return s.initEnvd(ctx, child.Node, child.SandboxName, envdInit{AccessToken: token})
+	return s.initEnvd(ctx, child.Node, child.SandboxName, "", envdInit{AccessToken: token})
 }
 
 // releaseAll gives back claims whose envd could not be initialized; a failed release is left to the lease.
@@ -301,7 +294,7 @@ func (s *Server) envdProcess(ctx context.Context, a scale.Assignment, cmd e2bbui
 	}
 	req.Header.Set("Content-Type", "application/connect+json")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cmd.User+":")))
-	resp, err := s.envdRoundTrip(ctx, a.Node, a.SandboxName, req)
+	resp, err := s.envdRoundTrip(ctx, a.Node, a.SandboxName, a.Token, req)
 	if err != nil {
 		return 0, false, err
 	}
@@ -345,6 +338,10 @@ func (s *Server) envdProcess(ctx context.Context, a scale.Assignment, cmd e2bbui
 
 // envdCall sends one request to envd inside sandbox id over its node's passive relay and reads the bounded reply; token authenticates it to envd.
 func (s *Server) envdCall(ctx context.Context, node, id, method, path, token string, body []byte) (int, []byte, error) {
+	return s.envdCallOver(ctx, node, id, "", method, path, token, body)
+}
+
+func (s *Server) envdCallOver(ctx context.Context, node, id, relay, method, path, token string, body []byte) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+envdHostAlias+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -355,7 +352,7 @@ func (s *Server) envdCall(ctx context.Context, node, id, method, path, token str
 	if token != "" {
 		req.Header.Set("X-Access-Token", token)
 	}
-	resp, err := s.envdRoundTrip(ctx, node, id, req)
+	resp, err := s.envdRoundTrip(ctx, node, id, relay, req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -367,9 +364,9 @@ func (s *Server) envdCall(ctx context.Context, node, id, method, path, token str
 	return resp.StatusCode, reply, nil
 }
 
-// envdRoundTrip writes req to envd inside sandbox id over its node's passive relay; closing the reply's body closes the connection.
-func (s *Server) envdRoundTrip(ctx context.Context, node, id string, req *http.Request) (*http.Response, error) {
-	conn, err := s.store.DialGuestPort(ctx, node, id, envdPort)
+// envdRoundTrip writes req to envd inside sandbox id over its node's relay, passive with an empty relay token; closing the reply's body closes the connection.
+func (s *Server) envdRoundTrip(ctx context.Context, node, id, relay string, req *http.Request) (*http.Response, error) {
+	conn, err := s.store.DialGuestPort(ctx, node, id, relay, envdPort)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +394,7 @@ func withRelay(route string, envs map[string]string) map[string]string {
 	if route != sandboxd.NetRouteRelay {
 		return envs
 	}
-	out := maps.Clone(relayEnvs)
+	out := maps.Clone(sandboxd.RelayEnv)
 	maps.Copy(out, envs)
 	return out
 }

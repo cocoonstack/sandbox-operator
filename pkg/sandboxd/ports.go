@@ -2,13 +2,16 @@ package sandboxd
 
 import (
 	"bufio"
+	"cmp"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -17,24 +20,33 @@ const (
 	portReplyMax = 16 << 10
 )
 
-// DialPort opens a guest port of sandbox id through this node's relay with the node api_token, which the node keeps passive: a paused sandbox answers 409 unwoken.
-func (c *Client) DialPort(ctx context.Context, id string, port uint16) (net.Conn, error) {
-	u, _ := url.Parse(c.baseURL)
+// DialPort opens a guest port of sandbox id through this node's relay; an empty token presents the node api_token, which the node keeps passive (a paused sandbox answers 409 unwoken), the sandbox's own token wakes it and stamps activity.
+func (c *Client) DialPort(ctx context.Context, id, token string, port uint16) (net.Conn, error) {
 	var d net.Dialer
-	return DialPort(ctx, &d, u.Host, id, c.token, port)
+	return DialPort(ctx, &d, c.baseURL, id, cmp.Or(token, c.token), port)
 }
 
-// DialPort opens the node's GET /v1/sandboxes/{id}/ports/{port} relay; with the sandbox's own token the node wakes a paused sandbox for it.
-func DialPort(ctx context.Context, d *net.Dialer, addr, id, token string, port uint16) (net.Conn, error) {
-	conn, err := d.DialContext(ctx, "tcp", addr)
+// DialPort opens the node's GET /v1/sandboxes/{id}/ports/{port} relay at base, a host:port or an http(s) origin; with the sandbox's own token the node wakes a paused sandbox for it.
+func DialPort(ctx context.Context, d *net.Dialer, base, id, token string, port uint16) (net.Conn, error) {
+	scheme, addr, serverName := relayTarget(base)
+	tcp, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial node: %w", err)
 	}
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = tcp.Close() })
 	defer stop()
+	conn := tcp
+	if scheme == "https" {
+		tc := tls.Client(tcp, &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12})
+		if err = tc.HandshakeContext(ctx); err != nil {
+			_ = tcp.Close()
+			return nil, fmt.Errorf("tls to node: %w", err)
+		}
+		conn = tc
+	}
 
 	path := "/v1/sandboxes/" + url.PathEscape(id) + "/ports/" + strconv.FormatUint(uint64(port), 10)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+addr+path, nil)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -69,3 +81,14 @@ type bufConn struct {
 }
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+func relayTarget(base string) (scheme, addr, serverName string) {
+	scheme, host, port := "http", base, ""
+	if u, err := url.Parse(base); err == nil && strings.Contains(base, "://") {
+		scheme, host, port = u.Scheme, u.Hostname(), u.Port()
+	} else if h, p, err := net.SplitHostPort(base); err == nil {
+		host, port = h, p
+	}
+	port = cmp.Or(port, map[bool]string{true: "443", false: "80"}[scheme == "https"])
+	return scheme, net.JoinHostPort(host, port), host
+}

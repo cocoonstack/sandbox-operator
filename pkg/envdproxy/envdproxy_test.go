@@ -105,12 +105,20 @@ func TestProxyRelaysASignedFileURLWithoutTheToken(t *testing.T) {
 	if strings.Contains(string(body), accessTokenHeader) {
 		t.Errorf("a signed request gained an access token on the way: %q", body)
 	}
+	if node.lastAuth != "Bearer root" {
+		t.Errorf("a signed request relayed with %q, want the node token: the passive relay never wakes a paused sandbox for a stranger's signature", node.lastAuth)
+	}
 	for _, path := range []string{"/files?path=%2Fetc%2Fhosts", "/envs?signature=v1_abc"} {
 		resp := request(t, h, "49983-sb-abc."+testDomain, path, "")
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401: only a signed file URL goes without the token", path, resp.StatusCode)
 		}
+	}
+	resp = request(t, h, "3000-sb-abc."+testDomain, "/files?path=%2Fetc%2Fhosts&signature=v1_abc&signature_expiration=9", "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a signed file URL on port 3000: status %d, want 401: only envd's port verifies a signature", resp.StatusCode)
 	}
 }
 
@@ -211,7 +219,7 @@ func TestProxyAdmitsOnlyTheTokenDerivedFromThePublishedClaim(t *testing.T) {
 	src := &countingSource{StaticInventorySource: scale.NewStaticInventorySource()}
 	src.Put(&scale.NodeInventory{Name: "node-0", Node: "node-0", Address: owner.addr, Entries: []scale.InventoryEntry{{Name: "sandboxes/s1", ID: "sb_abc"}}})
 	routed := scale.NewScatterGatherStore(src, scale.WithClaimRouting("root", scale.NewSandboxdClientFactory()))
-	r, err := NewResolver(scale.NewScatterGatherStore(src), routed, src, "", []byte(testSecret))
+	r, err := NewResolver(routed, src, "", []byte(testSecret))
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -293,7 +301,7 @@ func TestProxyMapsNodeRefusals(t *testing.T) {
 		nodeStatus int
 		want       int
 	}{
-		{"wrong token", http.StatusNotFound, http.StatusUnauthorized},
+		{"stale owner", http.StatusNotFound, http.StatusUnauthorized},
 		{"bad port", http.StatusBadRequest, http.StatusBadRequest},
 		{"no guest listener", http.StatusBadGateway, http.StatusBadGateway},
 	}
@@ -424,6 +432,9 @@ func TestNewServerRequiresADomainAndAResolver(t *testing.T) {
 	if _, err := NewServer(nil, Options{Domain: testDomain}); err == nil {
 		t.Error("NewServer accepted a nil resolver")
 	}
+	if _, err := NewServer(resolverFunc(nil), Options{Domain: testDomain}); err == nil {
+		t.Error("NewServer without a node token must fail")
+	}
 	if _, err := NewServer(resolverFunc(nil), Options{}); err == nil {
 		t.Error("NewServer accepted an empty domain; every sandbox host is derived from it")
 	}
@@ -431,7 +442,7 @@ func TestNewServerRequiresADomainAndAResolver(t *testing.T) {
 
 func newTestProxy(t *testing.T, r Resolver, opts ...func(*Options)) http.Handler {
 	t.Helper()
-	o := Options{Domain: testDomain}
+	o := Options{Domain: testDomain, NodeToken: "root"}
 	for _, fn := range opts {
 		fn(&o)
 	}
@@ -450,7 +461,7 @@ func unpublishedResolver(t *testing.T, nodes ...*fakeNode) (Resolver, *countingS
 		src.Put(&scale.NodeInventory{Name: name, Node: name, Address: n.addr})
 	}
 	routed := scale.NewScatterGatherStore(src, scale.WithClaimRouting("root", scale.NewSandboxdClientFactory()))
-	r, err := NewResolver(scale.NewScatterGatherStore(src), routed, src, "", []byte(testSecret))
+	r, err := NewResolver(routed, src, "", []byte(testSecret))
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -566,7 +577,7 @@ func (n *fakeNode) handle(conn net.Conn, guest func(net.Conn)) {
 	}
 	n.lastPath, n.lastAuth = req.URL.Path, req.Header.Get("Authorization")
 	refuse := n.refuse
-	if refuse == 0 && n.lastAuth != "Bearer tok" {
+	if refuse == 0 && n.lastAuth != "Bearer tok" && n.lastAuth != "Bearer root" {
 		refuse = http.StatusNotFound
 	}
 	if refuse != 0 {

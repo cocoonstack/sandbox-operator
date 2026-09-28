@@ -28,10 +28,11 @@ const (
 var buildNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://github.com/cocoonstack/sandbox-operator/e2b"))
 
 type templateHolder struct {
-	node   string
-	key    scale.PoolKey
-	digest string
-	labels map[string]string
+	node    string
+	key     scale.PoolKey
+	digest  string
+	labels  map[string]string
+	created time.Time
 }
 
 type builtTemplate struct {
@@ -105,7 +106,7 @@ func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	built := builtTemplates(nodes, s.templateScope(r))
+	built := builtTemplates(nodes, s.templateScope(r), "")
 	for _, name := range slices.Sorted(maps.Keys(built)) {
 		b := built[name]
 		created := b.created.UTC().Format(time.RFC3339)
@@ -271,7 +272,7 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 		s.deleteSnapshot(w, r)
 		return
 	}
-	if err := forEachHolder(b.holders, func(h templateHolder) error { return s.store.DeleteTemplate(r.Context(), h.node, h.key) }); err != nil {
+	if err := forEachHolder(b.holders, func(h templateHolder) error { return s.store.DeleteTemplate(r.Context(), h.node, h.key, "") }); err != nil {
 		logger.Errorf(r.Context(), err, "e2b delete template failed template=%s", name)
 		writeError(w, http.StatusInternalServerError, "failed to delete the template")
 		return
@@ -307,7 +308,7 @@ func (s *Server) resolveTemplate(r *http.Request, name string) (*builtTemplate, 
 	if err != nil {
 		return nil, aliased, err
 	}
-	return builtTemplates(nodes, s.templateScope(r))[name], aliased || advertisedIn(nodes, name), nil
+	return builtTemplates(nodes, s.templateScope(r), name)[name], aliased || advertisedIn(nodes, name), nil
 }
 
 func (s *Server) templateScope(r *http.Request) string {
@@ -331,7 +332,9 @@ func (s *Server) liveTags(r *http.Request, b *builtTemplate) (map[string]string,
 }
 
 func (s *Server) writeTags(r *http.Request, b *builtTemplate, tags map[string]string) error {
-	return forEachHolder(b.holders, func(h templateHolder) error { return s.store.SetTemplateLabels(r.Context(), h.node, h.key, tags) })
+	return forEachHolder(b.holders, func(h templateHolder) error {
+		return s.store.SetTemplateLabels(r.Context(), h.node, h.key, tags, h.digest)
+	})
 }
 
 func (s *Server) writeTagError(w http.ResponseWriter, r *http.Request, err error, name string) {
@@ -343,13 +346,13 @@ func (s *Server) writeTagError(w http.ResponseWriter, r *http.Request, err error
 	writeError(w, http.StatusInternalServerError, "failed to update the template's tags")
 }
 
-// builtTemplates groups the operator-owned templates under scope by their bare name.
-func builtTemplates(nodes []*scale.NodeInventory, scope string) map[string]*builtTemplate {
+// builtTemplates groups the operator-owned templates under scope by their bare name, or only the one named only.
+func builtTemplates(nodes []scale.NodePools, scope, only string) map[string]*builtTemplate {
 	out := map[string]*builtTemplate{}
 	for _, inv := range nodes {
 		for _, t := range inv.Templates {
 			name, ok := strings.CutPrefix(t.Template, scope)
-			if !ok || t.Tenant != "" {
+			if !ok || t.Tenant != "" || only != "" && name != only {
 				continue
 			}
 			b := out[name]
@@ -397,8 +400,8 @@ func buildUUID(digest string) string {
 	return uuid.NewSHA1(buildNamespace, []byte(digest)).String()
 }
 
-func advertisedIn(nodes []*scale.NodeInventory, image string) bool {
-	return slices.ContainsFunc(nodes, func(inv *scale.NodeInventory) bool {
+func advertisedIn(nodes []scale.NodePools, image string) bool {
+	return slices.ContainsFunc(nodes, func(inv scale.NodePools) bool {
 		return slices.ContainsFunc(inv.Pools, func(pc scale.PoolCapacity) bool { return pc.Template == image })
 	})
 }

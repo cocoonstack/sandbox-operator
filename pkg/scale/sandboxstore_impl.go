@@ -126,11 +126,11 @@ type SandboxdClient interface {
 	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
-	DeleteTemplate(ctx context.Context, key sandboxd.PoolKey) error
+	DeleteTemplate(ctx context.Context, key sandboxd.PoolKey, digest string) error
 	Promote(ctx context.Context, id, template string) (sandboxd.PoolKey, string, error)
-	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string) error
+	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string, digest string) error
 	Info(ctx context.Context) (*sandboxd.NodeInfo, error)
-	DialPort(ctx context.Context, id string, port uint16) (net.Conn, error)
+	DialPort(ctx context.Context, id, token string, port uint16) (net.Conn, error)
 	SetInstanceMetadata(ctx context.Context, id string, doc []byte) error
 
 	// Sandbox and SandboxesByClaimRef read the node's own index, which a published inventory lags.
@@ -233,15 +233,14 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	if s.sandboxdFactory == nil {
 		return Assignment{}, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
 	}
-	candidates, err := s.warmCandidates(ctx, pool)
+	nodes, err := s.src.NodeCapacities(ctx)
 	if err != nil {
-		return Assignment{}, err
+		return Assignment{}, fmt.Errorf("scale: enumerate node capacity: %w", err)
 	}
+	candidates := warmCandidates(nodes, pool)
 	promoted := len(candidates) == 0
 	if promoted {
-		if candidates, err = s.templateCandidates(ctx, pool); err != nil {
-			return Assignment{}, err
-		}
+		candidates = templateCandidates(nodes, pool)
 	}
 	if len(candidates) == 0 {
 		return Assignment{}, fmt.Errorf("scale: claim %s/%s: no node advertises warm capacity for template %q net %q size %q: %w", namespace, name, pool.Template, pool.Net, pool.Size, ErrNoWarmCapacity)
@@ -268,7 +267,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, spec)
 		redirect, _ := errors.AsType[*sandboxd.RedirectError](claimErr)
 		if redirect != nil {
-			node, res, claimErr = s.claimRedirected(ctx, node, redirect, spec)
+			node, res, claimErr = s.claimRedirected(ctx, nodes, node, redirect, spec)
 		}
 		if claimErr == nil {
 			s.index.remember(nameKey(namespace, name), node)
@@ -352,11 +351,11 @@ func (s *scatterGatherStore) matchOnNode(ctx context.Context, op, node string, m
 	return nil
 }
 
-func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, redirect *sandboxd.RedirectError, spec sandboxd.ClaimSpec) (string, sandboxd.ClaimResult, error) {
+func (s *scatterGatherStore) claimRedirected(ctx context.Context, nodes []NodePools, from string, redirect *sandboxd.RedirectError, spec sandboxd.ClaimSpec) (string, sandboxd.ClaimResult, error) {
 	logger := log.WithFunc("scale.claimRedirected")
 	spec.NoRedirect = true
 	for _, target := range redirect.Targets {
-		node := s.nodeForAddress(ctx, target)
+		node := nodeForAddress(nodes, target)
 		if node == "" {
 			logger.Debugf(ctx, "redirect target is no known node; skipping from=%s target=%s", from, target)
 			continue
@@ -372,53 +371,6 @@ func (s *scatterGatherStore) claimRedirected(ctx context.Context, from string, r
 		logger.Debugf(ctx, "redirect target delivered nothing; skipping from=%s node=%s err=%v", from, node, err)
 	}
 	return from, sandboxd.ClaimResult{}, redirect
-}
-
-func (s *scatterGatherStore) nodeForAddress(ctx context.Context, addr string) string {
-	nodes, err := s.src.NodeCapacities(ctx)
-	if err != nil {
-		return ""
-	}
-	if i := slices.IndexFunc(nodes, func(n NodePools) bool { return n.Address == addr }); i >= 0 {
-		return nodes[i].Node
-	}
-	return ""
-}
-
-func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
-	nodes, err := s.src.NodeCapacities(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node capacity: %w", err)
-	}
-	var out []warmCandidate
-	for _, n := range nodes {
-		if n.Address == "" {
-			continue
-		}
-		for _, pc := range n.Pools {
-			if pc.Warm > 0 && poolCapacityMatches(pc, pool) {
-				out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: pc.Warm})
-			}
-		}
-	}
-	return out, nil
-}
-
-// templateCandidates lists the nodes whose inventory holds pool as a promoted template, for a claim no warm pool serves.
-func (s *scatterGatherStore) templateCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
-	nodes, err := s.src.NodeCapacities(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node capacity: %w", err)
-	}
-	var out []warmCandidate
-	for _, n := range nodes {
-		if n.Address != "" && slices.ContainsFunc(n.Templates, func(t PromotedTemplate) bool {
-			return poolCapacityMatches(PoolCapacity{Template: t.Template, Net: t.Net, Size: t.Size}, pool)
-		}) {
-			out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: 1})
-		}
-	}
-	return out, nil
 }
 
 func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, labelSel labels.Selector, fieldSel fields.Selector, w *watch.ProxyWatcher, ch chan watch.Event) {
@@ -808,6 +760,41 @@ func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ct
 }
 
 // poolCapacityMatches compares pc against key, defaulting each unset net/size axis.
+func nodeForAddress(nodes []NodePools, addr string) string {
+	if i := slices.IndexFunc(nodes, func(n NodePools) bool { return n.Address == addr }); i >= 0 {
+		return nodes[i].Node
+	}
+	return ""
+}
+
+func warmCandidates(nodes []NodePools, pool PoolKey) []warmCandidate {
+	var out []warmCandidate
+	for _, n := range nodes {
+		if n.Address == "" {
+			continue
+		}
+		for _, pc := range n.Pools {
+			if pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+				out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: pc.Warm})
+			}
+		}
+	}
+	return out
+}
+
+// templateCandidates lists the nodes whose inventory holds pool as a promoted template, for a claim no warm pool serves.
+func templateCandidates(nodes []NodePools, pool PoolKey) []warmCandidate {
+	var out []warmCandidate
+	for _, n := range nodes {
+		if n.Address != "" && slices.ContainsFunc(n.Templates, func(t PromotedTemplate) bool {
+			return poolCapacityMatches(PoolCapacity{Template: t.Template, Net: t.Net, Size: t.Size}, pool)
+		}) {
+			out = append(out, warmCandidate{node: n.Node, addr: n.Address, warm: 1})
+		}
+	}
+	return out
+}
+
 func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 	return pc.Template == key.Template &&
 		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&

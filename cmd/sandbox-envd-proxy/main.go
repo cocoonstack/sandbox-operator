@@ -45,10 +45,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.Inventory.AddFlags(fs)
 	fs.StringVar(&o.Domain, "domain", o.Domain,
 		"Base domain sandbox hosts are derived from, as {port}-{sandboxID}.{domain}. Must match the apiserver's --e2b-domain.")
-	fs.StringVar(&o.SandboxdToken, "sandboxd-token", o.SandboxdToken,
-		"Fleet root sandboxd api_token, which reads a sandbox's claim token to verify its envd access token. Prefer --sandboxd-token-file for a Secret mount.")
-	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
-		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+	sandboxd.AddTokenFlags(fs, &o.SandboxdToken, &o.SandboxdTokenFile)
 	e2bcompat.AddEnvdSecretFlag(fs, &o.EnvdSecretFile)
 	fs.StringVar(&o.Namespace, "namespace", o.Namespace,
 		"Namespace inventory lookups are filtered to; empty matches every namespace. Not an access boundary: a caller holding a sandbox's token reaches it in any namespace.")
@@ -68,7 +65,7 @@ func main() {
 	o.addFlags(fs)
 	_ = fs.Parse(os.Args[1:])
 	if err := run(ctx, o); err != nil {
-		log.WithFunc("main").Fatalf(ctx, err, "sandbox-envd-proxy exited")
+		log.WithFunc("main.main").Fatalf(ctx, err, "sandbox-envd-proxy exited")
 	}
 }
 
@@ -78,11 +75,11 @@ func run(ctx context.Context, o *options) error {
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := kubeinventory.NewCache(ctx, restCfg)
+	informers, err := kubeinventory.NewCache(ctx, restCfg)
 	if err != nil {
 		return err
 	}
-	inv, err := kubeinventory.New(ctx, reader, o.Inventory)
+	inv, err := kubeinventory.New(ctx, informers, o.Inventory)
 	if err != nil {
 		return err
 	}
@@ -95,13 +92,14 @@ func run(ctx context.Context, o *options) error {
 		return err
 	}
 	routed := scale.NewScatterGatherStore(inv, scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()))
-	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), routed, inv, o.Namespace, secret)
+	resolver, err := envdproxy.NewResolver(routed, inv, o.Namespace, secret)
 	if err != nil {
 		return err
 	}
 	srv, err := envdproxy.NewServer(resolver, envdproxy.Options{
 		Domain:     o.Domain,
 		GuestHTTP2: o.Proxy.GuestHTTP2,
+		NodeToken:  token,
 	})
 	if err != nil {
 		return err

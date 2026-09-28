@@ -49,6 +49,8 @@ type Options struct {
 	// upgrade, which would fail every request; turn it on for a guest daemon
 	// that serves h2c, such as a user's own server on another port.
 	GuestHTTP2 bool
+	// NodeToken is the sandboxd api_token a signed file URL's relay presents, so that relay stays passive and never wakes a paused sandbox.
+	NodeToken string
 }
 
 // Server routes one public host onto many sandboxes' guest ports.
@@ -67,8 +69,11 @@ func NewServer(resolver Resolver, opts Options) (*Server, error) {
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("envdproxy: no domain configured; the SDK's sandbox host is derived from it")
 	}
+	if strings.TrimSpace(opts.NodeToken) == "" {
+		return nil, errors.New("envdproxy: the node token is required; a signed file URL relays with it")
+	}
 	dialer := &net.Dialer{Timeout: dialTimeout}
-	return &Server{resolver: resolver, transport: newGuestTransport(dialGuest(dialer)), opts: opts}, nil
+	return &Server{resolver: resolver, transport: newGuestTransport(dialer), opts: opts}, nil
 }
 
 // Handler returns the routed handler. Serve it with Protocols(): a ConnectRPC
@@ -99,8 +104,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch token := strings.TrimSpace(r.Header.Get(accessTokenHeader)); {
 	case token != "":
 		owner, err = s.resolver.Owner(r.Context(), rt.sandboxID, token)
-	case signedFileURL(r):
-		owner, err = s.resolver.Locate(r.Context(), rt.sandboxID)
+	case rt.port == envdPort && signedFileURL(r):
+		if owner, err = s.resolver.Locate(r.Context(), rt.sandboxID); err == nil {
+			owner.Token = s.opts.NodeToken
+		}
 	default:
 		writeError(w, http.StatusUnauthorized, "missing "+accessTokenHeader)
 		return
@@ -152,9 +159,8 @@ func (s *Server) sandboxHost(rt route) string {
 	return strconv.FormatUint(uint64(rt.port), 10) + "-" + rt.sandboxID + "." + s.opts.Domain
 }
 
-// writeUpstreamError maps a node's refusal without naming the node. sandboxd
-// answers 404 for both an unknown id and a wrong token; the id was just
-// resolved from inventory, so the token is what the caller can still fix.
+// writeUpstreamError maps a node's refusal without naming the node. The relay opens with the claim
+// token the edge read from the node, so its 404 or 401 means the cached owner is stale (released within recentOwnerTTL).
 func (s *Server) writeUpstreamError(w http.ResponseWriter, r *http.Request, err error) {
 	if status, ok := errors.AsType[*sandboxd.HTTPError](err); ok {
 		switch status.StatusCode {

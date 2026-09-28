@@ -16,6 +16,8 @@ const (
 	// accessTokenHeader is the per-sandbox data-plane credential.
 	accessTokenHeader = "X-Access-Token"
 	apiKeyHeader      = "X-API-KEY"
+
+	envdPort uint16 = 49983
 )
 
 // internalPaths are envd's own control surface (x-internal in its spec). They

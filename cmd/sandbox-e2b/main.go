@@ -35,10 +35,7 @@ type options struct {
 func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringSliceVar(&o.Seeds, "sandboxd-seeds", o.Seeds,
 		"Comma-separated sandboxd addresses dialed at start, each naming one node; each node reports its own advertise_addr as its key, and the rest of the mesh is found through their gossip.")
-	fs.StringVar(&o.SandboxdToken, "sandboxd-token", o.SandboxdToken,
-		"Fleet root sandboxd api_token (GET /v1/info needs root). Prefer --sandboxd-token-file for a Secret mount.")
-	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
-		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+	sandboxd.AddTokenFlags(fs, &o.SandboxdToken, &o.SandboxdTokenFile)
 	fs.DurationVar(&o.PollInterval, "inventory-poll", o.PollInterval,
 		"How often every node's info and sandbox list are read; List and Watch lag a change by up to one tick.")
 	o.E2B.AddFlags(fs)
@@ -94,11 +91,11 @@ func run() error {
 		<-ctx.Done()
 		return nil
 	}
-	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(src), store, src, "", opts.EnvdSecret)
+	resolver, err := envdproxy.NewResolver(store, src, "", opts.EnvdSecret)
 	if err != nil {
 		return err
 	}
-	proxy, err := envdproxy.NewServer(resolver, envdproxy.Options{Domain: o.E2B.Domain, GuestHTTP2: o.Proxy.GuestHTTP2})
+	proxy, err := envdproxy.NewServer(resolver, envdproxy.Options{Domain: o.E2B.Domain, GuestHTTP2: o.Proxy.GuestHTTP2, NodeToken: token})
 	if err != nil {
 		return err
 	}

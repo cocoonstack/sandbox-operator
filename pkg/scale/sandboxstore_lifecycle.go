@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 // maxSandboxdName is sandboxd's name budget (types.NameRe).
 const maxSandboxdName = 63
 
+var sandboxdName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,62}$`)
+
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
 	if err != nil {
@@ -29,12 +32,12 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	return nil
 }
 
-func (s *scatterGatherStore) DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error) {
+func (s *scatterGatherStore) DialGuestPort(ctx context.Context, node, id, token string, port uint16) (net.Conn, error) {
 	cl, err := s.nodeClient(ctx, node, "port", id)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := cl.DialPort(ctx, id, port)
+	conn, err := cl.DialPort(ctx, id, token, port)
 	if err != nil {
 		return nil, nodeVerbError(err, "port", id, node)
 	}
@@ -141,12 +144,12 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 	return nil
 }
 
-func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, key PoolKey) error {
+func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, key PoolKey, digest string) error {
 	cl, err := s.nodeClient(ctx, node, "delete template", key.Template)
 	if err != nil {
 		return err
 	}
-	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}); err != nil {
+	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey(key), digest); err != nil {
 		return nodeVerbError(err, "delete template", key.Template, node)
 	}
 	return nil
@@ -161,15 +164,15 @@ func (s *scatterGatherStore) Promote(ctx context.Context, node, id, template str
 	if err != nil {
 		return PoolKey{}, "", nodeVerbError(err, "promote", id, node)
 	}
-	return PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, digest, nil
+	return PoolKey(key), digest, nil
 }
 
-func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error {
+func (s *scatterGatherStore) SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string, digest string) error {
 	cl, err := s.nodeClient(ctx, node, "template labels", key.Template)
 	if err != nil {
 		return err
 	}
-	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, labels); err != nil {
+	if err := cl.SetTemplateLabels(ctx, sandboxd.PoolKey(key), labels, digest); err != nil {
 		return nodeVerbError(err, "template labels", key.Template, node)
 	}
 	return nil
@@ -228,6 +231,9 @@ func StampedName(kind, prefix, namespace, name string) (string, error) {
 	stamped := prefix + namespace + "/" + name
 	if len(stamped) > maxSandboxdName {
 		return "", k8serrors.NewBadRequest(fmt.Sprintf("%s name %q: at most %d characters in namespace %q", kind, name, maxSandboxdName-len(prefix)-len(namespace)-1, namespace))
+	}
+	if !sandboxdName.MatchString(stamped) {
+		return "", k8serrors.NewBadRequest(fmt.Sprintf("%s name %q: letters, digits and . _ : / - only", kind, name))
 	}
 	return stamped, nil
 }

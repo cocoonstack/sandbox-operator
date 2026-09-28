@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/spf13/pflag"
 )
 
 const (
@@ -29,13 +31,24 @@ const (
 
 	// NetRouteRelay is a claim whose guest reaches the network through the node's egress proxy on 127.0.0.1:3128.
 	NetRouteRelay = "relay"
+
+	captureTimeout = 10 * time.Minute
 )
 
-// ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
-// at max_claims, the calling tenant is at its own max_claims, or the node is
-// draining) or a 200 that delivers no sandbox. In every case this node handed
-// over no VM, so the store tries another node or reports no warm capacity.
-var ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
+var (
+	// ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
+	// at max_claims, the calling tenant is at its own max_claims, or the node is
+	// draining) or a 200 that delivers no sandbox. In every case this node handed
+	// over no VM, so the store tries another node or reports no warm capacity.
+	ErrNodeAtCapacity = errors.New("sandboxd: node at capacity or draining")
+
+	// RelayEnv points a guest process at the node's egress proxy on a NetRouteRelay claim, as silkd's unit points its own.
+	RelayEnv = map[string]string{
+		"http_proxy":  "http://127.0.0.1:3128",
+		"https_proxy": "http://127.0.0.1:3128",
+		"no_proxy":    "localhost,127.0.0.1,::1,169.254.169.254",
+	}
+)
 
 // ExpireAction is what the node does with a claim whose lease ends; empty keeps the claim's current action, destroy on a new claim.
 type ExpireAction string
@@ -159,8 +172,9 @@ type NodeInfo struct {
 type Client struct {
 	baseURL string
 	// token is the node api_token every verb presents, except Release, which takes one per call.
-	token string
-	hc    *http.Client
+	token   string
+	hc      *http.Client
+	capture *http.Client
 }
 
 // New returns a Client for the sandboxd at baseURL; token is the node api_token, empty when sandboxd runs without auth.
@@ -173,6 +187,9 @@ func New(baseURL, token string, opts ...Option) *Client {
 	for _, o := range opts {
 		o(c)
 	}
+	capture := *c.hc
+	capture.Timeout = captureTimeout
+	c.capture = &capture
 	return c
 }
 
@@ -253,6 +270,10 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 }
 
 func (c *Client) send(ctx context.Context, method, path, token, op string, body []byte, ok ...int) error {
+	return c.sendWith(ctx, c.hc, method, path, token, op, body, ok...)
+}
+
+func (c *Client) sendWith(ctx context.Context, hc *http.Client, method, path, token, op string, body []byte, ok ...int) error {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
@@ -266,7 +287,7 @@ func (c *Client) send(ctx context.Context, method, path, token, op string, body 
 	}
 	c.authenticate(req, token)
 
-	resp, err := c.hc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("sandboxd: %s: %w", op, err)
 	}
@@ -282,6 +303,14 @@ func (c *Client) authenticate(req *http.Request, token string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+}
+
+// AddTokenFlags registers the sandboxd api_token pair every binary that dials nodes takes.
+func AddTokenFlags(fs *pflag.FlagSet, literal, file *string) {
+	fs.StringVar(literal, "sandboxd-token", *literal,
+		"sandboxd api_token presented to every node (the e2b surface and the envd proxy need the root one). Prefer --sandboxd-token-file for a Secret mount.")
+	fs.StringVar(file, "sandboxd-token-file", *file,
+		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
 }
 
 // TokenFrom returns the api_token read from file (a Secret mount) when file is set, else literal.

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -568,6 +569,9 @@ type fakeStore struct {
 	deletedSnapshotNode string
 	deletedSnapshotID   string
 	deletedTemplates    []string
+	labeled             []string
+	labelErr            error
+	replacedDigest      string
 	deleteTemplateErr   map[string]error
 	fleet               *scale.StaticInventorySource
 	promoted            []string
@@ -576,6 +580,7 @@ type fakeStore struct {
 	live                map[string][]scale.PromotedTemplate
 
 	envdCalls    []string
+	envdRelays   []string
 	initStatus   int
 	metadataDocs []string
 	guestEnvs    map[string]string
@@ -663,15 +668,32 @@ func (f *fakeStore) DeleteSnapshot(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Promote(_ context.Context, node, id, template string) (scale.PoolKey, string, error) {
+func (f *fakeStore) Promote(ctx context.Context, node, id, template string) (scale.PoolKey, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.promoted = append(f.promoted, node+" "+id+" "+template)
-	return scale.PoolKey{Template: template, Net: scale.NetDefault, Size: f.claimPool.Size}, "sha256:" + id, f.promoteErr
+	key := scale.PoolKey{Template: template, Net: scale.NetDefault, Size: f.claimPool.Size}
+	fresh := scale.PromotedTemplate{Template: key.Template, Net: key.Net, Size: key.Size, ContentDigest: cmp.Or(f.replacedDigest, "sha256:"+id), CreatedAt: new(metav1.Now())}
+	same := func(t scale.PromotedTemplate) bool {
+		return t.Template == key.Template && t.Net == key.Net && t.Size == key.Size
+	}
+	if f.live != nil {
+		f.live[node] = append(slices.DeleteFunc(f.live[node], same), fresh)
+	} else if inv, err := f.fleet.NodeInventory(ctx, node); err == nil {
+		inv.Templates = append(slices.DeleteFunc(inv.Templates, same), fresh)
+		f.fleet.Put(inv)
+	}
+	return key, "sha256:" + id, f.promoteErr
 }
 
 // SetTemplateLabels writes straight into the fleet the test serves, so a live read sees it at once.
-func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string) error {
+func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string, digest string) error {
+	f.mu.Lock()
+	f.labeled = append(f.labeled, strings.TrimSpace(node+" "+key.Template+" "+digest))
+	f.mu.Unlock()
+	if f.labelErr != nil {
+		return f.labelErr
+	}
 	inv, err := f.fleet.NodeInventory(ctx, node)
 	if err != nil {
 		return err
@@ -700,14 +722,17 @@ func (f *fakeStore) NodeTemplates(ctx context.Context, node string) ([]scale.Pro
 	return inv.Templates, nil
 }
 
-func (f *fakeStore) DeleteTemplate(_ context.Context, node string, key scale.PoolKey) error {
+func (f *fakeStore) DeleteTemplate(_ context.Context, node string, key scale.PoolKey, digest string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.deletedTemplates = append(f.deletedTemplates, node+" "+key.Template+" "+key.Size)
+	f.deletedTemplates = append(f.deletedTemplates, strings.TrimSpace(node+" "+key.Template+" "+key.Size+" "+digest))
 	return f.deleteTemplateErr[node]
 }
 
-func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (net.Conn, error) {
+func (f *fakeStore) DialGuestPort(_ context.Context, _, id, token string, _ uint16) (net.Conn, error) {
+	f.mu.Lock()
+	f.envdRelays = append(f.envdRelays, token)
+	f.mu.Unlock()
 	return fakeEnvd(func(r *http.Request, body string) (int, string) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -798,7 +823,9 @@ func (f *renewStore) Renew(_ context.Context, node, id string, ttlSeconds int, _
 	return time.Now().Add(time.Duration(ttlSeconds) * time.Second), nil
 }
 
-func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
+type serverOption func(*Options)
+
+func newTestServer(t *testing.T, store scale.SandboxStore, opts ...serverOption) http.Handler {
 	t.Helper()
 	o := Options{Namespace: "sandboxes", Domain: testDomain, APIKeys: []string{testKey}, EnvdSecret: []byte(testEnvdSecret)}
 	for _, fn := range opts {

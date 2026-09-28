@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apiserver/pkg/storage/names"
 
@@ -72,17 +73,15 @@ func (s *Server) startBuild(w http.ResponseWriter, r *http.Request) {
 	pool.Net = scale.NetDefault
 	pool.Size = cmp.Or(pending.Size, pool.Size)
 	err := s.builds.Start(r.Context(), id, e2bbuild.Spec{
-		Namespace:  s.namespace(r),
-		ClaimName:  names.SimpleNameGenerator.GenerateName(namePrefix + "build-"),
-		Pool:       pool,
-		Template:   scope + name,
-		TTLSeconds: int(s.opts.Builds.Timeout / time.Second),
-		Steps:      req.Steps,
-		StartCmd:   req.StartCmd,
-		ReadyCmd:   req.ReadyCmd,
-		RelayEnvs:  relayEnvs,
-		Archive:    s.archive(s.namespace(r), name),
-		Publish:    s.publishBuild(scope, name, pending.Tags),
+		Namespace: s.namespace(r),
+		ClaimName: names.SimpleNameGenerator.GenerateName(namePrefix + "build-"),
+		Pool:      pool,
+		Template:  scope + name,
+		Steps:     req.Steps,
+		StartCmd:  req.StartCmd,
+		ReadyCmd:  req.ReadyCmd,
+		Archive:   s.archive(s.namespace(r), name),
+		Publish:   s.publishBuild(scope, name, pending.Tags),
 	})
 	switch {
 	case errors.Is(err, e2bbuild.ErrBusy):
@@ -113,17 +112,18 @@ func (s *Server) buildStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	floor := max(slices.Index(logLevels, q.Get("level")), 0)
-	var entries []BuildLogEntry
+	entries := []BuildLogEntry{}
 	for _, l := range info.Logs {
-		if slices.Index(logLevels, l.Level) >= floor {
+		if slices.Index(logLevels, l.Level) < floor {
+			continue
+		}
+		if offset > 0 {
+			offset--
+		} else if limit <= 0 || len(entries) < limit {
 			entries = append(entries, logEntryOf(l))
 		}
 	}
-	entries = entries[min(offset, len(entries)):]
-	if limit > 0 {
-		entries = entries[:min(limit, len(entries))]
-	}
-	out := TemplateBuildInfo{TemplateID: name, BuildID: buildID, Status: info.Status, Logs: []string{}, LogEntries: append([]BuildLogEntry{}, entries...)}
+	out := TemplateBuildInfo{TemplateID: name, BuildID: buildID, Status: info.Status, Logs: []string{}, LogEntries: entries}
 	if info.Status == e2bbuild.StatusError {
 		out.Reason = &BuildStatusReason{Message: info.Failure, Step: sdkStep(info.FailedPhase), LogEntries: []BuildLogEntry{}}
 		if n := len(info.Logs); n > 0 {
@@ -133,16 +133,30 @@ func (s *Server) buildStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// publishBuild deletes every other holder of name once the build's promote lands, so the registry names one build, then tags it.
+// publishBuild deletes the holders of name older than this build's promote, so concurrent builds converge on the newest, then tags it.
 // It asks each node itself: an inventory a tick behind would miss a build that finished moments ago.
-func (s *Server) publishBuild(scope, name string, tags []string) func(context.Context, string, scale.PoolKey, string) error {
+func (s *Server) publishBuild(scope, name string, tags []string) e2bbuild.PublishFunc {
 	return func(ctx context.Context, node string, key scale.PoolKey, digest string) error {
-		stale, err := s.liveHolders(ctx, scope+name)
+		holders, err := s.liveHolders(ctx, scope+name)
 		if err != nil {
 			return fmt.Errorf("list the previous builds: %w", err)
 		}
-		stale = slices.DeleteFunc(stale, func(h templateHolder) bool { return h.node == node && h.key == key })
-		if err := forEachHolder(stale, func(h templateHolder) error { return s.store.DeleteTemplate(ctx, h.node, h.key) }); err != nil {
+		i := slices.IndexFunc(holders, func(h templateHolder) bool { return h.node == node && h.key == key })
+		if i < 0 {
+			return fmt.Errorf("the build's template is no longer on %s", node)
+		}
+		own := holders[i]
+		if own.digest != digest {
+			return fmt.Errorf("a newer build of %s replaced this one on %s", name, node)
+		}
+		stale := slices.DeleteFunc(holders, func(h templateHolder) bool { return !h.created.Before(own.created) })
+		if err := forEachHolder(stale, func(h templateHolder) error {
+			err := s.store.DeleteTemplate(ctx, h.node, h.key, h.digest)
+			if replaced(err) {
+				return nil
+			}
+			return err
+		}); err != nil {
 			return fmt.Errorf("delete the previous build: %w", err)
 		}
 		if len(tags) == 0 {
@@ -152,7 +166,12 @@ func (s *Server) publishBuild(scope, name string, tags []string) func(context.Co
 		for _, t := range tags {
 			labels[t] = digest
 		}
-		return s.store.SetTemplateLabels(ctx, node, key, labels)
+		if err := s.store.SetTemplateLabels(ctx, node, key, labels, digest); replaced(err) {
+			return fmt.Errorf("a newer build of %s replaced this one on %s", name, node)
+		} else if err != nil {
+			return err
+		}
+		return nil
 	}
 }
 
@@ -178,13 +197,20 @@ func (s *Server) liveHolders(ctx context.Context, template string) ([]templateHo
 			defer mu.Unlock()
 			for _, t := range held {
 				if t.Template == template && t.Tenant == "" {
-					holders = append(holders, templateHolder{node: n, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}})
+					h := templateHolder{node: n, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}, digest: t.ContentDigest}
+					if t.CreatedAt != nil {
+						h.created = t.CreatedAt.Time
+					}
+					holders = append(holders, h)
 				}
 			}
 			return nil
 		})
 	}
-	return holders, g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return holders, nil
 }
 
 func (s *Server) buildKey(r *http.Request, name, buildID string) string {
@@ -200,6 +226,8 @@ func unsupportedBuildOption(req TemplateBuildStartV2, canCopy bool) (string, boo
 		return "fromImageRegistry is not supported; a pool pulls its own image", true
 	case req.FromImage == "":
 		return "fromImage is required", true
+	case strings.HasPrefix(req.FromImage, templatePrefix):
+		return "fromImage names a built template; build from an image", true
 	}
 	msg := e2bbuild.Invalid(req.Steps, canCopy)
 	return msg, msg != ""
@@ -244,4 +272,10 @@ func queryInt(v string) (int, error) {
 		return 0, errors.New("negative or malformed")
 	}
 	return n, nil
+}
+
+// replaced is sandboxd's 412: the template generation the caller observed is gone.
+func replaced(err error) bool {
+	se, ok := errors.AsType[*k8serrors.StatusError](err)
+	return ok && se.ErrStatus.Code == http.StatusPreconditionFailed
 }

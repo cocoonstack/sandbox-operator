@@ -72,7 +72,7 @@ type SandboxStore interface {
 	SandboxLifecycle
 }
 
-// SandboxLifecycle is the verb set of a claimed sandbox, each verb routed to its owning node.
+// SandboxLifecycle is the verb set routed to one node: a claimed sandbox's lifecycle, its checkpoints and the node's promoted templates.
 // Pause and Snapshot write guest memory out, so their cost grows with its size.
 type SandboxLifecycle interface {
 	// Pause snapshots and stops the sandbox, and is idempotent on a paused one.
@@ -87,16 +87,16 @@ type SandboxLifecycle interface {
 	Snapshots(ctx context.Context, node string) ([]Snapshot, error)
 	// DeleteSnapshot removes a checkpoint. A missing checkpoint is success.
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
-	// DeleteTemplate removes a promoted template on node alone. A missing template is success.
-	DeleteTemplate(ctx context.Context, node string, key PoolKey) error
+	// DeleteTemplate removes a promoted template on node alone; a missing template is success, and a digest removes only the generation it names (PreconditionFailed otherwise).
+	DeleteTemplate(ctx context.Context, node string, key PoolKey, digest string) error
 	// Promote publishes a claimed sandbox on node as the template name, keeping its net and size; it returns the full key and the content digest.
 	Promote(ctx context.Context, node, id, template string) (PoolKey, string, error)
-	// SetTemplateLabels replaces a promoted template's labels on node alone.
-	SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string) error
+	// SetTemplateLabels replaces a promoted template's labels on node alone; a digest writes only the generation it names (PreconditionFailed otherwise).
+	SetTemplateLabels(ctx context.Context, node string, key PoolKey, labels map[string]string, digest string) error
 	// NodeTemplates reads the promoted templates node holds now, ahead of its next inventory publish.
 	NodeTemplates(ctx context.Context, node string) ([]PromotedTemplate, error)
 	// DialGuestPort opens a guest port of a running sandbox through its node's passive relay; a paused one answers Conflict and is never woken.
-	DialGuestPort(ctx context.Context, node, id string, port uint16) (net.Conn, error)
+	DialGuestPort(ctx context.Context, node, id, token string, port uint16) (net.Conn, error)
 	// SetInstanceMetadata replaces the JSON object a running sandbox's guest reads from 169.254.169.254; a paused one answers Conflict.
 	SetInstanceMetadata(ctx context.Context, node, id string, doc []byte) error
 	// Read reports the sandbox as its owning node holds it: token, paused state and lease deadline.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -100,18 +101,18 @@ func TestStepsCarryTheirUserWorkdirAndEnvIntoLaterCommandsAndTheDefaults(t *test
 		"promote node-a sb_1 e2b/ns/app",
 		"release node-a sb_1",
 	}, store.calls())
-	assert.Equal(t, [2]string{"4", "out of make"}, [2]string{info.Logs[4].Phase, info.Logs[4].Message})
+	assert.Equal(t, [2]string{"1", "bash: warning: setlocale: LC_ALL: cannot change locale"}, [2]string{info.Logs[2].Phase, info.Logs[2].Message}, "the shell's stderr goes to the log, never into the ENV value")
+	assert.Equal(t, [2]string{"4", "out of make"}, [2]string{info.Logs[5].Phase, info.Logs[5].Message})
 }
 
 func TestARelayedBuildSeedsItsStepsWithTheProxyEnvironment(t *testing.T) {
-	for route, want := range map[string]string{"relay": "map[A:1 http_proxy:p]", "none": "map[A:1]"} {
+	for route, want := range map[string]string{"relay": "map[A:1 http_proxy:http://127.0.0.1:3128 https_proxy:http://127.0.0.1:3128 no_proxy:localhost,127.0.0.1,::1,169.254.169.254]", "none": "map[A:1]"} {
 		store := &fakeStore{route: route}
 		e := New(store, store, 1, time.Minute, 100)
 		e.Register("b", Request{})
 		require.NoError(t, e.Start(t.Context(), "b", Spec{
 			Pool: scale.PoolKey{Template: "img"}, Template: "t",
-			Steps:     []Step{{Type: stepEnv, Args: []string{"A", "1"}}, {Type: stepRun, Args: []string{"make"}}},
-			RelayEnvs: map[string]string{"http_proxy": "p"},
+			Steps: []Step{{Type: stepEnv, Args: []string{"A", "1"}}, {Type: stepRun, Args: []string{"make"}}},
 		}))
 		require.Equal(t, StatusReady, waitDone(t, e, "b").Status)
 		calls := store.calls()
@@ -282,13 +283,14 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return nil
 }
 
-func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, out func(string)) (int, error) {
+func (f *fakeStore) Run(_ context.Context, _ scale.Assignment, cmd Command, stdout, stderr LineFunc) (int, error) {
 	f.record(fmt.Sprintf("run %s %s %v %s", cmd.User, cmd.Workdir, cmd.Envs, cmd.Line))
 	if v, ok := strings.CutPrefix(cmd.Line, `printf "%s" "`); ok {
-		out(strings.TrimSuffix(v, `"`))
+		stderr("bash: warning: setlocale: LC_ALL: cannot change locale")
+		stdout(strings.TrimSuffix(v, `"`))
 		return 0, nil
 	}
-	out("out of " + cmd.Line)
+	stdout("out of " + cmd.Line)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	codes := f.exits[cmd.Line]
@@ -326,5 +328,5 @@ func (f *fakeStore) record(line string) {
 func (f *fakeStore) calls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.log...)
+	return slices.Clone(f.log)
 }

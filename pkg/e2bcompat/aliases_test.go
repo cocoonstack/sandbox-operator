@@ -95,6 +95,6 @@ func TestNewServerRefusesAMalformedAliasTable(t *testing.T) {
 	}
 }
 
-func withAliases(entries ...string) func(*Options) {
+func withAliases(entries ...string) serverOption {
 	return func(o *Options) { o.TemplateAliases = entries }
 }

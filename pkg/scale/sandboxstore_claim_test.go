@@ -201,7 +201,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 
 	picked := map[string]int{}
 	for range 200 {
-		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
+		candidates, err := WarmCandidates(t.Context(), store, PoolKey{Template: "img"})
 		require.NoError(t, err)
 		best := pickPowerOfTwo(candidates)
 		picked[best.node]++
@@ -218,7 +218,7 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 
 	warmPicks := 0
 	for range 200 {
-		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
+		candidates, err := WarmCandidates(t.Context(), store, PoolKey{Template: "img"})
 		require.NoError(t, err)
 		best := pickPowerOfTwo(candidates)
 		if best.node == "warm" {
@@ -429,12 +429,13 @@ func TestWarmCandidatesMatchThePerNodeFanOut(t *testing.T) {
 			}
 		}
 	}
-	got, err := store.warmCandidates(ctx, pool)
+	caps, err := store.src.NodeCapacities(ctx)
 	require.NoError(t, err)
+	got := warmCandidates(caps, pool)
 	assert.Equal(t, want, got)
 	assert.Len(t, got, 3, "a's rt pool and both of d's; b is cold, c has no address, e is partitioned")
-	assert.Equal(t, "d", store.nodeForAddress(ctx, "10.0.0.4:7777"), "a node address resolves to its node")
-	assert.Empty(t, store.nodeForAddress(ctx, "10.0.0.5:7777"), "a partitioned node's address does not resolve")
+	assert.Equal(t, "d", nodeForAddress(caps, "10.0.0.4:7777"), "a node address resolves to its node")
+	assert.Empty(t, nodeForAddress(caps, "10.0.0.5:7777"), "a partitioned node's address does not resolve")
 }
 
 type claimCall struct {
@@ -573,7 +574,7 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
 
-func (c *recordingClient) DeleteTemplate(_ context.Context, key sandboxd.PoolKey) error {
+func (c *recordingClient) DeleteTemplate(_ context.Context, key sandboxd.PoolKey, _ string) error {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	c.f.deletedTemplates = append(c.f.deletedTemplates, key)
@@ -584,7 +585,7 @@ func (c *recordingClient) Promote(_ context.Context, id, template string) (sandb
 	return sandboxd.PoolKey{Template: template}, "sha256:" + id, c.f.verbErr
 }
 
-func (c *recordingClient) SetTemplateLabels(context.Context, sandboxd.PoolKey, map[string]string) error {
+func (c *recordingClient) SetTemplateLabels(context.Context, sandboxd.PoolKey, map[string]string, string) error {
 	return c.f.verbErr
 }
 
@@ -599,7 +600,7 @@ func (c *recordingClient) SetInstanceMetadata(_ context.Context, id string, doc 
 	return c.f.verbErr
 }
 
-func (c *recordingClient) DialPort(_ context.Context, id string, port uint16) (net.Conn, error) {
+func (c *recordingClient) DialPort(_ context.Context, id, _ string, port uint16) (net.Conn, error) {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	c.f.dialPorts = append(c.f.dialPorts, port)

@@ -40,7 +40,7 @@ func BenchmarkStoreWarmCandidates(b *testing.B) {
 			ctx := b.Context()
 			b.ReportAllocs()
 			for b.Loop() {
-				candidates, err := store.warmCandidates(ctx, pool)
+				candidates, err := WarmCandidates(ctx, store, pool)
 				if err != nil {
 					b.Fatalf("warm candidates: %v", err)
 				}

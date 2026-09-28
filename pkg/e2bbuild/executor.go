@@ -14,6 +14,7 @@ import (
 	"maps"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,10 +56,20 @@ var (
 	// ErrUnknownBuild is a build this process never registered, or dropped an hour after it finished or was left unstarted.
 	ErrUnknownBuild = errors.New("e2bbuild: build not found")
 
-	envEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$(", `\$(`)
 	// FilesHash is the shape of the digest the SDK names a COPY upload by.
 	FilesHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+	envEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", "$(", `\$(`)
 )
+
+// LineFunc receives one line of a command's output.
+type LineFunc func(line string)
+
+// ArchiveFunc opens the upload a COPY step's files hash names.
+type ArchiveFunc func(ctx context.Context, hash string) (io.ReadCloser, error)
+
+// PublishFunc runs after the promote with the template's node, key and content digest.
+type PublishFunc func(ctx context.Context, node string, key scale.PoolKey, digest string) error
 
 // Request is what a build asked for before it starts.
 type Request struct {
@@ -99,19 +110,17 @@ func (s Step) problem(canCopy bool) string {
 	return ""
 }
 
-// Spec is how a registered build runs; RelayEnvs seed the steps when the claim relays through the node's proxy, StartCmd runs in the background and ReadyCmd until it exits 0, both before the promote; Publish runs after the promote and before the build reads ready.
+// Spec is how a registered build runs; StartCmd runs in the background and ReadyCmd until it exits 0, both before the promote; Publish runs after the promote and before the build reads ready.
 type Spec struct {
-	Namespace  string
-	ClaimName  string
-	Pool       scale.PoolKey
-	Template   string
-	TTLSeconds int
-	Steps      []Step
-	StartCmd   string
-	ReadyCmd   string
-	RelayEnvs  map[string]string
-	Archive    func(ctx context.Context, hash string) (io.ReadCloser, error)
-	Publish    func(ctx context.Context, node string, key scale.PoolKey, digest string) error
+	Namespace string
+	ClaimName string
+	Pool      scale.PoolKey
+	Template  string
+	Steps     []Step
+	StartCmd  string
+	ReadyCmd  string
+	Archive   ArchiveFunc
+	Publish   PublishFunc
 }
 
 // Command is one shell line run as User, in Workdir, with Envs; an empty Workdir is the user's home.
@@ -124,8 +133,8 @@ type Command struct {
 
 // Guest runs a build's commands inside its claimed sandbox.
 type Guest interface {
-	// Run runs cmd to its end, passes each output line to out, and returns its exit code.
-	Run(ctx context.Context, a scale.Assignment, cmd Command, out func(line string)) (int, error)
+	// Run runs cmd to its end, passes each line of its output to stdout or stderr, and returns its exit code.
+	Run(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr LineFunc) (int, error)
 	// Start starts cmd and returns while it runs.
 	Start(ctx context.Context, a scale.Assignment, cmd Command) error
 	// Init makes the user, workdir and envs of defaults what every later process in the sandbox gets.
@@ -227,7 +236,7 @@ func (e *Executor) Status(id string) (Info, bool) {
 		return Info{}, false
 	}
 	info := r.info
-	info.Logs = append([]LogEntry(nil), r.info.Logs...)
+	info.Logs = slices.Clip(r.info.Logs)
 	return info, true
 }
 
@@ -236,7 +245,7 @@ func (e *Executor) run(ctx context.Context, id string, spec Spec) {
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	e.logf(id, PhaseClaim, "claiming a sandbox from %s (%s, %s)", spec.Pool.Template, spec.Pool.Net, spec.Pool.Size)
-	a, err := e.store.Claim(ctx, spec.Namespace, spec.ClaimName, spec.Pool, scale.ClaimOptions{TTLSeconds: spec.TTLSeconds})
+	a, err := e.store.Claim(ctx, spec.Namespace, spec.ClaimName, spec.Pool, scale.ClaimOptions{TTLSeconds: int(e.timeout / time.Second)})
 	if err != nil {
 		msg := fmt.Sprintf("could not claim a sandbox of %s (%s, %s)", spec.Pool.Template, spec.Pool.Net, spec.Pool.Size)
 		if scale.IsNoWarmCapacity(err) {
@@ -261,7 +270,7 @@ func (e *Executor) run(ctx context.Context, id string, spec Spec) {
 func (e *Executor) prepare(ctx context.Context, id string, a scale.Assignment, spec Spec) (string, string, error) {
 	state := Command{User: defaultUser, Envs: map[string]string{}}
 	if a.NetRoute == sandboxd.NetRouteRelay {
-		maps.Copy(state.Envs, spec.RelayEnvs)
+		maps.Copy(state.Envs, sandboxd.RelayEnv)
 	}
 	for i, step := range spec.Steps {
 		phase := strconv.Itoa(i + 1)
@@ -298,12 +307,12 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 		if len(s.Args) > 1 {
 			cmd.User = s.Args[1]
 		}
-		msg, err := e.sh(ctx, a, cmd, logged)
+		msg, err := e.sh(ctx, a, cmd, logged, logged)
 		return state, msg, err
 	case stepEnv:
 		envs := maps.Clone(state.Envs)
 		for i := 0; i+1 < len(s.Args); i += 2 {
-			v, msg, err := e.expand(ctx, a, root, s.Args[i+1])
+			v, msg, err := e.expand(ctx, a, root, s.Args[i+1], logged)
 			if err != nil {
 				return state, msg, err
 			}
@@ -316,14 +325,14 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 			dir = path.Join(cmp.Or(state.Workdir, "/"), dir)
 		}
 		script := fmt.Sprintf(`t=%[1]s; [ -d "$t" ] && exit 0; n=$t; while [ ! -d "$(dirname "$n")" ]; do n=$(dirname "$n"); done; mkdir -p "$t" && chown -R %[2]s: "$n"`, shellQuote(dir), shellQuote(state.User))
-		if msg, err := e.sh(ctx, a, withLine(root, script), logged); err != nil {
+		if msg, err := e.sh(ctx, a, withLine(root, script), logged, logged); err != nil {
 			return state, msg, err
 		}
 		state.Workdir = dir
 	case stepUser:
 		name := shellQuote(s.Args[0])
 		script := fmt.Sprintf("id -u %[1]s >/dev/null 2>&1 || useradd --create-home --shell /bin/bash %[1]s", name)
-		if msg, err := e.sh(ctx, a, withLine(root, script), logged); err != nil {
+		if msg, err := e.sh(ctx, a, withLine(root, script), logged, logged); err != nil {
 			return state, msg, err
 		}
 		state.User = s.Args[0]
@@ -331,7 +340,7 @@ func (e *Executor) step(ctx context.Context, id, phase string, a scale.Assignmen
 		if msg, err := e.copyIn(ctx, a, spec, s.FilesHash); err != nil {
 			return state, msg, err
 		}
-		if _, err := e.sh(ctx, a, withLine(root, copyScript(state, s)), logged); err != nil {
+		if _, err := e.sh(ctx, a, withLine(root, copyScript(state, s)), logged, logged); err != nil {
 			return state, fmt.Sprintf("could not copy %s to %s", s.Args[0], s.Args[1]), err
 		}
 	}
@@ -345,15 +354,15 @@ func (e *Executor) copyIn(ctx context.Context, a scale.Assignment, spec Spec, ha
 		return "could not read the uploaded files", err
 	}
 	defer func() { _ = archive.Close() }()
-	if err := e.guest.Write(ctx, a, "/tmp/"+hash+".tar", archive); err != nil {
+	if err := e.guest.Write(ctx, a, archivePath(hash), archive); err != nil {
 		return "could not copy the uploaded files into the build sandbox", err
 	}
 	return "", nil
 }
 
 // sh returns the failure the caller sees next to the error; a non-zero exit is a failure.
-func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, out func(string)) (string, error) {
-	code, err := e.guest.Run(ctx, a, cmd, out)
+func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, stdout, stderr LineFunc) (string, error) {
+	code, err := e.guest.Run(ctx, a, cmd, stdout, stderr)
 	if err != nil {
 		return "could not run a command in the build sandbox", err
 	}
@@ -364,10 +373,10 @@ func (e *Executor) sh(ctx context.Context, a scale.Assignment, cmd Command, out 
 	return "", nil
 }
 
-// expand evaluates an ENV value in the guest's shell, so $VAR references resolve and command substitution does not run.
-func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command, value string) (string, string, error) {
+// expand evaluates an ENV value in the guest's shell, so $VAR references resolve and command substitution does not run; the shell's own stderr goes to the log, never into the value.
+func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command, value string, stderr LineFunc) (string, string, error) {
 	var lines []string
-	if _, err := e.sh(ctx, a, withLine(root, `printf "%s" "`+envEscaper.Replace(value)+`"`), func(line string) { lines = append(lines, line) }); err != nil {
+	if _, err := e.sh(ctx, a, withLine(root, `printf "%s" "`+envEscaper.Replace(value)+`"`), func(line string) { lines = append(lines, line) }, stderr); err != nil {
 		return "", fmt.Sprintf("could not evaluate the value %q", value), err
 	}
 	return strings.Join(lines, "\n"), "", nil
@@ -375,7 +384,7 @@ func (e *Executor) expand(ctx context.Context, a scale.Assignment, root Command,
 
 func (e *Executor) awaitReady(ctx context.Context, a scale.Assignment, cmd Command) error {
 	for {
-		code, err := e.guest.Run(ctx, a, cmd, func(string) {})
+		code, err := e.guest.Run(ctx, a, cmd, func(string) {}, func(string) {})
 		if err == nil && code == 0 {
 			return nil
 		}
@@ -440,13 +449,11 @@ func (e *Executor) log(id, step, level, message string) {
 }
 
 func (e *Executor) sweep(now time.Time) {
-	for id, r := range e.builds {
+	maps.DeleteFunc(e.builds, func(_ string, r *record) bool {
 		done := !r.finished.IsZero() && now.Sub(r.finished) > recordTTL
 		abandoned := r.info.Status == StatusWaiting && now.Sub(r.registered) > recordTTL
-		if done || abandoned {
-			delete(e.builds, id)
-		}
-	}
+		return done || abandoned
+	})
 }
 
 // Invalid names the first step a build cannot run, empty when every step can; a COPY needs canCopy.

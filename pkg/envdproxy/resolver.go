@@ -68,13 +68,9 @@ type storeResolver struct {
 	recent     *recentOwners
 }
 
-// NewResolver builds the Resolver. placed must read inventory only, so an unknown id reaches the nodes
-// only through the rate-limited probe; an empty namespace matches every namespace.
-func NewResolver(placed scale.SandboxStore, routed scale.SandboxLifecycle, inventory scale.InventorySource, namespace string, secret []byte) (Resolver, error) {
-	claims, ok := placed.(scale.ClaimIDResolver)
-	if !ok {
-		return nil, errors.New("envdproxy: store does not implement scale.ClaimIDResolver")
-	}
+// NewResolver builds the Resolver; its claim lookups read inventory only, so an unknown id reaches the nodes
+// only through the rate-limited probe, and an empty namespace matches every namespace.
+func NewResolver(routed scale.SandboxLifecycle, inventory scale.InventorySource, namespace string, secret []byte) (Resolver, error) {
 	if routed == nil || inventory == nil {
 		return nil, errors.New("envdproxy: a routed store and an inventory source are required")
 	}
@@ -82,7 +78,7 @@ func NewResolver(placed scale.SandboxStore, routed scale.SandboxLifecycle, inven
 		return nil, errors.New("envdproxy: the envd secret is required to verify access tokens")
 	}
 	return &storeResolver{
-		claims:     claims,
+		claims:     scale.NewScatterGatherStore(inventory).(scale.ClaimIDResolver),
 		lifecycle:  routed,
 		inventory:  inventory,
 		namespace:  namespace,
@@ -131,22 +127,14 @@ func (s *storeResolver) probe(ctx context.Context, sandboxID, claimID string, ad
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	var mu sync.Mutex
-	var found Owner
-	node, err := scale.FirstHit(ctx, s.inventory, probeConcurrency, func(ctx context.Context, node string) string {
-		o, err := s.ownerOn(ctx, node, claimID)
-		if err != nil {
-			return ""
-		}
-		mu.Lock()
-		found = o
-		mu.Unlock()
-		return node
+	found, err := scale.FirstHit(ctx, s.inventory, probeConcurrency, func(ctx context.Context, node string) Owner {
+		o, _ := s.ownerOn(ctx, node, claimID)
+		return o
 	})
 	if err != nil {
 		return Owner{}, err
 	}
-	if node == "" {
+	if found == (Owner{}) {
 		return Owner{}, ErrSandboxNotFound
 	}
 	e := s.entry(found)

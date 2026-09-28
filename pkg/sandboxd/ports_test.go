@@ -30,7 +30,7 @@ func TestClientDialPortOpensThePassiveRelayWithTheNodeToken(t *testing.T) {
 	}))
 	defer node.Close()
 
-	conn, err := New(node.URL, "root-token").DialPort(t.Context(), "sb_1", 8080)
+	conn, err := New(node.URL, "root-token").DialPort(t.Context(), "sb_1", "", 8080)
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 	_, err = conn.Write([]byte("ping\n"))
@@ -55,4 +55,52 @@ func TestDialPortReportsTheNodesRefusalAsAnHTTPError(t *testing.T) {
 	require.True(t, ok, "want *HTTPError, got %v", err)
 	assert.Equal(t, http.StatusNotFound, he.StatusCode)
 	assert.Equal(t, "unknown sandbox", he.Message)
+}
+
+func TestDialPortSpeaksTLSToAnHTTPSNode(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+	first := make(chan byte, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		var b [1]byte
+		if _, err := io.ReadFull(conn, b[:]); err == nil {
+			first <- b[0]
+		}
+	}()
+
+	_, err = New("https://"+ln.Addr().String(), "root-token").DialPort(t.Context(), "sb_1", "", 8080)
+	require.Error(t, err, "a plain listener cannot finish the handshake")
+	assert.Equal(t, byte(0x16), <-first, "an https base opens a TLS handshake, not a cleartext upgrade")
+}
+
+func TestRelayTargetJoinsAnOriginWithItsDefaultPort(t *testing.T) {
+	for base, want := range map[string][3]string{
+		"10.0.0.4:7777":              {"http", "10.0.0.4:7777", "10.0.0.4"},
+		"node":                       {"http", "node:80", "node"},
+		"http://node:8080":           {"http", "node:8080", "node"},
+		"https://node-a.example.com": {"https", "node-a.example.com:443", "node-a.example.com"},
+		"https://[2001:db8::1]":      {"https", "[2001:db8::1]:443", "2001:db8::1"},
+		"https://[2001:db8::1]:8443": {"https", "[2001:db8::1]:8443", "2001:db8::1"},
+	} {
+		scheme, addr, serverName := relayTarget(base)
+		assert.Equal(t, want, [3]string{scheme, addr, serverName}, base)
+	}
+}
+
+func TestClientDialPortPresentsTheSandboxTokenWhenGivenOne(t *testing.T) {
+	var gotAuth string
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer node.Close()
+	_, err := New(node.URL, "root-token").DialPort(t.Context(), "sb_1", "claim-token", 8080)
+	require.Error(t, err)
+	assert.Equal(t, "Bearer claim-token", gotAuth, "the sandbox's own token makes the relay active")
 }

@@ -9,8 +9,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -30,7 +33,7 @@ func TestABuildFromAnImagePromotesReplacesTheOldHolderAndTags(t *testing.T) {
 	require.Equal(t, e2bbuild.StatusReady, info.Status, info)
 	assert.Equal(t, [2]string{"reg/rt:24.04", scale.SizeClassMedium}, [2]string{store.claimPool.Template, store.claimPool.Size}, "the alias names the image; cpuCount 2 picks the size")
 	assert.Equal(t, []string{"n sb_1 e2b/sandboxes/app"}, store.promoted)
-	assert.Equal(t, []string{"m e2b/sandboxes/app small"}, store.deletedTemplates, "the previous build on another node goes")
+	assert.Equal(t, []string{"m e2b/sandboxes/app small sha256:old"}, store.deletedTemplates, "the previous build on another node goes")
 	assert.Equal(t, map[string]string{"v1": "sha256:sb_1"}, fleetLabels(t, store, "n", "e2b/sandboxes/app"))
 	assert.Equal(t, "n sb_1", store.releasedNode+" "+store.releasedID)
 	assert.Len(t, info.LogEntries, 3)
@@ -55,7 +58,7 @@ func TestABuildReplacesAPreviousBuildTheInventoryHasNotPublishedYet(t *testing.T
 	id := requestBuild(t, h, "app")
 	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
 	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
-	assert.Equal(t, []string{"m e2b/sandboxes/app small"}, store.deletedTemplates, "node m's build finished after its last publish and still goes")
+	assert.Equal(t, []string{"m e2b/sandboxes/app small sha256:old"}, store.deletedTemplates, "node m's build finished after its last publish and still goes")
 
 	delete(store.live, "m")
 	id = requestBuild(t, h, "app")
@@ -79,7 +82,7 @@ func TestABuildThatCannotClaimFailsAtTheBaseStep(t *testing.T) {
 }
 
 func TestABuildRunsItsStepsThroughEnvdAndLeavesItsDefaultsInTheSandbox(t *testing.T) {
-	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, processExits: map[string]int{"false": 1}}
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n", Token: "claim-tok"}, processExits: map[string]int{"false": 1}}
 	h := newTestServer(t, store, withBuilds(), withBuildFleet(store))
 
 	id := requestBuild(t, h, "app")
@@ -98,6 +101,7 @@ func TestABuildRunsItsStepsThroughEnvdAndLeavesItsDefaultsInTheSandbox(t *testin
 	assert.Equal(t, [2]any{"user", map[string]string{"A": "1"}}, [2]any{defaults.DefaultUser, defaults.EnvVars})
 	assert.Contains(t, info.LogEntries, BuildLogEntry{Timestamp: info.LogEntries[2].Timestamp, Message: "ok", Level: "info", Step: "2"})
 	assert.Equal(t, []string{"n sb_1 e2b/sandboxes/app"}, store.promoted)
+	assert.Equal(t, []string{"claim-tok", "claim-tok", "claim-tok", "claim-tok", "claim-tok"}, store.envdRelays, "every build call rides the claim's own relay, which wakes and keeps the sandbox awake")
 
 	id = requestBuild(t, h, "app")
 	body = `{"fromImage":"img","steps":[{"type":"ENV","args":["A","1"]},{"type":"WORKDIR","args":["/w"]},{"type":"RUN","args":["false"]}]}`
@@ -121,7 +125,7 @@ func TestARelayedBuildLeavesTheProxyInTheTemplateDefaults(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(body), &init))
 		}
 	}
-	assert.Equal(t, relayEnvs, init.EnvVars)
+	assert.Equal(t, sandboxd.RelayEnv, init.EnvVars)
 }
 
 func TestABuildRefusesWhatItCannotHonor(t *testing.T) {
@@ -140,8 +144,67 @@ func TestABuildRefusesWhatItCannotHonor(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodPost, "/v2/templates/app/builds/nope", `{"fromImage":"img"}`, testKey).Code)
 	assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v3/templates", `{"name":"`+strings.Repeat("x", 60)+`"}`, testKey).Code)
+	assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v3/templates", `{"name":"my app"}`, testKey).Code, "a name outside sandboxd's grammar is refused before the build runs")
 	assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v3/templates", `{}`, testKey).Code)
 	assert.Equal(t, http.StatusNotFound, do(t, newTestServer(t, &fakeStore{}), http.MethodPost, "/v3/templates", `{"name":"app"}`, testKey).Code, "builds are off unless enabled")
+}
+
+func TestAPublishLeavesANewerConcurrentBuildAlone(t *testing.T) {
+	newer := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:newer", CreatedAt: new(metav1.NewTime(time.Now().Add(time.Minute)))}
+	older := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:older", CreatedAt: new(metav1.NewTime(time.Now().Add(-time.Minute)))}
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil, "m": {newer}, "k": {older}}}
+	inv := scale.NewStaticInventorySource()
+	for _, n := range []string{"n", "m", "k"} {
+		inv.Put(&scale.NodeInventory{Node: n})
+	}
+	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
+
+	id := requestBuild(t, h, "app")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
+	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
+	assert.Equal(t, []string{"k e2b/sandboxes/app small sha256:older"}, store.deletedTemplates, "only the holder older than this promote goes, by the digest observed; a newer concurrent build keeps its node")
+}
+
+func TestAPublishSkipsAHolderReplacedSinceItWasObserved(t *testing.T) {
+	older := scale.PromotedTemplate{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:older", CreatedAt: new(metav1.NewTime(time.Now().Add(-time.Minute)))}
+	replaced := &k8serrors.StatusError{ErrStatus: metav1.Status{Code: http.StatusPreconditionFailed}}
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil, "k": {older}}, deleteTemplateErr: map[string]error{"k": replaced}}
+	inv := scale.NewStaticInventorySource()
+	for _, n := range []string{"n", "k"} {
+		inv.Put(&scale.NodeInventory{Node: n})
+	}
+	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
+
+	id := requestBuild(t, h, "app")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
+	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status, "a holder a newer promote replaced between the read and the delete is left alone")
+	assert.Equal(t, []string{"k e2b/sandboxes/app small sha256:older"}, store.deletedTemplates)
+}
+
+func TestABuildReplacedOnItsOwnNodeWritesNoTags(t *testing.T) {
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil}, replacedDigest: "sha256:newer"}
+	inv := scale.NewStaticInventorySource()
+	inv.Put(&scale.NodeInventory{Node: "n"})
+	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
+
+	id := requestBuild(t, h, "app:v1")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
+	info := waitBuild(t, h, id)
+	require.Equal(t, [2]string{e2bbuild.StatusError, "finalize"}, [2]string{info.Status, info.Reason.Step})
+	assert.Empty(t, store.labeled, "a build a newer promote replaced must not tag the newer content with its own digest")
+}
+
+func TestABuildWhoseTagWriteFindsANewerGenerationReportsReplaced(t *testing.T) {
+	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}, live: map[string][]scale.PromotedTemplate{"n": nil}, labelErr: &k8serrors.StatusError{ErrStatus: metav1.Status{Code: http.StatusPreconditionFailed}}}
+	inv := scale.NewStaticInventorySource()
+	inv.Put(&scale.NodeInventory{Node: "n"})
+	h := newTestServer(t, store, withBuilds(), func(o *Options) { o.Inventory = inv })
+
+	id := requestBuild(t, h, "app:v1")
+	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
+	info := waitBuild(t, h, id)
+	require.Equal(t, [2]string{e2bbuild.StatusError, "finalize"}, [2]string{info.Status, info.Reason.Step})
+	assert.Equal(t, []string{"n e2b/sandboxes/app sha256:sb_1"}, store.labeled, "the tag write carries the promote's digest, so a newer generation refuses it")
 }
 
 func requestBuild(t *testing.T, h http.Handler, name string) string {
@@ -166,12 +229,12 @@ func waitBuild(t *testing.T, h http.Handler, buildID string) TemplateBuildInfo {
 	return info
 }
 
-func withBuilds() func(*Options) {
+func withBuilds() serverOption {
 	return func(o *Options) { o.Builds = BuildOptions{Parallel: 2, Timeout: time.Minute, LogLines: 100} }
 }
 
 // withBuildFleet serves node n with app's earlier build and node m with a stale copy under a smaller key.
-func withBuildFleet(store *fakeStore) func(*Options) {
+func withBuildFleet(store *fakeStore) serverOption {
 	inv := scale.NewStaticInventorySource()
 	inv.Put(&scale.NodeInventory{Node: "n", Templates: []scale.PromotedTemplate{{Template: "e2b/sandboxes/app", Net: "none", Size: "medium", ContentDigest: "sha256:old"}}})
 	inv.Put(&scale.NodeInventory{Node: "m", Templates: []scale.PromotedTemplate{{Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:old"}}})

@@ -145,7 +145,7 @@ func (s *Server) fileUploadLink(w http.ResponseWriter, r *http.Request) {
 }
 
 // archive opens the uploads of one build's template for its COPY steps.
-func (s *Server) archive(ns, name string) func(context.Context, string) (io.ReadCloser, error) {
+func (s *Server) archive(ns, name string) e2bbuild.ArchiveFunc {
 	return func(ctx context.Context, hash string) (io.ReadCloser, error) {
 		return s.opts.Builds.Uploads.open(ctx, uploadKey{ns: ns, template: name, hash: hash})
 	}

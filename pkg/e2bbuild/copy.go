@@ -2,6 +2,7 @@ package e2bbuild
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -47,7 +48,7 @@ func copyScript(state Command, s Step) string {
 	scratch := "/tmp/" + s.FilesHash
 	unpack := scratch + "/unpack"
 	vars := [][2]string{
-		{"archive", scratch + ".tar"},
+		{"archive", archivePath(s.FilesHash)},
 		{"scratch", scratch},
 		{"unpack", unpack},
 		{"src", s.Args[0]},
@@ -65,13 +66,15 @@ func copyScript(state Command, s Step) string {
 	return b.String() + copyMove
 }
 
+func archivePath(hash string) string {
+	return "/tmp/" + hash + ".tar"
+}
+
 // globBase is src up to its first segment with a glob; the SDK expands globs into the archive itself.
 func globBase(src string) string {
 	segs := strings.Split(strings.TrimSuffix(src, "/"), "/")
-	for i, seg := range segs {
-		if strings.ContainsAny(seg, "*?[{") {
-			return strings.Join(segs[:i], "/")
-		}
+	if i := slices.IndexFunc(segs, func(seg string) bool { return strings.ContainsAny(seg, "*?[{") }); i >= 0 {
+		segs = segs[:i]
 	}
 	return strings.Join(segs, "/")
 }

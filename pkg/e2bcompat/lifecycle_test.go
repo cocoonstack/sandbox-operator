@@ -431,20 +431,16 @@ func TestResumeOfARunningSandboxIs409(t *testing.T) {
 }
 
 func TestResumeRefusesWhatConnectCannotGive(t *testing.T) {
-	for _, body := range []string{`{"memory":false}`} {
-		t.Run(body, func(t *testing.T) {
-			store := &lifecycleStore{}
-			nodeReportsPaused(store)
-			store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
-			h := newTestServer(t, store)
+	store := &lifecycleStore{}
+	nodeReportsPaused(store)
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
+	h := newTestServer(t, store)
 
-			if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/resume", body, testKey); w.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
-			}
-			if store.readID != "" || store.resumedID != "" {
-				t.Errorf("a refused resume reached the node (read %q, resumed %q)", store.readID, store.resumedID)
-			}
-		})
+	if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/resume", `{"memory":false}`, testKey); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if store.readID != "" || store.resumedID != "" {
+		t.Errorf("a refused resume reached the node (read %q, resumed %q)", store.readID, store.resumedID)
 	}
 }
 
@@ -605,7 +601,7 @@ func (f *lifecycleStore) Read(_ context.Context, node, id string) (scale.Sandbox
 	return scale.SandboxRecord{Token: f.token, Paused: f.nodePaused || f.nodeArchived, Deadline: f.deadline}, f.nodeErr
 }
 
-func (f *lifecycleStore) DialGuestPort(_ context.Context, _, id string, port uint16) (net.Conn, error) {
+func (f *lifecycleStore) DialGuestPort(_ context.Context, _, id, token string, port uint16) (net.Conn, error) {
 	f.dialPort.Store(uint32(port))
 	if f.nodeErr != nil {
 		return nil, f.nodeErr
@@ -629,7 +625,7 @@ func (f *lifecycleStore) DialGuestPort(_ context.Context, _, id string, port uin
 			return http.StatusOK, string(body)
 		}), nil
 	}
-	return f.fakeStore.DialGuestPort(context.Background(), "", id, port)
+	return f.fakeStore.DialGuestPort(context.Background(), "", id, token, port)
 }
 
 func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {

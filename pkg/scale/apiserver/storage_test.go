@@ -312,13 +312,15 @@ func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error)
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
 
-func (f *fakeStore) DeleteTemplate(context.Context, string, scale.PoolKey) error { return f.verbErr }
+func (f *fakeStore) DeleteTemplate(context.Context, string, scale.PoolKey, string) error {
+	return f.verbErr
+}
 
 func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, string, error) {
 	return scale.PoolKey{}, "", f.verbErr
 }
 
-func (f *fakeStore) SetTemplateLabels(context.Context, string, scale.PoolKey, map[string]string) error {
+func (f *fakeStore) SetTemplateLabels(context.Context, string, scale.PoolKey, map[string]string, string) error {
 	return f.verbErr
 }
 
@@ -330,7 +332,7 @@ func (f *fakeStore) SetInstanceMetadata(context.Context, string, string, []byte)
 	return f.verbErr
 }
 
-func (f *fakeStore) DialGuestPort(context.Context, string, string, uint16) (net.Conn, error) {
+func (f *fakeStore) DialGuestPort(context.Context, string, string, string, uint16) (net.Conn, error) {
 	return nil, f.verbErr
 }
 

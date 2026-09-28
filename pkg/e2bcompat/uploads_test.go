@@ -81,7 +81,7 @@ func TestACopyStepSendsItsUploadIntoTheSandbox(t *testing.T) {
 	assert.True(t, strings.HasPrefix(store.envdCalls[1], "sb_1 RUN root  archive='/tmp/"+hash+".tar'"), store.envdCalls[1])
 }
 
-func withUploads(t *testing.T, dir string, maxBytes int64) func(*Options) {
+func withUploads(t *testing.T, dir string, maxBytes int64) serverOption {
 	root, err := os.OpenRoot(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
