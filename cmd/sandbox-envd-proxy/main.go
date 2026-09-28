@@ -45,10 +45,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.Inventory.AddFlags(fs)
 	fs.StringVar(&o.Domain, "domain", o.Domain,
 		"Base domain sandbox hosts are derived from, as {port}-{sandboxID}.{domain}. Must match the apiserver's --e2b-domain.")
-	fs.StringVar(&o.SandboxdToken, "sandboxd-token", o.SandboxdToken,
-		"Fleet root sandboxd api_token, which reads a sandbox's claim token to verify its envd access token. Prefer --sandboxd-token-file for a Secret mount.")
-	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
-		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+	sandboxd.AddTokenFlags(fs, &o.SandboxdToken, &o.SandboxdTokenFile)
 	e2bcompat.AddEnvdSecretFlag(fs, &o.EnvdSecretFile)
 	fs.StringVar(&o.Namespace, "namespace", o.Namespace,
 		"Namespace inventory lookups are filtered to; empty matches every namespace. Not an access boundary: a caller holding a sandbox's token reaches it in any namespace.")

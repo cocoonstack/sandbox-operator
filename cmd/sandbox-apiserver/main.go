@@ -87,10 +87,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.Authentication.AddFlags(fs)
 	o.Authorization.AddFlags(fs)
 	o.Features.AddFlags(fs)
-	fs.StringVar(&o.SandboxdToken, "sandboxd-token", o.SandboxdToken,
-		"Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer --sandboxd-token-file for a Secret mount.")
-	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
-		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+	sandboxd.AddTokenFlags(fs, &o.SandboxdToken, &o.SandboxdTokenFile)
 	fs.BoolVar(&o.WarmPoolDriver, "enable-warm-pool-driver", o.WarmPoolDriver,
 		"Run the in-process SandboxWarmPool → sandboxd pool reconcile loop (control-plane warm-capacity surface; pool-level, never per-sandbox).")
 	fs.DurationVar(&o.WarmPoolInterval, "warm-pool-sync-interval", o.WarmPoolInterval,

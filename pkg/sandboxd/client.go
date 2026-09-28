@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/spf13/pflag"
 )
 
 const (
@@ -301,6 +303,14 @@ func (c *Client) authenticate(req *http.Request, token string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+}
+
+// AddTokenFlags registers the sandboxd api_token pair every binary that dials nodes takes.
+func AddTokenFlags(fs *pflag.FlagSet, literal, file *string) {
+	fs.StringVar(literal, "sandboxd-token", *literal,
+		"sandboxd api_token presented to every node (the e2b surface and the envd proxy need the root one). Prefer --sandboxd-token-file for a Secret mount.")
+	fs.StringVar(file, "sandboxd-token-file", *file,
+		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
 }
 
 // TokenFrom returns the api_token read from file (a Secret mount) when file is set, else literal.
