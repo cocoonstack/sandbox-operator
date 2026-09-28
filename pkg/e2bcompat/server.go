@@ -320,7 +320,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	if scale.IsNoWarmCapacity(err) {
 		b, pooled, lookupErr := s.resolveTemplate(r, req.TemplateID)
 		known = lookupErr != nil || b != nil || pooled
-		if lookupErr == nil && b != nil {
+		if lookupErr == nil && b != nil && !pooled {
 			if pool.Net != scale.NetDefault {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("template %q is a built template, which runs without internet access", req.TemplateID))
 				return

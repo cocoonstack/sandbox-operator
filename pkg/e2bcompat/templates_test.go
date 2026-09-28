@@ -143,6 +143,12 @@ func TestACreateNamingABuiltTemplateClaimsItsKey(t *testing.T) {
 	w = do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app","allow_internet_access":true}`, testKey)
 	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	assert.Equal(t, 1, store.claimCalls)
+
+	store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity}
+	h = newTestServer(t, store, withTemplateFleet(store), withAliases("app reg/rt:24.04"))
+	w = do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app"}`, testKey)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	assert.Equal(t, 1, store.claimCalls, "a drained alias pool never falls through to a built template of the same name")
 }
 
 func TestTheAliasLookupFindsABuiltTemplateAfterTheTable(t *testing.T) {
