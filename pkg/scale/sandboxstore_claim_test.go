@@ -58,7 +58,7 @@ func TestStoreClaim_ANodeAdvertisingThePromotedTemplateTakesAnUnpooledClaim(t *t
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_t", Token: "tok"}}
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
-	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{})
+	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{Promoted: true})
 	require.NoError(t, err)
 	assert.Equal(t, "n2", a.Node)
 	assert.True(t, f.claimSpec.RequirePromoted, "a claim routed by a promoted template asks the node for no cold boot")
@@ -86,7 +86,7 @@ func TestStoreClaim_AnAdvertiserThatLostTheTemplateSendsTheClaimOn(t *testing.T)
 	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
 
 	for range 4 {
-		a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{})
+		a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{Promoted: true})
 		require.NoError(t, err)
 		assert.Equal(t, "n2", a.Node)
 	}

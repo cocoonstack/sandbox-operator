@@ -238,7 +238,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		return Assignment{}, fmt.Errorf("scale: enumerate node capacity: %w", err)
 	}
 	candidates := warmCandidates(nodes, pool)
-	promoted := len(candidates) == 0
+	promoted := len(candidates) == 0 && opts.Promoted
 	if promoted {
 		candidates = templateCandidates(nodes, pool)
 	}

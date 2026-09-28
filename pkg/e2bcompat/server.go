@@ -334,7 +334,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		b, pooled, lookupErr := s.resolveTemplate(r, req.TemplateID)
 		known = lookupErr != nil || b != nil || pooled
 		if lookupErr == nil && b != nil && !pooled {
-			built = true
+			built, opts.Promoted = true, true
 			assignment, err = s.store.Claim(r.Context(), s.namespace(r), name, b.current().key, opts)
 		}
 	}
