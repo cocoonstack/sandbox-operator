@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -57,9 +58,7 @@ func (r relay) Do(ctx context.Context, port uint16, method, path string, headers
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range headers {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, headers)
 	return client.Do(req)
 }
 
@@ -102,7 +101,7 @@ func run(addr, token, template, wantVersion, size string, hold time.Duration, in
 	fmt.Printf("claimed %s on %s\n", res.ID, res.OwnerAddr)
 	rt := relay{client: client, id: res.ID, token: res.Token}
 
-	if err := waitReady(ctx, rt); err != nil {
+	if err = waitReady(ctx, rt); err != nil {
 		return err
 	}
 	version, err := envdVersion(ctx, rt)
@@ -353,7 +352,7 @@ func stdoutOf(events []string) string {
 
 func envelope(payload string) string {
 	head := make([]byte, 5)
-	binary.BigEndian.PutUint32(head[1:], uint32(len(payload))) //nolint:gosec // a probe payload is tens of bytes
+	binary.BigEndian.PutUint32(head[1:], uint32(len(payload)))
 	return string(head) + payload
 }
 
