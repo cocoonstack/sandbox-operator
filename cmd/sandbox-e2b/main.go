@@ -98,7 +98,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	proxy, err := envdproxy.NewServer(resolver, envdproxy.Options{Domain: o.E2B.Domain, GuestHTTP2: o.Proxy.GuestHTTP2})
+	proxy, err := envdproxy.NewServer(resolver, envdproxy.Options{Domain: o.E2B.Domain, GuestHTTP2: o.Proxy.GuestHTTP2, NodeToken: token})
 	if err != nil {
 		return err
 	}

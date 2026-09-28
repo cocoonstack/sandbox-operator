@@ -102,6 +102,7 @@ func run(ctx context.Context, o *options) error {
 	srv, err := envdproxy.NewServer(resolver, envdproxy.Options{
 		Domain:     o.Domain,
 		GuestHTTP2: o.Proxy.GuestHTTP2,
+		NodeToken:  token,
 	})
 	if err != nil {
 		return err

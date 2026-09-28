@@ -49,6 +49,8 @@ type Options struct {
 	// upgrade, which would fail every request; turn it on for a guest daemon
 	// that serves h2c, such as a user's own server on another port.
 	GuestHTTP2 bool
+	// NodeToken is the sandboxd api_token a signed file URL's relay presents, so that relay stays passive and never wakes a paused sandbox.
+	NodeToken string
 }
 
 // Server routes one public host onto many sandboxes' guest ports.
@@ -66,6 +68,9 @@ func NewServer(resolver Resolver, opts Options) (*Server, error) {
 	}
 	if strings.TrimSpace(opts.Domain) == "" {
 		return nil, errors.New("envdproxy: no domain configured; the SDK's sandbox host is derived from it")
+	}
+	if strings.TrimSpace(opts.NodeToken) == "" {
+		return nil, errors.New("envdproxy: the node token is required; a signed file URL relays with it")
 	}
 	dialer := &net.Dialer{Timeout: dialTimeout}
 	return &Server{resolver: resolver, transport: newGuestTransport(dialGuest(dialer)), opts: opts}, nil
@@ -100,7 +105,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case token != "":
 		owner, err = s.resolver.Owner(r.Context(), rt.sandboxID, token)
 	case signedFileURL(r):
-		owner, err = s.resolver.Locate(r.Context(), rt.sandboxID)
+		if owner, err = s.resolver.Locate(r.Context(), rt.sandboxID); err == nil {
+			owner.Token = s.opts.NodeToken
+		}
 	default:
 		writeError(w, http.StatusUnauthorized, "missing "+accessTokenHeader)
 		return
