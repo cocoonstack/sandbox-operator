@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 
 // maxSandboxdName is sandboxd's name budget (types.NameRe).
 const maxSandboxdName = 63
+
+var sandboxdName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,62}$`)
 
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
@@ -228,6 +231,9 @@ func StampedName(kind, prefix, namespace, name string) (string, error) {
 	stamped := prefix + namespace + "/" + name
 	if len(stamped) > maxSandboxdName {
 		return "", k8serrors.NewBadRequest(fmt.Sprintf("%s name %q: at most %d characters in namespace %q", kind, name, maxSandboxdName-len(prefix)-len(namespace)-1, namespace))
+	}
+	if !sandboxdName.MatchString(stamped) {
+		return "", k8serrors.NewBadRequest(fmt.Sprintf("%s name %q: letters, digits and . _ : / - only", kind, name))
 	}
 	return stamped, nil
 }

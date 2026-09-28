@@ -143,6 +143,7 @@ func TestABuildRefusesWhatItCannotHonor(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusNotFound, do(t, h, http.MethodPost, "/v2/templates/app/builds/nope", `{"fromImage":"img"}`, testKey).Code)
 	assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v3/templates", `{"name":"`+strings.Repeat("x", 60)+`"}`, testKey).Code)
+	assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v3/templates", `{"name":"my app"}`, testKey).Code, "a name outside sandboxd's grammar is refused before the build runs")
 	assert.Equal(t, http.StatusBadRequest, do(t, h, http.MethodPost, "/v3/templates", `{}`, testKey).Code)
 	assert.Equal(t, http.StatusNotFound, do(t, newTestServer(t, &fakeStore{}), http.MethodPost, "/v3/templates", `{"name":"app"}`, testKey).Code, "builds are off unless enabled")
 }
