@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apiserver/pkg/storage/names"
 
@@ -145,8 +146,17 @@ func (s *Server) publishBuild(scope, name string, tags []string) e2bbuild.Publis
 			return fmt.Errorf("the build's template is no longer on %s", node)
 		}
 		own := holders[i]
+		if own.digest != digest {
+			return fmt.Errorf("a newer build of %s replaced this one on %s", name, node)
+		}
 		stale := slices.DeleteFunc(holders, func(h templateHolder) bool { return !h.created.Before(own.created) })
-		if err := forEachHolder(stale, func(h templateHolder) error { return s.store.DeleteTemplate(ctx, h.node, h.key) }); err != nil {
+		if err := forEachHolder(stale, func(h templateHolder) error {
+			err := s.store.DeleteTemplate(ctx, h.node, h.key, h.digest)
+			if se, ok := errors.AsType[*k8serrors.StatusError](err); ok && se.ErrStatus.Code == http.StatusPreconditionFailed {
+				return nil
+			}
+			return err
+		}); err != nil {
 			return fmt.Errorf("delete the previous build: %w", err)
 		}
 		if len(tags) == 0 {
@@ -182,7 +192,7 @@ func (s *Server) liveHolders(ctx context.Context, template string) ([]templateHo
 			defer mu.Unlock()
 			for _, t := range held {
 				if t.Template == template && t.Tenant == "" {
-					h := templateHolder{node: n, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}}
+					h := templateHolder{node: n, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}, digest: t.ContentDigest}
 					if t.CreatedAt != nil {
 						h.created = t.CreatedAt.Time
 					}

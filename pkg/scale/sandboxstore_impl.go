@@ -126,7 +126,7 @@ type SandboxdClient interface {
 	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
-	DeleteTemplate(ctx context.Context, key sandboxd.PoolKey) error
+	DeleteTemplate(ctx context.Context, key sandboxd.PoolKey, digest string) error
 	Promote(ctx context.Context, id, template string) (sandboxd.PoolKey, string, error)
 	SetTemplateLabels(ctx context.Context, key sandboxd.PoolKey, labels map[string]string) error
 	Info(ctx context.Context) (*sandboxd.NodeInfo, error)

@@ -312,7 +312,9 @@ func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error)
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
 
-func (f *fakeStore) DeleteTemplate(context.Context, string, scale.PoolKey) error { return f.verbErr }
+func (f *fakeStore) DeleteTemplate(context.Context, string, scale.PoolKey, string) error {
+	return f.verbErr
+}
 
 func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, string, error) {
 	return scale.PoolKey{}, "", f.verbErr

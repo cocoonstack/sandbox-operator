@@ -144,12 +144,12 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 	return nil
 }
 
-func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, key PoolKey) error {
+func (s *scatterGatherStore) DeleteTemplate(ctx context.Context, node string, key PoolKey, digest string) error {
 	cl, err := s.nodeClient(ctx, node, "delete template", key.Template)
 	if err != nil {
 		return err
 	}
-	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey(key)); err != nil {
+	if err := cl.DeleteTemplate(ctx, sandboxd.PoolKey(key), digest); err != nil {
 		return nodeVerbError(err, "delete template", key.Template, node)
 	}
 	return nil

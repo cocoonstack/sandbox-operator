@@ -574,7 +574,7 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
 
-func (c *recordingClient) DeleteTemplate(_ context.Context, key sandboxd.PoolKey) error {
+func (c *recordingClient) DeleteTemplate(_ context.Context, key sandboxd.PoolKey, _ string) error {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	c.f.deletedTemplates = append(c.f.deletedTemplates, key)

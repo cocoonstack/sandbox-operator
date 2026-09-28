@@ -569,6 +569,8 @@ type fakeStore struct {
 	deletedSnapshotNode string
 	deletedSnapshotID   string
 	deletedTemplates    []string
+	labeled             []string
+	replacedDigest      string
 	deleteTemplateErr   map[string]error
 	fleet               *scale.StaticInventorySource
 	promoted            []string
@@ -670,7 +672,7 @@ func (f *fakeStore) Promote(ctx context.Context, node, id, template string) (sca
 	defer f.mu.Unlock()
 	f.promoted = append(f.promoted, node+" "+id+" "+template)
 	key := scale.PoolKey{Template: template, Net: scale.NetDefault, Size: f.claimPool.Size}
-	fresh := scale.PromotedTemplate{Template: key.Template, Net: key.Net, Size: key.Size, ContentDigest: "sha256:" + id, CreatedAt: new(metav1.Now())}
+	fresh := scale.PromotedTemplate{Template: key.Template, Net: key.Net, Size: key.Size, ContentDigest: cmp.Or(f.replacedDigest, "sha256:"+id), CreatedAt: new(metav1.Now())}
 	same := func(t scale.PromotedTemplate) bool {
 		return t.Template == key.Template && t.Net == key.Net && t.Size == key.Size
 	}
@@ -685,6 +687,9 @@ func (f *fakeStore) Promote(ctx context.Context, node, id, template string) (sca
 
 // SetTemplateLabels writes straight into the fleet the test serves, so a live read sees it at once.
 func (f *fakeStore) SetTemplateLabels(ctx context.Context, node string, key scale.PoolKey, labels map[string]string) error {
+	f.mu.Lock()
+	f.labeled = append(f.labeled, node+" "+key.Template)
+	f.mu.Unlock()
 	inv, err := f.fleet.NodeInventory(ctx, node)
 	if err != nil {
 		return err
@@ -713,10 +718,10 @@ func (f *fakeStore) NodeTemplates(ctx context.Context, node string) ([]scale.Pro
 	return inv.Templates, nil
 }
 
-func (f *fakeStore) DeleteTemplate(_ context.Context, node string, key scale.PoolKey) error {
+func (f *fakeStore) DeleteTemplate(_ context.Context, node string, key scale.PoolKey, digest string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.deletedTemplates = append(f.deletedTemplates, node+" "+key.Template+" "+key.Size)
+	f.deletedTemplates = append(f.deletedTemplates, strings.TrimSpace(node+" "+key.Template+" "+key.Size+" "+digest))
 	return f.deleteTemplateErr[node]
 }
 

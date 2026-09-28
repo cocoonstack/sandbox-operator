@@ -167,13 +167,16 @@ func (c *Client) Checkpoints(ctx context.Context) ([]Checkpoint, error) {
 	return out.Checkpoints, err
 }
 
-// DeleteTemplate performs DELETE /v1/templates for key on this node alone (no_redirect). A 404 is success.
-func (c *Client) DeleteTemplate(ctx context.Context, key PoolKey) error {
+// DeleteTemplate performs DELETE /v1/templates for key on this node alone (no_redirect); a 404 is success, and a digest deletes only that generation (412 otherwise).
+func (c *Client) DeleteTemplate(ctx context.Context, key PoolKey, digest string) error {
 	if key.Template == "" {
 		return fmt.Errorf("sandboxd: delete template requires a template name")
 	}
 	q := templateQuery(key)
 	q.Set("no_redirect", "1")
+	if digest != "" {
+		q.Set("digest", digest)
+	}
 	return c.send(ctx, http.MethodDelete, "/v1/templates?"+q.Encode(), c.token, "delete template", nil, http.StatusNoContent, http.StatusNotFound)
 }
 

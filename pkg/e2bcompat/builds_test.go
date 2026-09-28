@@ -32,7 +32,7 @@ func TestABuildFromAnImagePromotesReplacesTheOldHolderAndTags(t *testing.T) {
 	require.Equal(t, e2bbuild.StatusReady, info.Status, info)
 	assert.Equal(t, [2]string{"reg/rt:24.04", scale.SizeClassMedium}, [2]string{store.claimPool.Template, store.claimPool.Size}, "the alias names the image; cpuCount 2 picks the size")
 	assert.Equal(t, []string{"n sb_1 e2b/sandboxes/app"}, store.promoted)
-	assert.Equal(t, []string{"m e2b/sandboxes/app small"}, store.deletedTemplates, "the previous build on another node goes")
+	assert.Equal(t, []string{"m e2b/sandboxes/app small sha256:old"}, store.deletedTemplates, "the previous build on another node goes")
 	assert.Equal(t, map[string]string{"v1": "sha256:sb_1"}, fleetLabels(t, store, "n", "e2b/sandboxes/app"))
 	assert.Equal(t, "n sb_1", store.releasedNode+" "+store.releasedID)
 	assert.Len(t, info.LogEntries, 3)
@@ -57,7 +57,7 @@ func TestABuildReplacesAPreviousBuildTheInventoryHasNotPublishedYet(t *testing.T
 	id := requestBuild(t, h, "app")
 	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
 	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
-	assert.Equal(t, []string{"m e2b/sandboxes/app small"}, store.deletedTemplates, "node m's build finished after its last publish and still goes")
+	assert.Equal(t, []string{"m e2b/sandboxes/app small sha256:old"}, store.deletedTemplates, "node m's build finished after its last publish and still goes")
 
 	delete(store.live, "m")
 	id = requestBuild(t, h, "app")
@@ -161,7 +161,7 @@ func TestAPublishLeavesANewerConcurrentBuildAlone(t *testing.T) {
 	id := requestBuild(t, h, "app")
 	require.Equal(t, http.StatusAccepted, do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"img"}`, testKey).Code)
 	require.Equal(t, e2bbuild.StatusReady, waitBuild(t, h, id).Status)
-	assert.Equal(t, []string{"k e2b/sandboxes/app small"}, store.deletedTemplates, "only the holder older than this promote goes; a newer concurrent build keeps its node")
+	assert.Equal(t, []string{"k e2b/sandboxes/app small sha256:older"}, store.deletedTemplates, "only the holder older than this promote goes, by the digest observed; a newer concurrent build keeps its node")
 }
 
 func requestBuild(t *testing.T, h http.Handler, name string) string {

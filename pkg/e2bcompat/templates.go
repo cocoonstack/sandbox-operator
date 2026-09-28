@@ -272,7 +272,7 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 		s.deleteSnapshot(w, r)
 		return
 	}
-	if err := forEachHolder(b.holders, func(h templateHolder) error { return s.store.DeleteTemplate(r.Context(), h.node, h.key) }); err != nil {
+	if err := forEachHolder(b.holders, func(h templateHolder) error { return s.store.DeleteTemplate(r.Context(), h.node, h.key, "") }); err != nil {
 		logger.Errorf(r.Context(), err, "e2b delete template failed template=%s", name)
 		writeError(w, http.StatusInternalServerError, "failed to delete the template")
 		return
