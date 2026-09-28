@@ -28,31 +28,25 @@ func (c *Client) DialPort(ctx context.Context, id, token string, port uint16) (n
 
 // DialPort opens the node's GET /v1/sandboxes/{id}/ports/{port} relay at base, a host:port or an http(s) origin; with the sandbox's own token the node wakes a paused sandbox for it.
 func DialPort(ctx context.Context, d *net.Dialer, base, id, token string, port uint16) (net.Conn, error) {
-	scheme, host := "http", base
-	if u, err := url.Parse(base); err == nil && strings.Contains(base, "://") {
-		scheme, host = u.Scheme, u.Host
-	}
-	if _, _, err := net.SplitHostPort(host); err != nil {
-		host = net.JoinHostPort(host, map[bool]string{true: "443", false: "80"}[scheme == "https"])
-	}
-	conn, err := d.DialContext(ctx, "tcp", host)
+	scheme, addr, serverName := relayTarget(base)
+	tcp, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial node: %w", err)
 	}
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = tcp.Close() })
 	defer stop()
+	conn := tcp
 	if scheme == "https" {
-		hostname, _, _ := net.SplitHostPort(host)
-		tc := tls.Client(conn, &tls.Config{ServerName: hostname, MinVersion: tls.VersionTLS12})
+		tc := tls.Client(tcp, &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12})
 		if err = tc.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
+			_ = tcp.Close()
 			return nil, fmt.Errorf("tls to node: %w", err)
 		}
 		conn = tc
 	}
 
 	path := "/v1/sandboxes/" + url.PathEscape(id) + "/ports/" + strconv.FormatUint(uint64(port), 10)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+host+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+addr+path, nil)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -87,3 +81,14 @@ type bufConn struct {
 }
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+func relayTarget(base string) (scheme, addr, serverName string) {
+	scheme, host, port := "http", base, ""
+	if u, err := url.Parse(base); err == nil && strings.Contains(base, "://") {
+		scheme, host, port = u.Scheme, u.Hostname(), u.Port()
+	} else if h, p, err := net.SplitHostPort(base); err == nil {
+		host, port = h, p
+	}
+	port = cmp.Or(port, map[bool]string{true: "443", false: "80"}[scheme == "https"])
+	return scheme, net.JoinHostPort(host, port), host
+}

@@ -79,6 +79,20 @@ func TestDialPortSpeaksTLSToAnHTTPSNode(t *testing.T) {
 	assert.Equal(t, byte(0x16), <-first, "an https base opens a TLS handshake, not a cleartext upgrade")
 }
 
+func TestRelayTargetJoinsAnOriginWithItsDefaultPort(t *testing.T) {
+	for base, want := range map[string][3]string{
+		"10.0.0.4:7777":              {"http", "10.0.0.4:7777", "10.0.0.4"},
+		"node":                       {"http", "node:80", "node"},
+		"http://node:8080":           {"http", "node:8080", "node"},
+		"https://node-a.example.com": {"https", "node-a.example.com:443", "node-a.example.com"},
+		"https://[2001:db8::1]":      {"https", "[2001:db8::1]:443", "2001:db8::1"},
+		"https://[2001:db8::1]:8443": {"https", "[2001:db8::1]:8443", "2001:db8::1"},
+	} {
+		scheme, addr, serverName := relayTarget(base)
+		assert.Equal(t, want, [3]string{scheme, addr, serverName}, base)
+	}
+}
+
 func TestClientDialPortPresentsTheSandboxTokenWhenGivenOne(t *testing.T) {
 	var gotAuth string
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
