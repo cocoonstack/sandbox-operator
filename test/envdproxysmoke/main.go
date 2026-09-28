@@ -123,23 +123,24 @@ func main() {
 	node := flag.String("node", "", "owning node's sandboxd address")
 	sandboxID := flag.String("sandbox", "", "node-local claim id")
 	token := flag.String("token", "", "per-sandbox access token")
+	nodeToken := flag.String("node-token", "", "node api token; a signed file URL relays with it")
 	port := flag.Uint("port", 49983, "guest port the listener is on")
 	guestHTTP2 := flag.Bool("guest-http2", false, "forward to the guest over cleartext HTTP/2")
 	mode := flag.String("guest", "echo", "what listens in the guest: echo (guestserver) or envd")
 	flag.Parse()
 
-	if *node == "" || *sandboxID == "" || *token == "" {
-		fmt.Fprintln(os.Stderr, "envdproxysmoke: -node, -sandbox and -token are required")
+	if *node == "" || *sandboxID == "" || *token == "" || *nodeToken == "" {
+		fmt.Fprintln(os.Stderr, "envdproxysmoke: -node, -sandbox, -token and -node-token are required")
 		os.Exit(1)
 	}
-	if err := run(*node, *sandboxID, *token, uint16(*port), *guestHTTP2, *mode); err != nil {
+	if err := run(*node, *sandboxID, *token, *nodeToken, uint16(*port), *guestHTTP2, *mode); err != nil {
 		fmt.Fprintln(os.Stderr, "envdproxysmoke:", err)
 		os.Exit(1)
 	}
 	fmt.Println("ENVDPROXYSMOKE PASS")
 }
 
-func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode string) error {
+func run(node, sandboxID, token, nodeToken string, port uint16, guestHTTP2 bool, mode string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -148,7 +149,7 @@ func run(node, sandboxID, token string, port uint16, guestHTTP2 bool, mode strin
 	publicID := e2bcompat.PublicID(sandboxID)
 	access := e2bcompat.AccessToken([]byte("envdproxysmoke"), token)
 	srv, err := envdproxy.NewServer(staticResolver{claimID: sandboxID, address: node, publicID: publicID, token: token, access: access},
-		envdproxy.Options{Domain: domain, GuestHTTP2: guestHTTP2})
+		envdproxy.Options{Domain: domain, GuestHTTP2: guestHTTP2, NodeToken: nodeToken})
 	if err != nil {
 		return err
 	}

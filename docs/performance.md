@@ -235,7 +235,7 @@ go test -run '^$' -bench . ./pkg/scale ./pkg/e2bcompat
 
 # envd-proxy against a live sandbox (see envd-proxy.md for the node half)
 go run -tags envdproxysmoke ./test/envdproxysmoke \
-  -node <owner> -sandbox <id> -token <token> -port 49983
+  -node <owner> -sandbox <id> -token <token> -node-token <node api token> -port 49983
 
 # envd in a real guest (see e2b-compat.md, Proving envd on hardware)
 K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-rt:24.04 bash scripts/envd-e2e.sh

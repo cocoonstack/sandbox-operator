@@ -159,7 +159,7 @@ portsmoke -addr 127.0.0.1:7990 -token <node-token> -template <ref> \
   -listener ./guestserver -hold 300s          # prints: SANDBOX <id> <token> <owner> <port>
 
 go run -tags envdproxysmoke ./test/envdproxysmoke \
-  -node <owner> -sandbox <id> -token <token> -port 49983
+  -node <owner> -sandbox <id> -token <token> -node-token <node api token> -port 49983
 ```
 
 `-guest envd` swaps the assertions for the real daemon (health, a ConnectRPC
