@@ -285,6 +285,8 @@ func TestDeleteTemplateAsksThisNodeAloneAndTakesAMissAsGone(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "ns/pooled":
 			w.WriteHeader(http.StatusConflict)
+		case "ns/replaced":
+			w.WriteHeader(http.StatusPreconditionFailed)
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -292,14 +294,20 @@ func TestDeleteTemplateAsksThisNodeAloneAndTakesAMissAsGone(t *testing.T) {
 	defer srv.Close()
 	c := New(srv.URL, "root-token")
 
-	require.NoError(t, c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/app", Net: "none", Size: "medium"}))
-	require.NoError(t, c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/gone"}))
-	err := c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/pooled"})
+	require.NoError(t, c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/app", Net: "none", Size: "medium"}, ""))
+	require.NoError(t, c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/gone"}, ""))
+	err := c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/pooled"}, "")
 	he, ok := errors.AsType[*HTTPError](err)
 	require.True(t, ok, "the node's refusal must surface as its status, got %v", err)
 	assert.Equal(t, http.StatusConflict, he.StatusCode)
 	assert.Equal(t, "DELETE /v1/templates?net=none&no_redirect=1&size=medium&template=ns%2Fapp Bearer root-token", got[0])
 	assert.Equal(t, "DELETE /v1/templates?no_redirect=1&template=ns%2Fgone Bearer root-token", got[1])
+
+	err = c.DeleteTemplate(t.Context(), PoolKey{Template: "ns/replaced"}, "sha256:x")
+	he, ok = errors.AsType[*HTTPError](err)
+	require.True(t, ok, "a replaced generation must surface as 412, got %v", err)
+	assert.Equal(t, http.StatusPreconditionFailed, he.StatusCode)
+	assert.Equal(t, "DELETE /v1/templates?digest=sha256%3Ax&no_redirect=1&template=ns%2Freplaced Bearer root-token", got[3])
 }
 
 func TestSetTemplateLabelsPutsTheWholeMap(t *testing.T) {
