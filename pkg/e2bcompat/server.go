@@ -306,6 +306,10 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "templateID is required")
 		return
 	}
+	if strings.HasPrefix(req.TemplateID, templatePrefix) {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("template %q not found", req.TemplateID))
+		return
+	}
 	if req.Timeout != nil && *req.Timeout < 0 {
 		writeError(w, http.StatusBadRequest, "timeout must be >= 0")
 		return

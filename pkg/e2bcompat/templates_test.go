@@ -231,3 +231,15 @@ func tagNames(tags []TemplateTag) []string {
 	}
 	return out
 }
+
+func TestAFullE2bKeyNeverReachesAnotherNamespacesTemplate(t *testing.T) {
+	store := &fakeStore{}
+	h := newTestServer(t, store, withBuilds(), withTemplateFleet(store))
+	w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"e2b/others/app"}`, testKey)
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	assert.Equal(t, 0, store.claimCalls, "a full key is refused before any claim")
+
+	id := requestBuild(t, h, "app")
+	w = do(t, h, http.MethodPost, "/v2/templates/app/builds/"+id, `{"fromImage":"e2b/others/app"}`, testKey)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}

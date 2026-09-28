@@ -133,15 +133,20 @@ func (s *Server) buildStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// publishBuild deletes every other holder of name once the build's promote lands, so the registry names one build, then tags it.
+// publishBuild deletes the holders of name older than this build's promote, so concurrent builds converge on the newest, then tags it.
 // It asks each node itself: an inventory a tick behind would miss a build that finished moments ago.
 func (s *Server) publishBuild(scope, name string, tags []string) func(context.Context, string, scale.PoolKey, string) error {
 	return func(ctx context.Context, node string, key scale.PoolKey, digest string) error {
-		stale, err := s.liveHolders(ctx, scope+name)
+		holders, err := s.liveHolders(ctx, scope+name)
 		if err != nil {
 			return fmt.Errorf("list the previous builds: %w", err)
 		}
-		stale = slices.DeleteFunc(stale, func(h templateHolder) bool { return h.node == node && h.key == key })
+		i := slices.IndexFunc(holders, func(h templateHolder) bool { return h.node == node && h.key == key })
+		if i < 0 {
+			return fmt.Errorf("the build's template is no longer on %s", node)
+		}
+		own := holders[i]
+		stale := slices.DeleteFunc(holders, func(h templateHolder) bool { return !h.created.Before(own.created) })
 		if err := forEachHolder(stale, func(h templateHolder) error { return s.store.DeleteTemplate(ctx, h.node, h.key) }); err != nil {
 			return fmt.Errorf("delete the previous build: %w", err)
 		}
@@ -178,13 +183,20 @@ func (s *Server) liveHolders(ctx context.Context, template string) ([]templateHo
 			defer mu.Unlock()
 			for _, t := range held {
 				if t.Template == template && t.Tenant == "" {
-					holders = append(holders, templateHolder{node: n, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}})
+					h := templateHolder{node: n, key: scale.PoolKey{Template: t.Template, Net: t.Net, Size: t.Size}}
+					if t.CreatedAt != nil {
+						h.created = t.CreatedAt.Time
+					}
+					holders = append(holders, h)
 				}
 			}
 			return nil
 		})
 	}
-	return holders, g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return holders, nil
 }
 
 func (s *Server) buildKey(r *http.Request, name, buildID string) string {
@@ -200,6 +212,8 @@ func unsupportedBuildOption(req TemplateBuildStartV2, canCopy bool) (string, boo
 		return "fromImageRegistry is not supported; a pool pulls its own image", true
 	case req.FromImage == "":
 		return "fromImage is required", true
+	case strings.HasPrefix(req.FromImage, templatePrefix):
+		return "fromImage names a built template; build from an image", true
 	}
 	msg := e2bbuild.Invalid(req.Steps, canCopy)
 	return msg, msg != ""
