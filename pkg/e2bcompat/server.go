@@ -172,7 +172,7 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	}
 	s := &Server{store: store, resolver: resolver, opts: opts, keys: keys, aliases: aliases, imageAliases: imageAliases}
 	if b := opts.Builds; b.Parallel > 0 {
-		s.builds = e2bbuild.New(store, b.Parallel, b.Timeout, b.LogLines)
+		s.builds = e2bbuild.New(store, envdGuest{s: s}, b.Parallel, b.Timeout, b.LogLines)
 	}
 	return s, nil
 }
@@ -316,7 +316,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		opts.OnExpire = sandboxd.ExpireArchive
 	}
 	assignment, err := s.store.Claim(r.Context(), s.namespace(r), name, pool, opts)
-	templateID, known := pool.Template, true
+	known, built := true, false
 	if scale.IsNoWarmCapacity(err) {
 		b, pooled, lookupErr := s.resolveTemplate(r, req.TemplateID)
 		known = lookupErr != nil || b != nil || pooled
@@ -325,7 +325,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("template %q is a built template, which runs without internet access", req.TemplateID))
 				return
 			}
-			templateID = b.name
+			built = true
 			assignment, err = s.store.Claim(r.Context(), s.namespace(r), name, b.current().key, opts)
 		}
 	}
@@ -350,15 +350,22 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 
 	token := AccessToken(s.opts.EnvdSecret, assignment.Token)
 	init := envdInit{AccessToken: token, EnvVars: req.EnvVars, DefaultUser: envdDefaultUser, DefaultWorkdir: envdDefaultWorkdir}
-	if err := s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, init); err != nil {
+	if built {
+		init = envdInit{AccessToken: token}
+		init.EnvVars, err = s.templateEnvs(r.Context(), assignment, req.EnvVars)
+	}
+	if err == nil {
+		err = s.initEnvd(r.Context(), assignment.Node, assignment.SandboxName, init)
+	}
+	if err != nil {
 		log.WithFunc("e2bcompat.createSandbox").Errorf(r.Context(), err, "e2b create: envd init failed sandboxID=%s node=%s", assignment.SandboxName, assignment.Node)
 		s.releaseAll(r.Context(), []scale.Assignment{assignment})
 		writeError(w, http.StatusInternalServerError, "failed to start the sandbox")
 		return
 	}
 	writeJSON(w, http.StatusCreated, Sandbox{
-		TemplateID:      templateID,
-		Alias:           s.aliasOf(templateID),
+		TemplateID:      pool.Template,
+		Alias:           s.aliasOf(pool.Template),
 		SandboxID:       PublicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,

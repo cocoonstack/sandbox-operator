@@ -201,20 +201,39 @@ image's alias size (else `small`) holds. `POST
 /v2/templates/{templateID}/builds/{buildID}` resolves `fromImage` like a create's
 `templateID` — the alias table, else the image itself — so the SDK's default base
 needs an alias line such as `e2bdev/base ghcr.io/cocoonstack/sandbox/e2b-rt:24.04`.
-The build then claims a sandbox of that pool on the `none` lane, promotes it as
-`e2b/<namespace>/<name>`, deletes the name on every other node that held an
-earlier build, sets the requested tags, and releases the claim; a rebuild
-replaces the previous build. Steps, `fromTemplate`, `fromImageRegistry`,
-`startCmd` and `readyCmd` answer `400`; `force` is accepted and ignored (there is
-no layer cache); `waiting` stays reported while every build slot runs, and the
-start answers `429`.
+The build then claims a sandbox of that pool on the `none` lane, runs its steps
+and start command in it, promotes it as `e2b/<namespace>/<name>`, deletes the
+name on every other node that held an earlier build, sets the requested tags,
+and releases the claim; a rebuild replaces the previous build. `COPY` steps,
+`fromTemplate` and `fromImageRegistry` answer `400`, as does a malformed step;
+`force` is accepted and ignored (there is no layer cache); `waiting` stays
+reported while every build slot runs, and the start answers `429`.
+
+Steps run through envd's process API, the one `commands.run` uses, as upstream
+e2b runs them. A `RUN` runs `bash -l -c` as the current user (or the step's own)
+in the current workdir with the environment so far, its output in the build log
+and a non-zero exit failing the build. `ENV` evaluates each value in the guest's
+shell, so `$PATH` resolves, and adds it for later steps; `WORKDIR` creates the
+directory as root, owned by the current user, and `USER` creates a missing user;
+the user starts as `user` and the workdir as that user's home. After the last
+step the build hands envd the final user, workdir and environment as its
+defaults, starts `startCmd` in the background, and runs `readyCmd` every second
+until it exits 0 (the build timeout bounds it). The promote captures the running
+sandbox, so every clone resumes with the start command already running and
+envd holding those defaults: a create from a built template sends envd only its
+access token, and the request's `envVars` on top of the template's environment,
+which it reads from envd first because envd replaces the map it is given. A
+create without `envVars` makes no extra call, and a create from a pool image is
+unchanged. The build sandbox has no network, since a promote captures only the
+`none` lane: a step that downloads (`pip install`, `apt-get install`) fails.
 
 `GET /templates/{templateID}/builds/{buildID}/status` pages `logEntries` by
 `logsOffset` and `limit` and filters them by `level`; a failed build reports
-`reason.step` `base` for the claim or `finalize` for the promote and the
-publish. The `buildID` a build answers with is a random UUID that names this
-build attempt; once it is ready, the template list reports the UUIDv5 of the
-published content digest, so the two differ.
+`reason.step` `base` for the claim, the 1-based step number for a step (the
+index the SDK maps onto its stack traces), or `finalize` for the start and
+ready commands, the promote and the publish. The `buildID` a build answers with
+is a random UUID that names this build attempt; once it is ready, the template
+list reports the UUIDv5 of the published content digest, so the two differ.
 
 Builds live in the process that took `POST /v3/templates`, one goroutine each: a
 status poll that reaches another replica answers `404 build not found on this

@@ -1,6 +1,10 @@
 package e2bcompat
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bbuild"
+)
 
 // Sandbox states reported to the SDK (spec: SandboxState).
 const (
@@ -251,15 +255,15 @@ type TemplateRequestResponseV3 struct {
 	Aliases    []string `json:"aliases"`
 }
 
-// TemplateBuildStartV2 is the POST /v2/templates/{templateID}/builds/{buildID} body; only fromImage is served yet.
+// TemplateBuildStartV2 is the POST /v2/templates/{templateID}/builds/{buildID} body; fromTemplate and fromImageRegistry are not served.
 type TemplateBuildStartV2 struct {
-	FromImage         string            `json:"fromImage"`
-	FromTemplate      string            `json:"fromTemplate"`
-	FromImageRegistry json.RawMessage   `json:"fromImageRegistry"`
-	Force             bool              `json:"force"`
-	Steps             []json.RawMessage `json:"steps"`
-	StartCmd          string            `json:"startCmd"`
-	ReadyCmd          string            `json:"readyCmd"`
+	FromImage         string          `json:"fromImage"`
+	FromTemplate      string          `json:"fromTemplate"`
+	FromImageRegistry json.RawMessage `json:"fromImageRegistry"`
+	Force             bool            `json:"force"`
+	Steps             []e2bbuild.Step `json:"steps"`
+	StartCmd          string          `json:"startCmd"`
+	ReadyCmd          string          `json:"readyCmd"`
 }
 
 // TemplateBuildInfo is the GET /templates/{templateID}/builds/{buildID}/status reply.

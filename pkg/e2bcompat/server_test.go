@@ -578,6 +578,8 @@ type fakeStore struct {
 	envdCalls    []string
 	initStatus   int
 	metadataDocs []string
+	guestEnvs    map[string]string
+	processExits map[string]int
 }
 
 func (f *fakeStore) List(_ context.Context, opts scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
@@ -709,9 +711,25 @@ func (f *fakeStore) DialGuestPort(_ context.Context, _, id string, _ uint16) (ne
 	return fakeEnvd(func(r *http.Request, body string) (int, string) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if r.URL.Path == envdProcessStart {
+			var start envdStart
+			_ = json.Unmarshal([]byte(body[5:]), &start)
+			user, _, _ := r.BasicAuth()
+			line := start.Process.Args[2]
+			f.envdCalls = append(f.envdCalls, id+" RUN "+user+" "+start.Process.Cwd+" "+line)
+			out := "ok\n"
+			if v, ok := strings.CutPrefix(line, `printf "%s" "`); ok {
+				out = strings.TrimSuffix(v, `"`)
+			}
+			return http.StatusOK, processReply(out, f.processExits[line])
+		}
 		f.envdCalls = append(f.envdCalls, id+" "+r.Method+" "+r.URL.Path+" "+body)
-		if r.URL.Path == "/init" {
+		switch r.URL.Path {
+		case "/init":
 			return cmp.Or(f.initStatus, http.StatusNoContent), ""
+		case "/envs":
+			b, _ := json.Marshal(f.guestEnvs)
+			return http.StatusOK, string(b)
 		}
 		return http.StatusNotFound, ""
 	}), nil
