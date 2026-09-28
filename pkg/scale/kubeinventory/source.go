@@ -169,7 +169,7 @@ func (s *Source) publish() {
 	snap := &snapshot{caps: make([]scale.NodePools, len(names)), stamps: make([]int64, len(names)), byNode: maps.Clone(s.byNode)}
 	for i, node := range names {
 		inv := s.byNode[node]
-		snap.caps[i] = scale.NodePools{Node: node, Address: inv.Address, Pools: inv.Pools}
+		snap.caps[i] = scale.NodePools{Node: node, Address: inv.Address, Pools: inv.Pools, Templates: inv.Templates}
 		snap.stamps[i] = publishedAt(inv)
 		snap.newest = max(snap.newest, snap.stamps[i])
 	}

@@ -126,6 +126,31 @@ func TestCreateAnswers404OnlyWhenAFailedClaimNamesNothingKnown(t *testing.T) {
 	}
 }
 
+func TestACreateNamingABuiltTemplateClaimsItsKey(t *testing.T) {
+	store := &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity, assign: scale.Assignment{SandboxName: "sb_1", Node: "node-a"}}
+	h := newTestServer(t, store, withTemplateFleet(store))
+
+	w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app"}`, testKey)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	assert.Equal(t, 2, store.claimCalls, "the built template is tried only after the pool claim finds nothing")
+	assert.Equal(t, scale.PoolKey{Template: "e2b/sandboxes/app", Net: "none", Size: "medium"}, store.claimPool)
+	var got Sandbox
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "app", got.TemplateID)
+
+	store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity}
+	h = newTestServer(t, store, withTemplateFleet(store))
+	w = do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app","allow_internet_access":true}`, testKey)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Equal(t, 1, store.claimCalls)
+
+	store = &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity}
+	h = newTestServer(t, store, withTemplateFleet(store), withAliases("app reg/rt:24.04"))
+	w = do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"app"}`, testKey)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	assert.Equal(t, 1, store.claimCalls, "a drained alias pool never falls through to a built template of the same name")
+}
+
 func TestTheAliasLookupFindsABuiltTemplateAfterTheTable(t *testing.T) {
 	store := &fakeStore{}
 	h := newTestServer(t, store, withTemplateFleet(store), withAliases("app reg/rt:24.04"))

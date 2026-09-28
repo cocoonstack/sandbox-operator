@@ -237,7 +237,7 @@ func (s *Source) publish() {
 	next.caps = make([]scale.NodePools, len(next.nodes))
 	for i, node := range next.nodes {
 		inv := next.byKey[node]
-		next.caps[i] = scale.NodePools{Node: node, Address: inv.Address, Pools: inv.Pools}
+		next.caps[i] = scale.NodePools{Node: node, Address: inv.Address, Pools: inv.Pools, Templates: inv.Templates}
 	}
 	s.snap.Store(next)
 }

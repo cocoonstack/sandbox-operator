@@ -89,6 +89,8 @@ type ClaimSpec struct {
 	NoRedirect bool              `json:"no_redirect,omitzero"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
 	OnExpire   ExpireAction      `json:"on_expire,omitempty"`
+	// RequirePromoted asks the node to provision only from a promoted template, never a cold image boot.
+	RequirePromoted bool `json:"require_promoted,omitzero"`
 }
 
 // ClaimResult is the POST /v1/claim success body.

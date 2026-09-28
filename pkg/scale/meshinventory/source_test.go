@@ -307,7 +307,9 @@ func TestNodeCapacitiesMatchesTheListAndPerNodeLookups(t *testing.T) {
 	for _, n := range listNodes(t, s) {
 		addr, pools, err := s.NodeCapacity(t.Context(), n)
 		require.NoError(t, err)
-		want = append(want, scale.NodePools{Node: n, Address: addr, Pools: pools})
+		inv, err := s.NodeInventory(t.Context(), n)
+		require.NoError(t, err)
+		want = append(want, scale.NodePools{Node: n, Address: addr, Pools: pools, Templates: inv.Templates})
 	}
 	assert.Equal(t, want, got)
 	assert.Len(t, got, 2)

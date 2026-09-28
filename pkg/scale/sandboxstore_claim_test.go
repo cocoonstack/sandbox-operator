@@ -41,6 +41,54 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	assert.Equal(t, 1, f.claimCalls)
 }
 
+func TestStoreClaim_ANodeAdvertisingThePromotedTemplateTakesAnUnpooledClaim(t *testing.T) {
+	tpl := PromotedTemplate{Template: "ns/app", Net: "none", Size: "small", ContentDigest: "sha256:aa"}
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 3}))
+	advertiser := poolInv("n2", "10.0.0.2:7777")
+	advertiser.Templates = []PromotedTemplate{tpl}
+	src.Put(advertiser)
+	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_t", Token: "tok"}}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+
+	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "n2", a.Node)
+	assert.True(t, f.claimSpec.RequirePromoted, "a claim routed by a promoted template asks the node for no cold boot")
+
+	_, err = store.Claim(t.Context(), "ns", "s2", PoolKey{Template: "img"}, ClaimOptions{})
+	require.NoError(t, err)
+	assert.False(t, f.claimSpec.RequirePromoted, "a warm pool claim is unchanged")
+	assert.Equal(t, []string{"10.0.0.2:7777", "10.0.0.1:7777"}, f.claimAddrs)
+
+	_, err = store.Claim(t.Context(), "ns", "s3", PoolKey{Template: "ns/app", Size: "medium"}, ClaimOptions{})
+	assert.True(t, IsNoWarmCapacity(err), "another size of the template is not advertised: %v", err)
+}
+
+func TestStoreClaim_AnAdvertiserThatLostTheTemplateSendsTheClaimOn(t *testing.T) {
+	tpl := PromotedTemplate{Template: "ns/app", ContentDigest: "sha256:aa"}
+	src := NewStaticInventorySource()
+	for _, n := range []string{"n1", "n2"} {
+		inv := poolInv(n, "10.0.0."+n[1:]+":7777")
+		inv.Templates = []PromotedTemplate{tpl}
+		src.Put(inv)
+	}
+	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb_t"}, claimErrAt: map[string]error{
+		"10.0.0.1:7777": &sandboxd.HTTPError{StatusCode: http.StatusNotFound, Message: "unknown template"},
+	}}
+	store := NewScatterGatherStore(src, WithClaimRouting("t", f.factory()))
+
+	for range 4 {
+		a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "n2", a.Node)
+	}
+
+	f.claimErrAt["10.0.0.2:7777"] = f.claimErrAt["10.0.0.1:7777"]
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "ns/app"}, ClaimOptions{})
+	assert.True(t, IsNoWarmCapacity(err), "every advertiser lost it: %v", err)
+}
+
 func TestStoreClaim_NoWarmCapacityIsRetryable(t *testing.T) {
 	src := NewStaticInventorySource()
 
@@ -443,6 +491,8 @@ type recordingFactory struct {
 	claimResult sandboxd.ClaimResult
 	forkResult  sandboxd.ForkResult
 	claimErr    error
+	claimErrAt  map[string]error
+	claimAddrs  []string
 	releaseErr  error
 	verbErr     error
 
@@ -477,6 +527,10 @@ type recordingClient struct {
 func (c *recordingClient) Claim(_ context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
 	c.f.claimCalls++
 	c.f.claimSpec = spec
+	c.f.claimAddrs = append(c.f.claimAddrs, c.addr)
+	if err := c.f.claimErrAt[c.addr]; err != nil {
+		return sandboxd.ClaimResult{}, err
+	}
 	if c.f.claimErr != nil {
 		return sandboxd.ClaimResult{}, c.f.claimErr
 	}
