@@ -13,7 +13,7 @@ GO_LDFLAGS ?= -s -w \
 
 ## Shipped binaries under cmd/, and the build-tagged harnesses under test/ (one tag per directory)
 BINARIES := sandbox-apiserver sandbox-envd-proxy sandbox-e2b
-TAGGED_HARNESSES := l3bench envdproxysmoke meshinventorysmoke
+TAGGED_HARNESSES := l3bench envdproxysmoke meshinventorysmoke envdsmoke
 
 ## Target OSes for vet / lint
 GOOSES ?= linux darwin
