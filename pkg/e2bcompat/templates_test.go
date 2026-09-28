@@ -153,6 +153,25 @@ func TestACreateNamingABuiltTemplateClaimsItsKey(t *testing.T) {
 	assert.Equal(t, 1, store.claimCalls, "a drained alias pool never falls through to a built template of the same name")
 }
 
+func TestACreateNamingATagOfABuiltTemplateClaimsItsKey(t *testing.T) {
+	created := &metav1.Time{Time: time.Date(2026, 9, 28, 1, 2, 3, 0, time.UTC)}
+	for ref, want := range map[string]int{"app": http.StatusCreated, "app:v1": http.StatusCreated, "app:default": http.StatusCreated, "app:v9": http.StatusNotFound, "app:old": http.StatusNotFound} {
+		inv := scale.NewStaticInventorySource()
+		inv.Put(&scale.NodeInventory{Node: "node-a", Templates: []scale.PromotedTemplate{{
+			Template: "e2b/sandboxes/app", Net: "none", Size: "small", ContentDigest: "sha256:aa", CreatedAt: created,
+			Labels: map[string]string{"v1": "sha256:aa", "old": "sha256:gone"},
+		}}})
+		store := &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity, assign: scale.Assignment{SandboxName: "sb_1", Node: "node-a"}, fleet: inv}
+		h := newTestServer(t, store, func(o *Options) { o.Inventory = inv })
+
+		w := do(t, h, http.MethodPost, "/sandboxes", `{"templateID":"`+ref+`"}`, testKey)
+		assert.Equal(t, want, w.Code, "%s: %s", ref, w.Body.String())
+		if want == http.StatusCreated {
+			assert.Equal(t, "e2b/sandboxes/app", store.claimPool.Template, ref)
+		}
+	}
+}
+
 func TestABuiltTemplateCreateKeepsTheTemplateDefaultsAndLayersTheRequestEnvs(t *testing.T) {
 	store := &fakeStore{firstClaimErr: scale.ErrNoWarmCapacity, assign: scale.Assignment{SandboxName: "sb_1", Node: "node-a", Token: "tok"}}
 	h := newTestServer(t, store, withTemplateFleet(store))

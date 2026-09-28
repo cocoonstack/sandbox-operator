@@ -288,14 +288,19 @@ func (s *Server) builtTemplate(w http.ResponseWriter, r *http.Request, name stri
 	return nil, false
 }
 
-// resolveTemplate reports name's built template in the caller's namespace, and whether an alias or an advertised pool image names it.
-func (s *Server) resolveTemplate(r *http.Request, name string) (*builtTemplate, bool, error) {
-	_, aliased := s.aliases[name]
+// resolveTemplate reports ref's built template in the caller's namespace (ref is a name, or name:tag for one of its live tags), and whether an alias or an advertised pool image names ref.
+func (s *Server) resolveTemplate(r *http.Request, ref string) (*builtTemplate, bool, error) {
+	_, aliased := s.aliases[ref]
 	nodes, err := s.inventories(r.Context())
 	if err != nil {
 		return nil, aliased, err
 	}
-	return builtTemplates(nodes, s.templateScope(r), name)[name], aliased || advertisedIn(nodes, name), nil
+	name, tag, _ := strings.Cut(ref, ":")
+	b := builtTemplates(nodes, s.templateScope(r), name)[name]
+	if b != nil && tag != "" && tag != defaultTag && b.liveOnly(b.current().labels)[tag] == "" {
+		b = nil
+	}
+	return b, aliased || advertisedIn(nodes, ref), nil
 }
 
 func (s *Server) templateScope(r *http.Request) string {
