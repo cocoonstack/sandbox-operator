@@ -260,7 +260,6 @@ type TemplateBuildStartV2 struct {
 	FromImage         string          `json:"fromImage"`
 	FromTemplate      string          `json:"fromTemplate"`
 	FromImageRegistry json.RawMessage `json:"fromImageRegistry"`
-	Force             bool            `json:"force"`
 	Steps             []e2bbuild.Step `json:"steps"`
 	StartCmd          string          `json:"startCmd"`
 	ReadyCmd          string          `json:"readyCmd"`
