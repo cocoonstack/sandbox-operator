@@ -95,7 +95,7 @@ func run(ctx context.Context, o *options) error {
 		return err
 	}
 	routed := scale.NewScatterGatherStore(inv, scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()))
-	resolver, err := envdproxy.NewResolver(scale.NewScatterGatherStore(inv), routed, inv, o.Namespace, secret)
+	resolver, err := envdproxy.NewResolver(routed, inv, o.Namespace, secret)
 	if err != nil {
 		return err
 	}

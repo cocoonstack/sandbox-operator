@@ -214,7 +214,7 @@ func TestProxyAdmitsOnlyTheTokenDerivedFromThePublishedClaim(t *testing.T) {
 	src := &countingSource{StaticInventorySource: scale.NewStaticInventorySource()}
 	src.Put(&scale.NodeInventory{Name: "node-0", Node: "node-0", Address: owner.addr, Entries: []scale.InventoryEntry{{Name: "sandboxes/s1", ID: "sb_abc"}}})
 	routed := scale.NewScatterGatherStore(src, scale.WithClaimRouting("root", scale.NewSandboxdClientFactory()))
-	r, err := NewResolver(scale.NewScatterGatherStore(src), routed, src, "", []byte(testSecret))
+	r, err := NewResolver(routed, src, "", []byte(testSecret))
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestProxyMapsNodeRefusals(t *testing.T) {
 		nodeStatus int
 		want       int
 	}{
-		{"wrong token", http.StatusNotFound, http.StatusUnauthorized},
+		{"stale owner", http.StatusNotFound, http.StatusUnauthorized},
 		{"bad port", http.StatusBadRequest, http.StatusBadRequest},
 		{"no guest listener", http.StatusBadGateway, http.StatusBadGateway},
 	}
@@ -456,7 +456,7 @@ func unpublishedResolver(t *testing.T, nodes ...*fakeNode) (Resolver, *countingS
 		src.Put(&scale.NodeInventory{Name: name, Node: name, Address: n.addr})
 	}
 	routed := scale.NewScatterGatherStore(src, scale.WithClaimRouting("root", scale.NewSandboxdClientFactory()))
-	r, err := NewResolver(scale.NewScatterGatherStore(src), routed, src, "", []byte(testSecret))
+	r, err := NewResolver(routed, src, "", []byte(testSecret))
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}

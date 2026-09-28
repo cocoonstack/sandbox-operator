@@ -22,17 +22,6 @@ type target struct {
 // targetKey addresses target in a request context.
 type targetKey struct{}
 
-// guestDialer opens the connection a request's target names.
-type guestDialer func(ctx context.Context, t target) (net.Conn, error)
-
-// dialGuest opens sandboxd's guest-port relay and hands back the upgraded
-// connection as a plain net.Conn.
-func dialGuest(dialer *net.Dialer) guestDialer {
-	return func(ctx context.Context, t target) (net.Conn, error) {
-		return sandboxd.DialPort(ctx, dialer, t.owner.Address, t.owner.ClaimID, t.owner.Token, t.port)
-	}
-}
-
 // guestTransport carries a request to the guest daemon over the protocol that
 // daemon serves, which is not the one the client used: the edge may answer
 // HTTP/2 while the guest speaks only HTTP/1.1.
@@ -41,16 +30,16 @@ type guestTransport struct {
 	h2 *http.Transport
 }
 
-// newGuestTransport builds both halves over dial. Neither pools: a reused
+// newGuestTransport builds both halves over sandboxd's guest-port relay. Neither pools: a reused
 // connection would outlive the sandboxd relay carrying it, and reusing one
 // across sandboxes would cross a tenancy boundary.
-func newGuestTransport(dial guestDialer) *guestTransport {
+func newGuestTransport(dialer *net.Dialer) *guestTransport {
 	dialContext := func(ctx context.Context, _, _ string) (net.Conn, error) {
 		t, ok := targetFrom(ctx)
 		if !ok {
 			return nil, errNoTarget
 		}
-		return dial(ctx, t)
+		return sandboxd.DialPort(ctx, dialer, t.owner.Address, t.owner.ClaimID, t.owner.Token, t.port)
 	}
 	// With HTTP/1 also set, a plaintext transport cannot negotiate HTTP/2 and picks HTTP/1.
 	var h2 http.Protocols

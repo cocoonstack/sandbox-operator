@@ -73,7 +73,7 @@ func NewServer(resolver Resolver, opts Options) (*Server, error) {
 		return nil, errors.New("envdproxy: the node token is required; a signed file URL relays with it")
 	}
 	dialer := &net.Dialer{Timeout: dialTimeout}
-	return &Server{resolver: resolver, transport: newGuestTransport(dialGuest(dialer)), opts: opts}, nil
+	return &Server{resolver: resolver, transport: newGuestTransport(dialer), opts: opts}, nil
 }
 
 // Handler returns the routed handler. Serve it with Protocols(): a ConnectRPC
@@ -159,9 +159,8 @@ func (s *Server) sandboxHost(rt route) string {
 	return strconv.FormatUint(uint64(rt.port), 10) + "-" + rt.sandboxID + "." + s.opts.Domain
 }
 
-// writeUpstreamError maps a node's refusal without naming the node. sandboxd
-// answers 404 for both an unknown id and a wrong token; the id was just
-// resolved from inventory, so the token is what the caller can still fix.
+// writeUpstreamError maps a node's refusal without naming the node. The relay opens with the claim
+// token the edge read from the node, so its 404 or 401 means the cached owner is stale (released within recentOwnerTTL).
 func (s *Server) writeUpstreamError(w http.ResponseWriter, r *http.Request, err error) {
 	if status, ok := errors.AsType[*sandboxd.HTTPError](err); ok {
 		switch status.StatusCode {
