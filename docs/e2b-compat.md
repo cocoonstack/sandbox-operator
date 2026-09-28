@@ -325,6 +325,13 @@ needs its own stickiness (or run one replica). A finished build is kept for an h
 loses a build in flight; the SDK's next poll throws, and a rebuild converges
 because a promote replaces.
 
+Built templates expect a `checkpoint_store` per node. A node reads the store's
+template records once at start and advertises them as its own, so with one S3
+store shared by every node each node advertises every node's templates as of its
+own start, and a publish that deletes an older holder removes a record its
+siblings still advertise; a create of one fails over to the next advertiser, and
+the template list lags until those nodes restart.
+
 ## Limits worth knowing
 
 - **Reaching `envd` (the in-sandbox data plane).** The SDK derives the sandbox
