@@ -148,7 +148,6 @@ func (s *Source) run(ctx context.Context) {
 }
 
 func (s *Source) tick(ctx context.Context) map[string]answer {
-	logger := log.WithFunc("meshinventory.tick")
 	answers := s.poll(ctx)
 	named, heard := map[string]bool{}, false
 	for _, a := range answers {
@@ -164,7 +163,7 @@ func (s *Source) tick(ctx context.Context) map[string]answer {
 			continue
 		}
 		m.fails++
-		logger.Warnf(ctx, "mesh member did not answer addr=%s fails=%d err=%v", addr, m.fails, a.err)
+		log.WithFunc("meshinventory.tick").Warnf(ctx, "mesh member did not answer addr=%s fails=%d err=%v", addr, m.fails, a.err)
 		if !m.seed && heard && !named[addr] && m.fails > s.opts.MaxStale {
 			delete(s.members, addr)
 		}
