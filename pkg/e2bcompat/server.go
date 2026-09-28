@@ -334,7 +334,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		b, pooled, lookupErr := s.resolveTemplate(r, req.TemplateID)
 		known = lookupErr != nil || b != nil || pooled
 		if lookupErr == nil && b != nil && !pooled {
-			built = true
+			built, opts.Promoted = true, true
 			assignment, err = s.store.Claim(r.Context(), s.namespace(r), name, b.current().key, opts)
 		}
 	}
@@ -639,8 +639,7 @@ func (f listFilter) keeps(d SandboxDetail) bool {
 		return false
 	}
 	if !f.startedAfter.IsZero() {
-		started, err := time.Parse(time.RFC3339, d.StartedAt)
-		if err != nil || started.Before(f.startedAfter.Truncate(time.Second)) {
+		if started, _ := time.Parse(time.RFC3339, d.StartedAt); started.Before(f.startedAfter.Truncate(time.Second)) {
 			return false
 		}
 	}

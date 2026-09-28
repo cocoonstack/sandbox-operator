@@ -40,6 +40,7 @@ type ClaimOptions struct {
 	Metadata   map[string]string
 	OnExpire   sandboxd.ExpireAction
 	NoEgress   bool
+	Promoted   bool
 }
 
 // Assignment is a successful claim: the sandbox, the node serving it and its address.

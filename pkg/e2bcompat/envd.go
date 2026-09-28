@@ -223,10 +223,7 @@ func (s *Server) initEnvd(ctx context.Context, node, id, relay string, req envdI
 	ctx, cancel := context.WithTimeout(ctx, initTimeout)
 	defer cancel()
 	req.Timestamp = time.Now()
-	payload, err := json.Marshal(req) //nolint:gosec // /init is how envd receives its access token
-	if err != nil {
-		return err
-	}
+	payload, _ := json.Marshal(req) //nolint:gosec // /init is how envd receives its access token
 	status, _, err := s.envdCallOver(ctx, node, id, relay, http.MethodPost, "/init", "", payload)
 	if err != nil {
 		return fmt.Errorf("envd init of %s: %w", id, err)
@@ -284,10 +281,7 @@ func (s *Server) releaseAll(ctx context.Context, claims []scale.Assignment) {
 
 // envdProcess starts cmd through envd's process API in a's sandbox and passes its output to data until it ends with its exit code; with no data it returns running once envd starts it.
 func (s *Server) envdProcess(ctx context.Context, a scale.Assignment, cmd e2bbuild.Command, data func(stdout, stderr []byte)) (int, bool, error) {
-	msg, err := json.Marshal(envdStart{Process: envdProcess{Cmd: "/bin/bash", Args: []string{"-l", "-c", cmd.Line}, Envs: cmd.Envs, Cwd: cmd.Workdir}})
-	if err != nil {
-		return 0, false, err
-	}
+	msg, _ := json.Marshal(envdStart{Process: envdProcess{Cmd: "/bin/bash", Args: []string{"-l", "-c", cmd.Line}, Envs: cmd.Envs, Cwd: cmd.Workdir}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+envdHostAlias+envdProcessStart, bytes.NewReader(connectFrame(0, msg)))
 	if err != nil {
 		return 0, false, err

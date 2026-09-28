@@ -26,19 +26,19 @@ import (
 func TestSourceDropsADeadNodeAgainstTheNewestPublish(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := t.Context()
-		src, w := fleet(t, Options{}, inventory("live", metav1.Now()), inventory("dead", metav1.Now()), inventory("unstamped", metav1.Time{}))
+		src, w := fleet(t, Options{}, inventory("live", metav1.Now()), inventory("dead", metav1.Now()))
 
 		time.Sleep(90 * time.Second)
 		w.publish("live", metav1.Now())
 		nodes, err := src.ListNodes(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"dead", "live", "unstamped"}, nodes)
+		assert.Equal(t, []string{"dead", "live"}, nodes)
 
 		time.Sleep(time.Second)
 		w.publish("live", metav1.Now())
 		nodes, err = src.ListNodes(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"live", "unstamped"}, nodes)
+		assert.Equal(t, []string{"live"}, nodes)
 		_, err = src.NodeInventory(ctx, "dead")
 		assert.True(t, k8serrors.IsNotFound(err), "NodeInventory on a stale node: %v", err)
 		_, _, err = src.NodeCapacity(ctx, "dead")
@@ -158,10 +158,10 @@ func TestSourceReadsStayConsistentWhileTheSnapshotRebuilds(t *testing.T) {
 func TestNodeCapacitiesMatchesTheListAndPerNodeLookups(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := t.Context()
-		src, w := fleet(t, Options{}, inventory("live", metav1.Now()), inventory("dead", metav1.Now()), inventory("unstamped", metav1.Time{}))
+		src, w := fleet(t, Options{}, inventory("live", metav1.Now()), inventory("dead", metav1.Now()))
 		fresh, err := src.NodeCapacities(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"dead", "live", "unstamped"}, nodeNames(fresh))
+		assert.Equal(t, []string{"dead", "live"}, nodeNames(fresh))
 		time.Sleep(91 * time.Second)
 		w.publish("live", metav1.Now())
 		got, err := src.NodeCapacities(ctx)
@@ -175,7 +175,7 @@ func TestNodeCapacitiesMatchesTheListAndPerNodeLookups(t *testing.T) {
 			want = append(want, scale.NodePools{Node: n, Address: addr, Pools: pools})
 		}
 		assert.Equal(t, want, got)
-		assert.Equal(t, []string{"live", "unstamped"}, nodes)
+		assert.Equal(t, []string{"live"}, nodes)
 	})
 }
 

@@ -238,7 +238,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		return Assignment{}, fmt.Errorf("scale: enumerate node capacity: %w", err)
 	}
 	candidates := warmCandidates(nodes, pool)
-	promoted := len(candidates) == 0
+	promoted := len(candidates) == 0 && opts.Promoted
 	if promoted {
 		candidates = templateCandidates(nodes, pool)
 	}
@@ -468,17 +468,28 @@ func (s *scatterGatherStore) listItems(ctx context.Context, namespace string, la
 }
 
 func (s *scatterGatherStore) listInventories(ctx context.Context, namespace string, labelSel labels.Selector, fieldSel fields.Selector) ([]sandboxv1beta1.Sandbox, error) {
-	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
-		inv, invErr := s.src.NodeInventory(gctx, node)
-		if invErr != nil {
-			log.WithFunc("scale.listInventories").Debugf(gctx, "node inventory unavailable; omitting from list (eventual consistency) node=%s err=%v", node, invErr)
-			return nil
-		}
-		return s.materialize(inv, namespace, labelSel, fieldSel)
-	})
+	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
 	}
+	perNode := make([][]sandboxv1beta1.Sandbox, len(nodes))
+	g, gctx := errgroup.WithContext(ctx)
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
+	}
+	for i, node := range nodes {
+		g.Go(func() error {
+			inv, invErr := s.src.NodeInventory(gctx, node)
+			if invErr != nil {
+				log.WithFunc("scale.listInventories").Debugf(gctx, "node inventory unavailable; omitting from list (eventual consistency) node=%s err=%v", node, invErr)
+				return nil
+			}
+			perNode[i] = s.materialize(inv, namespace, labelSel, fieldSel)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	items := slices.Concat(perNode...)
 	slices.SortFunc(items, func(a, b sandboxv1beta1.Sandbox) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
@@ -738,28 +749,6 @@ func FirstHit[T comparable](ctx context.Context, src InventorySource, concurrenc
 	return found, nil
 }
 
-// fanOutNodes runs work on every node at the store's concurrency and concatenates the results in node order.
-func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ctx context.Context, node string) []T) ([]T, error) {
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-	perNode := make([][]T, len(nodes))
-	g, gctx := errgroup.WithContext(ctx)
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	for i, node := range nodes {
-		g.Go(func() error {
-			perNode[i] = work(gctx, node)
-			return nil
-		})
-	}
-	_ = g.Wait()
-	return slices.Concat(perNode...), nil
-}
-
-// poolCapacityMatches compares pc against key, defaulting each unset net/size axis.
 func nodeForAddress(nodes []NodePools, addr string) string {
 	if i := slices.IndexFunc(nodes, func(n NodePools) bool { return n.Address == addr }); i >= 0 {
 		return nodes[i].Node
@@ -795,6 +784,7 @@ func templateCandidates(nodes []NodePools, pool PoolKey) []warmCandidate {
 	return out
 }
 
+// poolCapacityMatches compares pc against key, defaulting each unset net/size axis.
 func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
 	return pc.Template == key.Template &&
 		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&

@@ -270,8 +270,8 @@ func TestProxyProbeNeedsTheSandboxsOwnToken(t *testing.T) {
 
 	resp := request(t, h, "49983-sb-abc."+testDomain, "/files", "someone-elses")
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: a probed owner refuses a wrong token like a published one", resp.StatusCode)
 	}
 	if owner.lastPath != "" {
 		t.Errorf("a caller without the sandbox's token was relayed to %q", owner.lastPath)
@@ -303,6 +303,7 @@ func TestProxyMapsNodeRefusals(t *testing.T) {
 	}{
 		{"stale owner", http.StatusNotFound, http.StatusUnauthorized},
 		{"bad port", http.StatusBadRequest, http.StatusBadRequest},
+		{"paused", http.StatusConflict, http.StatusBadGateway},
 		{"no guest listener", http.StatusBadGateway, http.StatusBadGateway},
 	}
 	for _, tt := range tests {

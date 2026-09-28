@@ -148,7 +148,7 @@ token leaves it fail-closed: it logs and sets no pools.
 
 | Flag | Default | Help |
 |---|---|---|
-| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
+| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on every binary that reads inventory. An inventory without `publishedAt` is stale. |
 
 A node that stops publishing, because it died or its vk-sandbox stopped,
 leaves every read and claim path once its `publishedAt` trails the newest
@@ -218,7 +218,7 @@ informer and relays the request into the owning node's guest-port endpoint.
 | `--guest-http2` | `false` | Forward to the guest over cleartext HTTP/2. Off by default: envd 0.8.0 installs no h2c handler and refuses it. Clients still reach this proxy over HTTP/2. |
 | `--e2b-envd-secret-file` | — | The e2b surface's envd secret file; access tokens are verified against it. Required. |
 | `--sandboxd-token` / `--sandboxd-token-file` | — | Fleet sandboxd `api_token`, which reads a sandbox's claim token by id; the file overrides the literal. |
-| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on sandbox-apiserver and sandbox-envd-proxy. An inventory without `publishedAt`, from a vk-sandbox that predates the field, always stays. |
+| `--inventory-stale-after` | `90s` | Drop a node from this process's inventory reads once its NodeInventory `publishedAt` trails the newest publish in the fleet by more than this; set the same value on every binary that reads inventory. An inventory without `publishedAt` is stale. |
 
 The two TLS flags must be set together. Routing, authorization and failure
 mapping are in [envd-proxy](envd-proxy.md).

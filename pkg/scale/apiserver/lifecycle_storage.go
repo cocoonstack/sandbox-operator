@@ -42,10 +42,7 @@ func (r *lifecycleREST) Destroy() {}
 func (r *lifecycleREST) NamespaceScoped() bool { return true }
 
 func (r *lifecycleREST) GroupVersionKind(schema.GroupVersion) schema.GroupVersionKind {
-	gvks, _, err := Scheme.ObjectKinds(r.newOptions())
-	if err != nil || len(gvks) == 0 {
-		return schema.GroupVersionKind{}
-	}
+	gvks, _, _ := Scheme.ObjectKinds(r.newOptions())
 	return gvks[0]
 }
 
