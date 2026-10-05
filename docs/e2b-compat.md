@@ -442,6 +442,14 @@ K=<kit> TEMPLATE=ghcr.io/cocoonstack/sandbox/e2b-ci:24.04 SIZE=medium CODE_INTER
   `400`. Honoring them silently would hand back a different sandbox than the
   caller asked for. `metadata` rides on the claim; the owning node caps it at
   16 pairs and 4 KiB and answers more with `400`, which create passes through.
+- **A create the caller never received can leave a paused sandbox.** When the
+  reply to a create is lost, or the `/init` after the claim fails while the
+  owning node cannot be reached for the release, the claim follows its lease.
+  With `autoPause: true` the node pauses and archives it at lease end and
+  keeps it for sandboxd's `archive_delete_after_seconds`, which is forever at
+  the default `0`. The sandbox is listed as `paused` in the key's namespace
+  and `DELETE /sandboxes/{id}` removes it. A fleet that offers `autoPause` to
+  tenants sets a retention, so these archives expire without an operator.
 - **No internet unless asked.** A create without `allow_internet_access: true`
   lands on the `none` lane, whatever the SDK's own default: JS SDKs 2.3 to 2.50
   send `true` unless told otherwise, 2.51 sends nothing. A fleet that serves
