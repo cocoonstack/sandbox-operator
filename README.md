@@ -49,7 +49,7 @@ data plane in the same process; see
 Install the L3 path on a cluster with sandboxd nodes and cert-manager:
 
 ```bash
-VERSION=v1.0.3
+VERSION=v1.0.5
 for crd in extensions.agents.x-k8s.io_sandboxtemplates extensions.agents.x-k8s.io_sandboxwarmpools; do
   kubectl apply -f "https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/${VERSION}/k8s/crds/${crd}.yaml"
 done
