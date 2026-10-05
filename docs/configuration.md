@@ -11,7 +11,7 @@ configured in [e2b-compat](e2b-compat.md#mesh-mode-no-kubernetes).
 Upstream's release installs the CRDs and the controller that serves Pods:
 
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.3/sandbox-with-extensions.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.5/sandbox-with-extensions.yaml
 ```
 
 That is the whole install for the Pod path; nothing from this repository is
@@ -26,6 +26,11 @@ kubectl -n agent-sandbox-system patch deployment agent-sandbox-controller --type
   {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--disable-claim-observability-annotations"}]'
 ```
 
+How long a claim waits for a warm Sandbox's Pod IP before it creates its own is
+a flag on upstream `main`, `--sandbox-claim-warm-candidate-grace-period`
+(default 2 s, in no release up to v1.0.5). On sandboxd nodes the default is the
+right value ([performance](performance.md#when-claims-drain-the-pool)).
+
 ### L3 path
 
 Prerequisites: cert-manager, unless you set `certManager.enabled=false` and
@@ -35,7 +40,7 @@ DNS for `*.{domain}` resolving to the `sandbox-envd-proxy` Service.
 The warm-pool driver reads two of upstream's CRDs. Apply those, then the chart:
 
 ```bash
-VERSION=v1.0.3
+VERSION=v1.0.5
 for crd in extensions.agents.x-k8s.io_sandboxtemplates extensions.agents.x-k8s.io_sandboxwarmpools; do
   kubectl apply -f "https://raw.githubusercontent.com/kubernetes-sigs/agent-sandbox/${VERSION}/k8s/crds/${crd}.yaml"
 done

@@ -179,6 +179,31 @@ Pod IP it has seen, waits up to 2 s for one, then creates its own, and a slow
 node side makes that fallback fire. Its median is better throughout, because a
 claim it binds is ready.
 
+That wait is a controller flag since
+[agent-sandbox#1758](https://github.com/kubernetes-sigs/agent-sandbox/pull/1758),
+`--sandbox-claim-warm-candidate-grace-period`, asked for in
+[#1745](https://github.com/kubernetes-sigs/agent-sandbox/issues/1745); it is on
+upstream `main` and in no release up to v1.0.5. Measured on 2026-10-05 with the
+same burst on the same hosts, upstream v1.0.5 and `main` at `fa39d57`,
+vk-sandbox v0.1.5, sandboxd v0.1.15, every arm at least twice, interleaved:
+
+| vk-sandbox pod queues | controller, grace | claim → Ready p50 / p95 / max | Sandboxes the claims created |
+|---|---|---|---|
+| 10/s (library default) | v1.0.5, 2 s | 0.43–0.52 / 8.5–8.6 / 9.1–9.2 s | 123–136 of 200 |
+| 10/s (library default) | `fa39d57`, 2 s | 0.49–0.59 / 8.1–8.7 / 8.9–9.6 s | 122–132 of 200 |
+| 10/s (library default) | `fa39d57`, 10 s | 0.51–0.52 / 7.5–8.0 / 9.7 s | 105–107 of 200 |
+| client budget (200/s) | v1.0.5, 2 s | 0.48 / 0.85–0.91 / 0.94–0.99 s | 74–87 of 200 |
+| client budget (200/s) | `fa39d57`, 2 s | 0.41–0.46 / 0.83–0.89 / 0.85–0.94 s | 82–89 of 200 |
+| client budget (200/s) | `fa39d57`, 10 s | 0.47 / 0.81–0.86 / 0.85–0.87 s | 76–83 of 200 |
+
+A longer grace turns some fallbacks into adoptions and does not move the
+latency: an adopted pool member and a claim's own Sandbox wait in the same Pod
+queue on the node, and sandboxd hands either one a warm microVM. Most claims
+that create their own Sandbox do so because the pool has no member left at that
+moment, which the grace does not cover: at 10 s no claim outlived the grace, and
+76–107 of 200 still created their own. Keep the default; a slow node side is
+fixed on the node, with the queue budget above.
+
 Per claim, both controllers write about the same: 21–24 apiserver writes and
 18–21 etcd puts, upstream 3–9% above the fork, plus 1.4–2.3 times the
 claim-controller reconciles, the more the longer claims wait for a warm Sandbox
