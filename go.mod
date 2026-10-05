@@ -20,7 +20,7 @@ require (
 	k8s.io/component-base v0.37.1
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
-	sigs.k8s.io/agent-sandbox v1.0.4-0.20260922222611-ce66bdc1484d
+	sigs.k8s.io/agent-sandbox v1.0.6-0.20261005050033-fa39d5743bbc
 	sigs.k8s.io/controller-runtime v0.25.1
 )
 
